@@ -1,0 +1,504 @@
+-- island.lua  --  Island Station + mainframe alerts (CC:Tweaked + Advanced Peripherals, ATM10 / MC 1.21.1)
+-- Needs an Environment Detector next to the computer. Optional: a Chat Box and a monitor.
+--
+-- Chat commands (start with $ to keep them out of public chat, e.g. "$island miner"):
+--   island status | scan | miner | storage | alerts | test | help
+-- "island alerts" subscribes you to private alerts: storage filling up, the miner going quiet,
+-- getting lost, running out of fuel, finishing, or bringing home diamonds. Alerts you miss
+-- while offline are replayed the next time you say anything in chat.
+
+local PREFIX       = "Mainframe" -- name shown in chat brackets
+local ALERT_RANGE  = 64          -- range for public station messages (sunset, mobs...)
+local SCAN_RANGE   = 16          -- entity scan radius
+local REFRESH      = 2           -- seconds between updates
+local SILENT_AFTER = 120         -- seconds without hearing from the miner before alerting
+local ALERTS_FILE  = "alerts.cfg"
+local HOSTILES = {
+  Zombie=true, Skeleton=true, Creeper=true, Spider=true, Drowned=true,
+  Enderman=true, Witch=true, Phantom=true, Husk=true, Stray=true, Slime=true,
+}
+local VALUABLE = { "diamond", "emerald", "ancient_debris", "netherite" }
+
+-- 1.21.1 uses snake_case names; older packs used camelCase. Try both.
+local function find(...)
+  for _, t in ipairs({ ... }) do
+    local p = peripheral.find(t)
+    if p then return p end
+  end
+end
+
+local env = find("environment_detector", "environmentDetector")
+local mon = peripheral.find("monitor")
+local function chatBox() return find("chat_box", "chatBox") end -- looked up each time, so a new box just works
+
+if not env then
+  printError("No Environment Detector found.")
+  print("Put the detector block next to this computer.")
+  return
+end
+
+-- List what this build of the detector actually supports (handy when the docs drift)
+do
+  local want = { "getBiome", "getMoonId", "getMoonName", "isRaining", "isThunder",
+    "getSkyLightLevel", "getBlockLightLevel", "scanEntities" }
+  local missing = {}
+  for _, m in ipairs(want) do
+    if type(env[m]) ~= "function" then missing[#missing + 1] = m end
+  end
+  if #missing > 0 then
+    print("Detector lacks: " .. table.concat(missing, ", ") .. " (working around it)")
+  end
+end
+
+local out = mon or term
+if mon then mon.setTextScale(0.5) end
+
+local function col(c)
+  out.setTextColour(out.isColour() and c or colours.white)
+end
+
+local function pretty(id)
+  local s = tostring(id):gsub("^.-:", ""):gsub("_", " ")
+  return (s:gsub("^%l", string.upper))
+end
+
+---------------------------------------------------------------------------
+-- Chat
+---------------------------------------------------------------------------
+-- Chat box has a ~1s cooldown between messages. Returns true if the message went out.
+local lastSend = -10
+local function say(msg, player)
+  local chat = chatBox()
+  if not chat then return false end
+  local wait = 1.1 - (os.clock() - lastSend)
+  if wait > 0 then os.sleep(wait) end
+  lastSend = os.clock()
+  -- AP 0.8+ (ATM10): sendMessage(msg, {options}); sendMessageToPlayer was merged into it.
+  local opts = { prefix = PREFIX, brackets = "[]", bracketsColor = "&b" }
+  if player then opts.player = player else opts.range = ALERT_RANGE end
+  local ok, res = pcall(chat.sendMessage, msg, opts)
+  if ok and res then return true end
+  -- Older AP: positional arguments
+  if player and chat.sendMessageToPlayer then
+    ok, res = pcall(chat.sendMessageToPlayer, msg, player, PREFIX, "[]", "&b")
+  elseif not player then
+    ok, res = pcall(chat.sendMessage, msg, PREFIX, "[]", "&b", ALERT_RANGE)
+  end
+  return ok and res and true or false
+end
+
+---------------------------------------------------------------------------
+-- Alerts: subscribers, missed-message queue, conditions
+---------------------------------------------------------------------------
+local A = { subs = {}, pending = {} }
+local function loadA()
+  if fs.exists(ALERTS_FILE) then
+    local f = fs.open(ALERTS_FILE, "r")
+    local t = textutils.unserialize(f.readAll())
+    f.close()
+    if type(t) == "table" then A.subs, A.pending = t.subs or {}, t.pending or {} end
+  end
+end
+local function saveA()
+  local f = fs.open(ALERTS_FILE, "w")
+  f.write(textutils.serialize(A))
+  f.close()
+end
+
+local function queue(name, text)
+  local q = A.pending[name] or {}
+  q[#q + 1] = textutils.formatTime(os.time(), true) .. " " .. text
+  while #q > 10 do table.remove(q, 1) end
+  A.pending[name] = q
+end
+
+local function notify(text, only)
+  for name in pairs(A.subs) do
+    if not only or only == name then
+      if not say("&e" .. text, name) then queue(name, text) end
+    end
+  end
+  saveA()
+end
+
+local active, activeOrder = {}, {} -- conditions that are currently true
+local function condition(key, isTrue, text)
+  if isTrue and not active[key] then
+    active[key] = text
+    activeOrder[#activeOrder + 1] = key
+    notify(text)
+  elseif not isTrue and active[key] then
+    active[key] = nil
+    for i, k in ipairs(activeOrder) do if k == key then table.remove(activeOrder, i) break end end
+  end
+end
+
+local function minerName(m) return (m and m.label) or "The miner" end
+
+local function minerLine(m)
+  if not m then return "No miner has checked in yet." end
+  local ago = _G.MINER_SEEN and math.floor(os.clock() - _G.MINER_SEEN) or 0
+  local function v(x) return x == nil and "-" or tostring(x) end
+  return ("%s: %s%s. Y %s, layer %s/%s, ring %s/%s. Fuel %s, cargo %s/16. Seen %ds ago."):format(
+    minerName(m), v(m.state):upper(), (m.msg and m.msg ~= "") and (" (" .. m.msg .. ")") or "",
+    v(m.y), v(m.layer), v(m.layers), v(m.ring), v(m.maxRing), v(m.fuel), v(m.slots), ago)
+end
+
+local function storageLine(s)
+  if not s or not s.total or s.total == 0 then return "Storage hasn't reported in yet." end
+  local line = ("Storage %d%% full (%d/%d slots, %d item types)."):format(
+    math.floor(s.used / s.total * 100), s.used, s.total, s.kinds or 0)
+  if s.fuelTarget then
+    line = line .. (" Fuel barrel %d%%, %s fuel left in storage."):format(
+      math.floor((s.fuelUnits or 0) / s.fuelTarget * 100), tostring(s.fuelAvailable or 0))
+  end
+  return line
+end
+
+local function riggerLine(r)
+  if not r then return "Rigger hasn't checked in yet." end
+  local ago = _G.RIGGER_SEEN and math.floor(os.clock() - _G.RIGGER_SEEN) or 0
+  local pct = (r.total and r.total > 0) and math.floor((r.placed or 0) / r.total * 100) or 0
+  local where = r.phase == "ext" and ("edge wall %s/%s"):format(tostring(r.ext), tostring(r.extTotal))
+    or r.phase == "layer" and ("layer %s/%s"):format(tostring(r.layer), tostring(r.layers))
+    or tostring(r.phase or "not started")
+  return ("%s: %s%s. %s, %d/%d blocks (%d%%). Fuel %s. Seen %ds ago."):format(
+    r.label or "Rigger", tostring(r.state or "?"):upper(), (r.msg and r.msg ~= "") and (" (" .. r.msg .. ")") or "",
+    where, r.placed or 0, r.total or 0, pct, tostring(r.fuel), ago)
+end
+
+local function farmLine(st)
+  local ago = _G.FARM_SEEN and _G.FARM_SEEN[tostring(st.label):lower()] and math.floor(os.clock() - _G.FARM_SEEN[tostring(st.label):lower()]) or 0
+  local head = ("%s: %s%s."):format(st.label, tostring(st.state or "?"):upper(), (st.msg and st.msg ~= "") and (" (" .. st.msg .. ")") or "")
+  local body
+  if st.role == "lumberjack" then
+    local lr = st.lastRound or {}
+    body = ("%d tree spots, %d saplings on hand."):format(st.spots or 0, st.saplings or 0)
+  else
+    local lr = st.lastRound or {}
+    body = ("%d plots. Last round: harvested %d, planted %d, hoed %d."):format(st.plots or 0, lr.harvested or 0, lr.planted or 0, lr.tilled or 0)
+  end
+  return ("%s %s Fuel %s. Seen %ds ago."):format(head, body, tostring(st.fuel), ago)
+end
+
+local lastHaul = nil
+local function watch()
+  local s = _G.STORAGE_STATS
+  if s and s.total and s.total > 0 then
+    local pct = s.used / s.total
+    if pct >= 0.9 then
+      condition("storage90", true, ("Storage is %d%% full (%d/%d slots). Time for more barrels."):format(math.floor(pct * 100), s.used, s.total))
+    elseif pct < 0.85 then
+      condition("storage90", false)
+    end
+    condition("inputStuck", s.inputStuck == true, "Storage is full: items are piling up in the input chests.")
+    if s.fuelTarget then
+      condition("fuelDry", (s.fuelUnits or 0) < s.fuelTarget * 0.25 and (s.fuelAvailable or 0) == 0,
+        "The miner's fuel barrel is running dry and storage has no coal or lava buckets left.")
+    end
+  end
+
+  local m = _G.MINER_STATUS
+  if m then
+    local name = minerName(m)
+    local ago = _G.MINER_SEEN and (os.clock() - _G.MINER_SEEN) or 0
+    condition("minerSilent", ago > SILENT_AFTER,
+      ("Lost contact with %s (last seen at Y %s, %s)."):format(name, tostring(m.y), tostring(m.state)))
+    condition("minerLost", m.state == "lost",
+      name .. " lost track of which way he's facing. Carry him to the dock and press Enter on him.")
+    condition("minerError", m.state == "error", name .. " hit a problem: " .. tostring(m.msg))
+    condition("minerFuel", m.state == "waiting" and tostring(m.msg):find("fuel") ~= nil,
+      name .. " is waiting at the dock for fuel.")
+    condition("minerDump", m.state == "waiting" and tostring(m.msg):find("Dump") ~= nil,
+      name .. "'s dump barrel is full. Is storage running?")
+    condition("minerDone", m.done == true and m.state == "docked",
+      name .. " finished the range and is docked. Pick a new one on the panel.")
+
+    -- Valuables in a fresh haul
+    local parts = {}
+    for _, e in ipairs(m.haul or {}) do parts[#parts + 1] = tostring(e[1]) .. "=" .. tostring(e[2]) end
+    local sig = table.concat(parts, ",")
+    if sig ~= lastHaul then
+      if lastHaul ~= nil and sig ~= "" then
+        local found = {}
+        for _, e in ipairs(m.haul or {}) do
+          for _, v in ipairs(VALUABLE) do
+            if tostring(e[1]):find(v) then found[#found + 1] = e[2] .. "x " .. pretty(e[1]); break end
+          end
+        end
+        if #found > 0 then notify(name .. " brought home " .. table.concat(found, ", ") .. "!") end
+      end
+      lastHaul = sig
+    end
+  end
+
+  for k, st in pairs(_G.FARM_STATUS or {}) do
+    local name = st.label or k
+    local ago = (_G.FARM_SEEN and _G.FARM_SEEN[k]) and (os.clock() - _G.FARM_SEEN[k]) or 0
+    condition("farmSilent:" .. k, ago > SILENT_AFTER, "Lost contact with " .. name .. ".")
+    condition("farmError:" .. k, st.state == "error", name .. " hit a problem: " .. tostring(st.msg))
+    condition("farmLost:" .. k, st.state == "lost", name .. " is lost. " .. tostring(st.msg))
+    condition("farmWait:" .. k, st.state == "waiting", name .. ": " .. tostring(st.msg))
+  end
+
+  local r = _G.RIGGER_STATUS
+  if r then
+    local name = r.label or "Rigger"
+    local ago = _G.RIGGER_SEEN and (os.clock() - _G.RIGGER_SEEN) or 0
+    condition("riggerSilent", ago > SILENT_AFTER, ("Lost contact with %s (last seen at Y %s)."):format(name, tostring(r.y)))
+    condition("riggerWaiting", r.state == "waiting", name .. " is waiting at the dock. " .. tostring(r.msg))
+    condition("riggerError", r.state == "error", name .. " hit a problem: " .. tostring(r.msg))
+    condition("riggerLost", r.state == "lost", name .. " lost track of which way he's facing. Carry him to his dock and type: rigger found")
+    condition("riggerDone", r.state == "done", name .. " finished building " .. tostring(r.plan or "the island") .. "!")
+    if r.phase == "layer" and r.layers and r.layer then
+      local tenth = math.floor((r.layer - 1) / r.layers * 10)
+      if A.riggerTenth and tenth > A.riggerTenth then
+        notify(("%s is %d%% of the way up (layer %d/%d)."):format(name, tenth * 10, r.layer, r.layers))
+      end
+      A.riggerTenth = tenth
+    end
+  end
+end
+
+---------------------------------------------------------------------------
+-- Station (environment)
+---------------------------------------------------------------------------
+local function phase(h)
+  if h >= 6 and h < 17.5 then return "Day"
+  elseif h >= 17.5 and h < 18.5 then return "Sunset"
+  elseif h >= 18.5 or h < 5 then return "Night"
+  else return "Dawn" end
+end
+
+-- AP renames/drops methods between versions, so every detector call goes through this.
+local function call(name, ...)
+  local f = env[name]
+  if type(f) ~= "function" then return nil end
+  local ok, v = pcall(f, ...)
+  if ok then return v end
+end
+
+local MOONS = { [0] = "Full", "Waning gibbous", "Third quarter", "Waning crescent",
+  "New", "Waxing crescent", "First quarter", "Waxing gibbous" }
+
+local function read()
+  local r = {}
+  r.hour    = os.time()
+  r.time    = textutils.formatTime(r.hour, true)
+  r.day     = os.day()
+  r.phase   = phase(r.hour)
+  r.weather = call("isThunder") and "Thunder" or (call("isRaining") and "Rain" or "Clear")
+  local moonId = call("getMoonId") or (os.day() % 8)
+  r.moon    = call("getMoonName") or MOONS[moonId] or "?"
+  r.biome   = (tostring(call("getBiome") or "?")):gsub("^.-:", ""):gsub("_", " ")
+  r.sky     = call("getSkyLightLevel") or "?"
+  r.block   = call("getBlockLightLevel") or "?"
+  r.fuel    = turtle and turtle.getFuelLevel() or nil
+  r.near = {}
+  local ok, ents = pcall(call, "scanEntities", SCAN_RANGE)
+  if ok and type(ents) == "table" then
+    for _, e in ipairs(ents) do
+      local d = math.sqrt((e.x or 0) ^ 2 + (e.y or 0) ^ 2 + (e.z or 0) ^ 2)
+      r.near[#r.near + 1] = { name = tostring(e.name or "?"), d = d }
+    end
+    table.sort(r.near, function(a, b) return a.d < b.d end)
+  end
+  return r
+end
+
+local function line(y, label, value, c)
+  out.setCursorPos(1, y)
+  col(colours.lightGrey); out.write(label)
+  col(c or colours.white); out.write(value)
+end
+
+-- Compact strip for when the station shares the monitor (3 lines)
+local function drawCompact(r, w, h)
+  local function seg(text, c) col(c or colours.white); out.write(text) end
+  out.setCursorPos(1, 1)
+  seg(" ISLAND ", colours.lime)
+  seg(r.time .. "  ")
+  seg(r.phase, r.phase == "Night" and colours.red or colours.yellow)
+  seg("  day " .. r.day .. "  ", colours.lightGrey)
+  seg(r.weather, r.weather == "Clear" and colours.lightBlue or colours.orange)
+  if h >= 2 then
+    out.setCursorPos(1, 2)
+    seg((" Moon %s  Biome %s  Light %s/%s"):format(r.moon, r.biome, tostring(r.sky), tostring(r.block)):sub(1, w),
+      colours.lightGrey)
+  end
+  if h >= 3 then
+    out.setCursorPos(1, 3)
+    local hostile, others = {}, 0
+    for _, e in ipairs(r.near) do
+      if HOSTILES[e.name] then hostile[#hostile + 1] = ("%s %.0fm"):format(e.name, e.d) else others = others + 1 end
+    end
+    if #hostile > 0 then
+      seg((" Danger: " .. table.concat(hostile, ", ")):sub(1, w), colours.red)
+    elseif #activeOrder > 0 then
+      local text = active[activeOrder[#activeOrder]]
+      local more = #activeOrder > 1 and (" (+%d more)"):format(#activeOrder - 1) or ""
+      seg((" ! " .. text):sub(1, w - #more) .. more, colours.orange)
+    else
+      seg((" All clear (%d other thing%s nearby)"):format(others, others == 1 and "" or "s"):sub(1, w), colours.lime)
+    end
+  end
+end
+
+local function draw(r)
+  out.setBackgroundColour(colours.black)
+  out.clear()
+  local w, h = out.getSize()
+  if h < 10 then return drawCompact(r, w, h) end
+  out.setCursorPos(1, 1); col(colours.lime); out.write("ISLAND STATION")
+  line(3, "Time    ", r.time .. "  (day " .. r.day .. ")")
+  line(4, "Phase   ", r.phase, r.phase == "Night" and colours.red or colours.yellow)
+  line(5, "Weather ", r.weather, r.weather == "Clear" and colours.lightBlue or colours.orange)
+  line(6, "Moon    ", r.moon)
+  line(7, "Biome   ", r.biome)
+  line(8, "Light   ", ("sky %s  block %s"):format(tostring(r.sky), tostring(r.block)))
+  if r.fuel then line(9, "Fuel    ", tostring(r.fuel)) end
+  out.setCursorPos(1, 11); col(colours.lightGrey)
+  out.write("Nearby (" .. SCAN_RANGE .. "m):")
+  if #r.near == 0 then line(12, " ", "nothing", colours.grey) end
+  for i, e in ipairs(r.near) do
+    if 11 + i > h then break end
+    line(11 + i, " ", ("%-14s %5.1fm"):format(e.name:sub(1, 14), e.d),
+      HOSTILES[e.name] and colours.red or colours.white)
+  end
+end
+
+local function summary(r)
+  return ("%s (%s), %s, %s moon"):format(r.time, r.phase, r.weather, r.moon)
+end
+
+local state, prev, lastHostileAlert = nil, {}, -100
+local function stationAlerts(r)
+  if prev.phase and r.phase ~= prev.phase then
+    if r.phase == "Sunset" then say("Sun's going down. About a minute until mobs.") end
+    if r.phase == "Night"  then say("Night. Bed time.") end
+    if r.phase == "Dawn"   then say("Morning! Day " .. r.day .. ".") end
+  end
+  if prev.weather and r.weather ~= prev.weather then
+    say("Weather changed: " .. r.weather .. ".")
+  end
+  for _, e in ipairs(r.near) do
+    if HOSTILES[e.name] and e.d < 10 and os.clock() - lastHostileAlert > 30 then
+      say(("&c%s&r %.0f blocks from the station!"):format(e.name, e.d))
+      lastHostileAlert = os.clock()
+      break
+    end
+  end
+  prev = { phase = r.phase, weather = r.weather }
+end
+
+local function stationLoop()
+  while true do
+    state = read()
+    watch()
+    draw(state)
+    stationAlerts(state)
+    os.sleep(REFRESH)
+  end
+end
+
+---------------------------------------------------------------------------
+-- Chat commands
+---------------------------------------------------------------------------
+local HELP = "Commands: island status | scan | miner | storage | rigger | tigger | figger | smelt | alerts | test"
+
+local function chatLoop()
+  while true do
+    -- AP 0.8 (ATM10): "chat", uuid, name, message, isHidden
+    -- AP 0.7 and older: "chat", name, message, uuid, isHidden
+    local _, a, b, c = os.pullEvent("chat")
+    local user, msg
+    if type(a) == "string" and a:match("^%x+%-%x+%-%x+%-%x+%-%x+$") then
+      user, msg = b, c
+    elseif a == nil then
+      user, msg = b, c   -- 0.8 /say messages have no uuid
+    else
+      user, msg = a, b
+    end
+    user = tostring(user)
+
+    -- Replay anything this player missed
+    local missed = A.pending[user]
+    if missed and #missed > 0 and say(("While you were away (%d):"):format(#missed), user) then
+      for _, t in ipairs(missed) do say("&7" .. t, user) end
+      A.pending[user] = nil
+      saveA()
+    end
+
+    local cmd = tostring(msg):lower():gsub("^%$", ""):match("^%s*island%s*(%a*)")
+    if cmd then
+      if (cmd == "" or cmd == "status") and state then
+        say(summary(state), user)
+      elseif cmd == "scan" and state then
+        local names = {}
+        for i = 1, math.min(#state.near, 8) do
+          names[#names + 1] = ("%s %.0fm"):format(state.near[i].name, state.near[i].d)
+        end
+        say(#names > 0 and table.concat(names, ", ") or "Nothing nearby.", user)
+      elseif cmd == "miner" then
+        say(minerLine(_G.MINER_STATUS), user)
+      elseif cmd == "storage" then
+        say(storageLine(_G.STORAGE_STATS), user)
+      elseif (_G.FARM_STATUS and _G.FARM_STATUS[cmd]) or cmd == "tigger" or cmd == "figger" then
+        local sub = tostring(msg):lower():match(cmd .. "%s+(%a+)")
+        local orders = { rounds = "rounds", now = "rounds", survey = "survey", stop = "stop", pause = "stop", go = "go", resume = "go" }
+        local st = _G.FARM_STATUS and _G.FARM_STATUS[cmd]
+        local proper = st and st.label or (cmd:sub(1, 1):upper() .. cmd:sub(2))
+        if sub and orders[sub] then
+          _G.FARM_CMD = _G.FARM_CMD or {}
+          _G.FARM_CMD[cmd] = { want = orders[sub], seq = os.epoch("utc") }
+          local words = { rounds = "heading out on his rounds now.", survey = "re-mapping his area.",
+            stop = "pausing. He'll stay docked.", go = "back on his schedule." }
+          say(proper .. " is " .. words[orders[sub]], user)
+        elseif st then
+          say(farmLine(st), user)
+          say("Orders: island " .. cmd .. " rounds | survey | stop | go", user)
+        else
+          say(proper .. " hasn't checked in yet. Is his modem on and his script running?", user)
+        end
+      elseif cmd == "smelt" then
+        local item, amount = tostring(msg):lower():match("smelt%s+(%S+)%s+(%d+)")
+        if item then
+          _G.SMELT_CMD = { item = item, amount = tonumber(amount), seq = os.epoch("utc") }
+          say(("Queued %s %s for smelting."):format(amount, item), user)
+        else
+          local lines = _G.SMELT_STATUS or { "Storage hasn't reported smelting yet." }
+          for i = 1, math.min(#lines, 5) do say(lines[i], user) end
+        end
+      elseif cmd == "rigger" then
+        local sub = tostring(msg):lower():match("rigger%s+(%a+)")
+        local orders = { build = "build", start = "build", stop = "dock", dock = "dock", test = "test", clear = "clear" }
+        if sub and orders[sub] then
+          _G.RIGGER_CMD = { want = orders[sub], seq = os.epoch("utc") }
+          local words = { build = "Building. He'll restock as he goes.", dock = "Stopping. He'll head back to his dock.",
+            test = "Placing markers on the 8 corners of the build.", clear = "Taking the corner markers back down." }
+          say("Rigger: " .. words[orders[sub]], user)
+        else
+          say(riggerLine(_G.RIGGER_STATUS), user)
+          say("Orders: island rigger test | clear | build | stop", user)
+        end
+      elseif cmd == "alerts" then
+        if A.subs[user] then
+          A.subs[user] = nil
+          say("Alerts off.", user)
+        else
+          A.subs[user] = true
+          say("Alerts on. I'll message you about storage and the miner, even when you're away from base.", user)
+        end
+        saveA()
+      elseif cmd == "test" then
+        if A.subs[user] then notify("Test alert. This is what alerts look like.", user)
+        else say("You're not subscribed. Say: island alerts", user) end
+      else
+        say(HELP, user)
+      end
+    end
+  end
+end
+
+loadA()
+parallel.waitForAny(stationLoop, chatLoop)

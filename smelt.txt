@@ -1,0 +1,11 @@
+# Auto-smelting. One rule per line, # for comments. Edits are picked up within 30 seconds.
+#   <item> <stacks>   keep that many stacks in storage, e.g.  stone 20
+#   <item> all        smelt everything of it that comes in, e.g.  iron all
+# Items: stone, smooth_stone, deepslate, glass, iron, gold, copper, charcoal, brick,
+# terracotta, cracked_stone_bricks, smooth_sandstone, smooth_quartz, nether_brick,
+# netherite_scrap, dried_kelp, green_dye, sponge, or any modded metal by name
+# (e.g. "osmium all" smelts raw osmium into ingots).
+
+# Your rules:
+stone 20
+iron all

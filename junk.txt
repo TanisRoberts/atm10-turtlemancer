@@ -1,0 +1,25 @@
+# Digger's junk list: blocks he may throw away underground.
+# One item per line. "minecraft:" is optional. Lines starting with # are ignored.
+# Junk still comes home (up to 4 slots) while storage has less than its cap of it.
+# Ores, raw metals and gems always come home. Anything else (flint, dripstone...)
+# gets thrown out when his bag is full, unless you add a "keep" line, e.g.:
+#   keep flint
+cobblestone
+cobbled_deepslate
+stone
+deepslate
+tuff
+granite
+diorite
+andesite
+calcite
+dirt
+gravel
+sand
+sandstone
+netherrack
+smooth_basalt
+basalt
+blackstone
+mud
+clay
