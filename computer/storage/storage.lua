@@ -11,8 +11,10 @@
 -- Use:
 --   * Dump items into any INPUT chest. They get sorted into storage automatically.
 --   * Tap an item on the monitor to send it to the OUTPUT chest (tap x1 / x16 / Stack to choose how many).
---   * Or type on the computer: a search word, then the item number and an amount.
---   * Commands: /rescan /clear /setup /addinput /fuel /inputs /help
+--   * Or use the computer's own screen: type in the search bar at the bottom and the list filters
+--     as you type; click an item (or press Enter for the top one) to send it. Qty / A-Z sorting,
+--     x1 / x16 / Stack buttons and paging (scroll wheel, arrow keys) work the same as on the monitor.
+--   * Commands: type / in the search bar to see them (/setup /addinput /fuel /inputs /rescan)
 -- Junk (cobble, deepslate, ...) is capped at JUNK_CAP; the miner is told to stop bringing more.
 --
 -- Storage is the only computer that moves items in or out of storage. Over the network it:
@@ -566,19 +568,43 @@ local function supplyRigger()
 end
 
 ---------------------------------------------------------------------------
--- Shared UI state
+-- Screens: the monitor wall and the computer's own screen share one item-list design.
+-- Each screen ("view") has its own search, page and buttons.
 ---------------------------------------------------------------------------
-local filter   = ""
-local page     = 1
-local takeMode = 3            -- 1 = x1, 2 = x16, 3 = one stack
+local takeMode = 3            -- 1 = x1, 2 = x16, 3 = one stack (shared: same buttons on both screens)
 local TAKE     = { { "x1", 1 }, { "x16", 16 }, { "Stack", "stack" } }
-local notice, noticeUntil = nil, 0
+local uiBusy   = false        -- a command (/setup...) is using the computer's screen
 
-local function shown()
-  if filter == "" then return items end
-  local q, out = filter:lower(), {}
+local COMMANDS = {
+  { "/setup",    "pick chests with marker items" },
+  { "/addinput", "add one more input chest" },
+  { "/fuel",     "set the miner's fuel barrel" },
+  { "/inputs",   "show which chest is which" },
+  { "/rescan",   "re-read every chest now" },
+}
+
+local mon = peripheral.find("monitor")
+local monView  = { dev = mon, kind = "monitor", touch = mon and mon.isColour(), filter = "", page = 1, hits = {} }
+local termView = { dev = term, kind = "term", touch = term.isColour(), filter = "", page = 1, hits = {} }
+
+local C = {
+  bg = colours.black, bar = colours.grey, fg = colours.white, dim = colours.lightGrey,
+  accent = colours.cyan, stripe = colours.grey, warn = colours.orange, good = colours.lime,
+}
+
+local function shown(v)
+  if v.filter == "" then return items end
+  local q, out = v.filter:lower(), {}
   for _, e in ipairs(items) do
     if e.label:lower():find(q, 1, true) or e.name:find(q, 1, true) then out[#out + 1] = e end
+  end
+  return out
+end
+
+local function commandMatches(v)
+  local out = {}
+  for _, c in ipairs(COMMANDS) do
+    if c[1]:sub(1, #v.filter) == v.filter:lower() then out[#out + 1] = c end
   end
   return out
 end
@@ -594,117 +620,159 @@ local function amountFor(e)
   return t == "stack" and (e.max or 64) or t
 end
 
-local function say(msg)
-  notice, noticeUntil = msg, os.clock() + 4
+local function say(v, msg, colour)
+  v.notice, v.noticeColour, v.noticeUntil = msg, colour or C.good, os.clock() + 4
 end
 
----------------------------------------------------------------------------
--- Monitor
----------------------------------------------------------------------------
-local mon = peripheral.find("monitor")
-local touch = mon and mon.isColour() -- only advanced monitors send touch events
-local hits = {}                       -- clickable regions for the current frame
+local function take(v, e)
+  local n, full = retrieve(e.key, amountFor(e))
+  buildItems()
+  say(v, n > 0 and ("Sent %d %s%s"):format(n, e.label, full and " (output full)" or "") or "Output chest is full",
+    n > 0 and C.good or C.warn)
+end
 
-local C = {
-  bg = colours.black, bar = colours.grey, fg = colours.white, dim = colours.lightGrey,
-  accent = colours.cyan, stripe = colours.grey, warn = colours.orange, good = colours.lime,
-}
+local function region(v, x1, x2, y, action) v.hits[#v.hits + 1] = { x1 = x1, x2 = x2, y = y, action = action } end
 
-local function region(x1, x2, y, action) hits[#hits + 1] = { x1 = x1, x2 = x2, y = y, action = action } end
-
-local function button(x, y, label, active, action)
-  mon.setCursorPos(x, y)
-  mon.setBackgroundColour(active and C.accent or C.bar)
-  mon.setTextColour(active and colours.black or C.fg)
-  mon.write(" " .. label .. " ")
-  region(x, x + #label + 1, y, action)
+local function button(v, x, y, label, active, action)
+  local d = v.dev
+  d.setCursorPos(x, y)
+  d.setBackgroundColour(active and C.accent or C.bar)
+  d.setTextColour(active and colours.black or C.fg)
+  d.write(" " .. label .. " ")
+  region(v, x, x + #label + 1, y, action)
   return x + #label + 3
 end
 
-local function draw()
-  if not mon then return end
-  mon.setTextScale(TEXT_SCALE)
-  local w, h = mon.getSize()
-  hits = {}
-  mon.setBackgroundColour(C.bg); mon.clear()
+local runCommand -- defined further down (needs the terminal)
+
+local function drawView(v)
+  local d = v.dev
+  if not d then return end
+  if v.kind == "monitor" then d.setTextScale(TEXT_SCALE) end
+  local w, h = d.getSize()
+  local isTerm = v.kind == "term"
+  v.hits = {}
+  d.setCursorBlink(false)
+  d.setBackgroundColour(C.bg); d.clear()
 
   -- Header
-  mon.setCursorPos(1, 1); mon.setBackgroundColour(C.bar); mon.clearLine()
-  mon.setTextColour(C.accent); mon.write(" STORAGE")
+  d.setCursorPos(1, 1); d.setBackgroundColour(C.bar); d.clearLine()
+  d.setTextColour(C.accent); d.write(" STORAGE")
   local pct = stats.total > 0 and math.floor(stats.used / stats.total * 100) or 0
   local right = ("%d items  %d/%d slots  %d%% "):format(stats.kinds, stats.used, stats.total, pct)
   if cfg.fuel then right = ("Fuel %d%%  "):format(math.floor(fuelUnits / (minerFuelLimit or REFILL) * 100)) .. right end
-  mon.setTextColour(pct >= 90 and C.warn or C.dim)
-  mon.setCursorPos(math.max(1, w - #right + 1), 1); mon.write(right)
+  if #right > w - 9 then right = ("%d/%d slots %d%% "):format(stats.used, stats.total, pct) end
+  d.setTextColour(pct >= 90 and C.warn or C.dim)
+  d.setCursorPos(math.max(1, w - #right + 1), 1); d.write(right)
 
-  -- Search / notice line
-  mon.setBackgroundColour(C.bg)
-  mon.setCursorPos(2, 2)
-  if notice and os.clock() < noticeUntil then
-    mon.setTextColour(C.good); mon.write(notice:sub(1, w - 2))
-  elseif filter ~= "" then
-    mon.setTextColour(C.fg); mon.write(("Search: %s"):format(filter):sub(1, w - 10))
-    mon.setCursorPos(w - 8, 2)
-    mon.setBackgroundColour(C.bar); mon.write(" Clear ")
-    region(w - 8, w - 2, 2, function() filter = ""; page = 1 end)
+  -- Notice / hint line
+  d.setBackgroundColour(C.bg)
+  d.setCursorPos(2, 2)
+  if v.notice and os.clock() < v.noticeUntil then
+    d.setTextColour(v.noticeColour or C.good); d.write(v.notice:sub(1, w - 2))
+  elseif not isTerm and v.filter ~= "" then
+    d.setTextColour(C.fg); d.write(("Search: %s"):format(v.filter):sub(1, w - 10))
+    d.setCursorPos(w - 8, 2)
+    d.setBackgroundColour(C.bar); d.write(" Clear ")
+    region(v, w - 8, w - 2, 2, function() v.filter = ""; v.page = 1 end)
   else
-    mon.setTextColour(C.dim)
-    mon.write((touch and "Tap an item to send it to the output chest" or "Search on the computer"):sub(1, w - 2))
+    d.setTextColour(C.dim)
+    local hint = isTerm and (v.touch and "Click an item to send it to the output chest" or "Type to search, Enter sends the top item")
+      or (v.touch and "Tap an item to send it to the output chest" or "Search on the storage computer")
+    d.write(hint:sub(1, w - 2))
   end
 
-  -- Sort switch (row 3)
-  if touch then
-    mon.setCursorPos(2, 3); mon.setBackgroundColour(C.bg); mon.setTextColour(C.dim); mon.write("Sort")
-    local sx = button(7, 3, "Qty", cfg.sort ~= "az", function() cfg.sort = "qty"; saveCfg(); buildItems(); page = 1 end)
-    button(sx - 1, 3, "A-Z", cfg.sort == "az", function() cfg.sort = "az"; saveCfg(); buildItems(); page = 1 end)
-  end
-
-  -- Item rows
-  local list = shown()
-  local top, bottom = 4, h - 2
-  local rows = math.max(1, bottom - top + 1)
-  local pages = math.max(1, math.ceil(#list / rows))
-  page = math.min(math.max(page, 1), pages)
-  if #list == 0 then
-    mon.setCursorPos(2, top); mon.setTextColour(C.dim)
-    mon.write(filter ~= "" and "Nothing matches." or "Empty. Drop items in the input chest.")
-  end
-  for i = 1, rows do
-    local e = list[(page - 1) * rows + i]
-    if not e then break end
-    local y = top + i - 1
-    mon.setCursorPos(1, y)
-    mon.setBackgroundColour(i % 2 == 0 and C.stripe or C.bg); mon.clearLine()
-    local count = fmt(e.count)
-    mon.setTextColour(C.fg)
-    mon.setCursorPos(2, y); mon.write(e.label:sub(1, w - #count - 4))
-    mon.setTextColour(C.accent)
-    mon.setCursorPos(w - #count, y); mon.write(count)
-    region(1, w, y, function()
-      local n, full = retrieve(e.key, amountFor(e))
-      buildItems()
-      say(n > 0 and ("Sent %d %s%s"):format(n, e.label, full and " (output full)" or "")
-                 or ("Output chest is full"))
-    end)
-  end
-
-  -- Footer: amount + paging
-  local y = h
-  mon.setCursorPos(1, y); mon.setBackgroundColour(C.bg); mon.clearLine()
-  local x = 2
-  if touch then
-    for i, t in ipairs(TAKE) do
-      x = button(x, y, t[1], takeMode == i, function() takeMode = i end)
+  -- Row 3: sort switch, and on the computer screen the take buttons too
+  if v.touch then
+    d.setCursorPos(2, 3); d.setBackgroundColour(C.bg); d.setTextColour(C.dim); d.write("Sort")
+    local sx = button(v, 7, 3, "Qty", cfg.sort ~= "az", function() cfg.sort = "qty"; saveCfg(); buildItems(); v.page = 1 end)
+    button(v, sx - 1, 3, "A-Z", cfg.sort == "az", function() cfg.sort = "az"; saveCfg(); buildItems(); v.page = 1 end)
+    if isTerm then
+      local tw = 0
+      for _, t in ipairs(TAKE) do tw = tw + #t[1] + 3 end
+      local x = w - tw + 1
+      for i, t in ipairs(TAKE) do x = button(v, x, 3, t[1], takeMode == i, function() takeMode = i end) end
     end
   end
-  local label = ("%d/%d"):format(page, pages)
-  local px = w - #label - 11
-  if px > x then
-    button(px, y, "<", page > 1, function() page = page - 1 end)
-    mon.setBackgroundColour(C.bg); mon.setTextColour(C.dim)
-    mon.setCursorPos(px + 4, y); mon.write(label)
-    button(w - 4, y, ">", page < pages, function() page = page + 1 end)
+
+  -- List: items, or commands while the search starts with "/"
+  local cmdMode = isTerm and v.filter:sub(1, 1) == "/"
+  local list = cmdMode and commandMatches(v) or shown(v)
+  local top = 4
+  local bottom = isTerm and h - 2 or h - 2
+  local rows = math.max(1, bottom - top + 1)
+  local pages = math.max(1, math.ceil(#list / rows))
+  v.page = math.min(math.max(v.page, 1), pages)
+  v.first = list[(v.page - 1) * rows + 1]
+  v.cmdMode = cmdMode
+  if #list == 0 then
+    d.setCursorPos(2, top); d.setTextColour(C.dim); d.setBackgroundColour(C.bg)
+    d.write((cmdMode and "No command starts with that." or v.filter ~= "" and "Nothing matches."
+      or "Empty. Drop items in the input chest."):sub(1, w - 2))
   end
+  for i = 1, rows do
+    local e = list[(v.page - 1) * rows + i]
+    if not e then break end
+    local y = top + i - 1
+    d.setCursorPos(1, y)
+    d.setBackgroundColour(i % 2 == 0 and C.stripe or C.bg); d.clearLine()
+    if cmdMode then
+      d.setTextColour(C.accent); d.setCursorPos(2, y); d.write(e[1])
+      d.setTextColour(C.dim); d.setCursorPos(13, y); d.write(e[2]:sub(1, w - 14))
+      region(v, 1, w, y, function() runCommand(e[1]) end)
+    else
+      local count = fmt(e.count)
+      d.setTextColour(C.fg)
+      d.setCursorPos(2, y); d.write(e.label:sub(1, w - #count - 4))
+      d.setTextColour(C.accent)
+      d.setCursorPos(w - #count, y); d.write(count)
+      region(v, 1, w, y, function() take(v, e) end)
+    end
+  end
+
+  -- Paging (+ take buttons on the monitor) on the second-to-last row (terminal) or last row (monitor)
+  local y = isTerm and h - 1 or h
+  d.setCursorPos(1, y); d.setBackgroundColour(C.bg); d.clearLine()
+  local x = 2
+  if not isTerm and v.touch then
+    for i, t in ipairs(TAKE) do x = button(v, x, y, t[1], takeMode == i, function() takeMode = i end) end
+  elseif isTerm then
+    d.setTextColour(C.dim); d.setCursorPos(2, y)
+    local tip = v.touch and "Enter: send top   / commands" or "Enter: send top  Arrows: page  / commands"
+    d.write(tip:sub(1, math.max(0, w - 16)))
+    x = math.min(w, 2 + #tip + 1)
+  end
+  local label = ("%d/%d"):format(v.page, pages)
+  local px = w - #label - 11
+  if px > x or (isTerm and pages > 1) then
+    px = math.max(px, 1)
+    button(v, px, y, "<", v.page > 1, function() v.page = v.page - 1 end)
+    d.setBackgroundColour(C.bg); d.setTextColour(C.dim)
+    d.setCursorPos(px + 4, y); d.write(label)
+    button(v, w - 4, y, ">", v.page < pages, function() v.page = v.page + 1 end)
+  end
+
+  -- Search bar (computer screen only), with the typing cursor
+  if isTerm then
+    d.setCursorPos(1, h); d.setBackgroundColour(C.bar); d.clearLine()
+    d.setTextColour(C.dim); d.write(" Search: ")
+    local room = w - 10 - (v.filter ~= "" and 4 or 0)
+    local shownText = #v.filter > room and v.filter:sub(-room) or v.filter
+    d.setTextColour(C.fg); d.write(shownText)
+    local cx = 10 + #shownText
+    if v.filter ~= "" then
+      d.setCursorPos(w - 2, h); d.setTextColour(C.dim); d.write(" x ")
+      region(v, w - 2, w, h, function() v.filter = ""; v.page = 1 end)
+    end
+    d.setCursorPos(cx, h)
+    d.setTextColour(C.fg)
+    d.setCursorBlink(true)
+  end
+end
+
+local function draw()
+  if mon then drawView(monView) end
+  if not uiBusy then drawView(termView) end
 end
 
 ---------------------------------------------------------------------------
@@ -794,58 +862,63 @@ local function netLoop()
   end
 end
 
-local function touchLoop()
-  if not touch then return os.pullEvent("never") end
-  while true do
-    local _, _, x, y = os.pullEvent("monitor_touch")
-    for _, r in ipairs(hits) do
-      if y == r.y and x >= r.x1 and x <= r.x2 then
-        r.action()
-        draw()
-        break
-      end
+local function clickIn(v, x, y)
+  for _, r in ipairs(v.hits) do
+    if y == r.y and x >= r.x1 and x <= r.x2 then
+      r.action()
+      return true
     end
   end
 end
 
-local function help()
-  print("Type a word to search, e.g. iron")
-  print("Then: <number> [amount]  e.g. 2 32")
-  print("/sort      switch between quantity and A-Z")
-  print("/setup     pick chests with marker items")
-  print("/inputs    show which chest is which")
-  print("/addinput  add one more input chest")
-  print("/clear /rescan /help")
+local function touchLoop()
+  if not monView.touch then return os.pullEvent("never") end
+  while true do
+    local _, _, x, y = os.pullEvent("monitor_touch")
+    if clickIn(monView, x, y) then draw() end
+  end
 end
 
-local function terminalLoop()
+-- Commands take over the computer's screen for a moment (they print and ask questions)
+local function waitEnter()
+  print()
+  write("Press Enter to go back.")
+  read()
+end
+
+function runCommand(cmd)
+  cmd = cmd:lower():match("^%s*(%S+)") or ""
+  local found
+  for _, c in ipairs(COMMANDS) do if c[1] == cmd then found = c[1] end end
+  if not found then
+    local m = commandMatches(termView)
+    if #m == 1 then found = m[1][1] end
+  end
+  if not found then say(termView, "Unknown command. Type / to see them all.", C.warn); return end
+  uiBusy = true
+  termView.filter, termView.page = "", 1
+  term.setCursorBlink(false)
+  term.setBackgroundColour(colours.black); term.setTextColour(colours.white)
   term.clear(); term.setCursorPos(1, 1)
-  print(("Storage online: %d chests, %d item types."):format(stats.inv, stats.kinds))
-  help()
-  while true do
-    print()
-    write("search> ")
-    local q = read()
-    if q == "/help" then help()
-    elseif q == "/clear" or q == "" then filter = ""; page = 1; draw()
-    elseif q == "/rescan" then scanAll(); buildItems(); draw(); print("Rescanned.")
-    elseif q == "/setup" then setup(); scanAll(); buildItems(); draw()
-    elseif q == "/addinput" then
+  local ok, err = pcall(function()
+    if found == "/setup" then
+      setup(); scanAll(); buildItems()
+    elseif found == "/rescan" then
+      print("Rescanning..."); scanAll(); buildItems()
+      say(termView, "Rescanned.")
+    elseif found == "/addinput" then
       local n = pickChest("extra INPUT chest (e.g. the miner's dump barrel)")
-      if isSpecial(n) then printError("That one's already in use.") else
-        cfg.inputs[#cfg.inputs + 1] = n; saveCfg(); scanAll(); buildItems(); draw()
-        print("Added. Anything dropped in it gets sorted.")
+      if isSpecial(n) then printError("That one's already in use."); waitEnter() else
+        cfg.inputs[#cfg.inputs + 1] = n; saveCfg(); scanAll(); buildItems()
+        say(termView, "Input added. Anything dropped in it gets sorted.")
       end
-    elseif q == "/fuel" then
+    elseif found == "/fuel" then
       local n = pickChest("miner FUEL barrel")
-      if isSpecial(n) and n ~= cfg.fuel then printError("That one's already in use.") else
-        cfg.fuel = n; saveCfg(); scanAll(); buildItems(); draw()
-        print("Fuel barrel set. I'll keep one refill in it (coal, coal blocks, lava buckets...).")
+      if isSpecial(n) and n ~= cfg.fuel then printError("That one's already in use."); waitEnter() else
+        cfg.fuel = n; saveCfg(); scanAll(); buildItems()
+        say(termView, "Fuel barrel set. I'll keep one refill in it.")
       end
-    elseif q == "/sort" then
-      cfg.sort = cfg.sort == "az" and "qty" or "az"; saveCfg(); buildItems(); page = 1; draw()
-      print(cfg.sort == "az" and "Sorted A-Z." or "Sorted by quantity.")
-    elseif q == "/inputs" then
+    elseif found == "/inputs" then
       for i, n in ipairs(cfg.inputs) do print(i .. "  " .. n) end
       print("Output: " .. tostring(cfg.output))
       print("Fuel:   " .. tostring(cfg.fuel or "not set"))
@@ -854,31 +927,55 @@ local function terminalLoop()
       local dn = 0
       for _, n in ipairs(storage) do if isDrawer(n) then dn = dn + 1 end end
       print(("Drawers: %d (filled first for items they hold)"):format(dn))
-    else
-      filter, page = q, 1
-      draw()
-      local list = shown()
-      if #list == 0 then
-        print("Nothing matches.")
-      else
-        local _, th = term.getSize()
-        local max = math.min(#list, th - 6)
-        for i = 1, max do
-          print(("%2d  %-24s %s"):format(i, list[i].label:sub(1, 24), fmt(list[i].count)))
-        end
-        if #list > max then print(("...and %d more; be more specific."):format(#list - max)) end
-        write("take # [amount]> ")
-        local pick = read()
-        local num, amt = pick:match("^%s*(%d+)%s*(%d*)")
-        local e = num and list[tonumber(num)]
-        if e then
-          local n, full = retrieve(e.key, tonumber(amt) or e.max or 64)
-          buildItems(); draw()
-          print(n > 0 and ("Sent %d %s to the output chest.%s"):format(n, e.label, full and " Output is full." or "")
-                       or "Output chest is full.")
-        end
-      end
+      waitEnter()
     end
+  end)
+  uiBusy = false
+  if not ok then say(termView, "Error: " .. tostring(err), C.warn) end
+  draw()
+end
+
+-- The computer's own screen: type to filter, click (advanced) or Enter to take, scroll/arrows to page
+local function terminalLoop()
+  local v = termView
+  draw()
+  while true do
+    local e, a, b, c = os.pullEvent()
+    local redraw = true
+    if uiBusy then
+      redraw = false
+    elseif e == "char" then
+      v.filter, v.page = v.filter .. a, 1
+    elseif e == "paste" then
+      v.filter, v.page = v.filter .. a:gsub("[\r\n]", ""), 1
+    elseif e == "key" then
+      if a == keys.backspace then
+        v.filter, v.page = v.filter:sub(1, -2), 1
+      elseif a == keys.delete then
+        v.filter, v.page = "", 1
+      elseif a == keys.enter or a == keys.numPadEnter then
+        if v.filter:sub(1, 1) == "/" then
+          runCommand(v.filter)
+        elseif v.first then
+          take(v, v.first)
+        end
+      elseif a == keys.up or a == keys.pageUp then
+        v.page = v.page - 1
+      elseif a == keys.down or a == keys.pageDown then
+        v.page = v.page + 1
+      else
+        redraw = false
+      end
+    elseif e == "mouse_click" then
+      redraw = clickIn(v, b, c) or false
+    elseif e == "mouse_scroll" then
+      v.page = v.page + a
+    elseif e == "term_resize" then
+      redraw = true
+    else
+      redraw = false
+    end
+    if redraw and not uiBusy then draw() end
   end
 end
 
