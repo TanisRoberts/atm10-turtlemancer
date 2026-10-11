@@ -1,7 +1,8 @@
 -- rigger_link.lua  --  base-side radio link for Rigger the builder (runs from startup.lua)
 --
--- Passes orders from chat (island rigger build/stop/test/clear) to Rigger, keeps his status
--- for the alerts, and hands his material requests to storage, which fills his supply barrel.
+-- Passes orders from chat (island rigger build/stop/test/clear) to Rigger and keeps his status
+-- for the alerts. The storage computer hears his material requests directly and fills his
+-- supply barrel; if storage has gone quiet, this tells Rigger so he just checks the barrel.
 
 local PROTOCOL   = "tanis-rigger"
 local CONFIG     = "rigger_link.cfg"
@@ -31,8 +32,9 @@ while true do
     if msg.type == "status" then
       _G.RIGGER_STATUS, _G.RIGGER_SEEN = msg, os.clock()
     elseif msg.type == "need" then
-      pendingReq = msg
-      _G.RIGGER_REQUEST = msg       -- storage fills the supply barrel and answers in RIGGER_SUPPLIED
+      if not (pendingReq and pendingReq.seq == msg.seq) then pendingReq = msg; pendingReq.at = os.clock() end
+    elseif msg.type == "supplied" and pendingReq and msg.seq == pendingReq.seq then
+      pendingReq = nil              -- storage answered him
     end
   end
 
@@ -44,13 +46,9 @@ while true do
     lastSend = -100
   end
 
-  -- Storage finished a request
-  local s = _G.RIGGER_SUPPLIED
-  if pendingReq and s and s.seq == pendingReq.seq then
-    rednet.broadcast({ type = "supplied", seq = s.seq, got = s.got, missing = s.missing }, PROTOCOL)
-    pendingReq = nil
-  elseif pendingReq and not _G.STORAGE_STATS then
-    -- Storage isn't running: tell Rigger so he just checks the barrel
+  -- Storage computer silent: tell Rigger so he just checks the barrel (you can fill it by hand)
+  local storageQuiet = not _G.STORAGE_SEEN or os.clock() - _G.STORAGE_SEEN > 20
+  if pendingReq and storageQuiet and os.clock() - pendingReq.at > 2 then
     rednet.broadcast({ type = "supplied", seq = pendingReq.seq, got = {}, missing = pendingReq.items }, PROTOCOL)
     pendingReq = nil
   end

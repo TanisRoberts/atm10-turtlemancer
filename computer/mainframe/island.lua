@@ -198,6 +198,15 @@ local function watch()
     end
   end
 
+  -- The storage and smelter computers (heard via base_link)
+  if _G.STORAGE_SEEN then
+    condition("storageSilent", os.clock() - _G.STORAGE_SEEN > SILENT_AFTER,
+      "Lost contact with the storage computer. Is it running, with its wireless modem on?")
+  end
+  if _G.SMELTER_SEEN then
+    condition("smelterSilent", os.clock() - _G.SMELTER_SEEN > SILENT_AFTER, "Lost contact with the smelter computer.")
+  end
+
   local m = _G.MINER_STATUS
   if m then
     local name = minerName(m)
@@ -464,9 +473,13 @@ local function chatLoop()
         local item, amount = tostring(msg):lower():match("smelt%s+(%S+)%s+(%d+)")
         if item then
           _G.SMELT_CMD = { item = item, amount = tonumber(amount), seq = os.epoch("utc") }
-          say(("Queued %s %s for smelting."):format(amount, item), user)
+          if _G.SMELTER_SEEN and os.clock() - _G.SMELTER_SEEN < 30 then
+            say(("Queued %s %s for smelting."):format(amount, item), user)
+          else
+            say(("I'll pass on %s %s, but the smelter isn't answering right now."):format(amount, item), user)
+          end
         else
-          local lines = _G.SMELT_STATUS or { "Storage hasn't reported smelting yet." }
+          local lines = _G.SMELT_STATUS or { "The smelter hasn't reported in yet." }
           for i = 1, math.min(#lines, 5) do say(lines[i], user) end
         end
       elseif cmd == "rigger" then

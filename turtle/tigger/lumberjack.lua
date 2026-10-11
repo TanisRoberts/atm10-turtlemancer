@@ -684,9 +684,8 @@ end
 
 -- Start-up
 do
-  local cur = ""
-  if fs.exists("startup.lua") then local f = fs.open("startup.lua", "r"); cur = f.readAll(); f.close() end
-  if not cur:find("lumberjack") then
+  -- startup.lua (the self-updater) normally starts us; only write a fallback if there's none
+  if not fs.exists("startup.lua") then
     local f = fs.open("startup.lua", "w"); f.write('shell.run("lumberjack")\n'); f.close()
   end
 end

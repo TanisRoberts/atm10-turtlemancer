@@ -6,6 +6,7 @@
 --   * INPUT chest(s) and one OUTPUT chest, also on the network
 --   * Optional: a FUEL barrel for the miner turtle (kept at exactly one refill)
 --   * Optional: an advanced monitor wall (touch screen). Normal monitors work as display-only.
+--   * A wireless or ender modem, so it can talk to the mainframe, the smelter and the turtles
 --
 -- Use:
 --   * Dump items into any INPUT chest. They get sorted into storage automatically.
@@ -13,6 +14,11 @@
 --   * Or type on the computer: a search word, then the item number and an amount.
 --   * Commands: /rescan /clear /setup /addinput /fuel /inputs /help
 -- Junk (cobble, deepslate, ...) is capped at JUNK_CAP; the miner is told to stop bringing more.
+--
+-- Storage is the only computer that moves items in or out of storage. Over the network it:
+--   * broadcasts its status (fill level, item totals, junk caps) for the mainframe and smelter
+--   * fills Rigger's supply barrel when he asks, and keeps Digger's fuel barrel at one refill
+--   * carries out the smelter's moves (furnace output back to storage, inputs and fuel in)
 --
 -- Drawers (Functional Storage / Storage Drawers) are bulk storage: an item a drawer already
 -- holds always goes there first, and empty drawers are only used when every barrel is full.
@@ -25,6 +31,8 @@ local FULL_SCAN    = 30      -- seconds between full rescans (catches things you
 local TEXT_SCALE   = 0.5
 local JUNK_CAP     = 20 * 64 -- items of one kind before the miner stops bringing more of it
 local REFILL       = 20000   -- fuel units in one turtle refill (updated live from the miner's tank size)
+local BASE         = "tanis-base"   -- network protocol shared by the base computers
+local STATUS_EVERY = 3              -- seconds between status broadcasts
 
 -- Fuel value per item, best first. Used to keep the fuel barrel at exactly one refill.
 local FUEL_VALUES = {
@@ -232,6 +240,8 @@ local info    = {}   -- item key -> { label, max }
 local items   = {}   -- sorted item summaries
 local byName  = {}   -- item id -> total count (all variants)
 local stats   = { used = 0, total = 0, kinds = 0, inv = 0 }
+local overCapList = {}  -- items storage has enough of (sent to Digger via the mainframe)
+local minerFuelLimit, riggerBill = nil, {}   -- heard over the network from Digger / Rigger
 
 local function keyOf(it) return it.name .. (it.nbt and ("#" .. it.nbt) or "") end
 
@@ -304,11 +314,11 @@ local function buildItems()
     byName[e.name] = (byName[e.name] or 0) + e.count
   end
   -- Anything Rigger's build still needs is kept until storage has enough of it
-  local bill = _G.RIGGER_STATUS and _G.RIGGER_STATUS.bill or {}
+  local bill = riggerBill or {}
   for name, c in pairs(byName) do
     if c >= math.max(JUNK_CAP, bill[name] or 0) then overCap[#overCap + 1] = name end
   end
-  _G.STORAGE_OVERCAP = overCap -- the miner panel passes this to the turtle
+  overCapList = overCap -- broadcast; the mainframe's miner panel passes it to Digger
   if cfg.sort == "az" then
     table.sort(items, function(a, b)
       local la, lb = a.label:lower(), b.label:lower()
@@ -459,8 +469,7 @@ end
 
 local function topUpFuel()
   if not cfg.fuel then return false end
-  local status = _G.MINER_STATUS
-  local target = (status and tonumber(status.fuelLimit)) or REFILL
+  local target = minerFuelLimit or REFILL
   local value = {}
   for _, fv in ipairs(FUEL_VALUES) do value[fv[1]] = fv[2] end
   local have = 0
@@ -486,135 +495,10 @@ local function topUpFuel()
 end
 
 ---------------------------------------------------------------------------
--- Auto-smelting
+-- Smelter jobs: the smelter computer decides, storage moves the items
 ---------------------------------------------------------------------------
--- smelt.txt lines:  "stone 20"  keep 20 stacks of stone by smelting cobblestone
---                   "iron all"  smelt every bit of raw iron that comes in
--- One-off jobs:     /smelt stone 400  (terminal)  or  island smelt stone 400  (chat)
-local SMELT_FILE = "smelt.txt"
-local DEFAULT_SMELT = [[
-# Auto-smelting. One rule per line, # for comments. Edits are picked up within 30 seconds.
-#   <item> <stacks>   keep that many stacks in storage, e.g.  stone 20
-#   <item> all        smelt everything of it that comes in, e.g.  iron all
-# Items: stone, smooth_stone, deepslate, glass, iron, gold, copper, charcoal, brick,
-# terracotta, cracked_stone_bricks, smooth_sandstone, smooth_quartz, nether_brick,
-# netherite_scrap, dried_kelp, green_dye, sponge, or any modded metal by name
-# (e.g. "osmium all" smelts raw osmium into ingots).
-]]
-local RECIPES = {
-  stone              = { out = "minecraft:stone",              inputs = { "minecraft:cobblestone" } },
-  smooth_stone       = { out = "minecraft:smooth_stone",       inputs = { "minecraft:stone" } },
-  deepslate          = { out = "minecraft:deepslate",          inputs = { "minecraft:cobbled_deepslate" } },
-  glass              = { out = "minecraft:glass",              inputs = { "minecraft:sand", "minecraft:red_sand" } },
-  iron               = { out = "minecraft:iron_ingot",         inputs = { "minecraft:raw_iron" } },
-  gold               = { out = "minecraft:gold_ingot",         inputs = { "minecraft:raw_gold" } },
-  copper             = { out = "minecraft:copper_ingot",       inputs = { "minecraft:raw_copper" } },
-  charcoal           = { out = "minecraft:charcoal",           pattern = "_log$" },
-  brick              = { out = "minecraft:brick",              inputs = { "minecraft:clay_ball" } },
-  terracotta         = { out = "minecraft:terracotta",         inputs = { "minecraft:clay" } },
-  cracked_stone_bricks = { out = "minecraft:cracked_stone_bricks", inputs = { "minecraft:stone_bricks" } },
-  smooth_sandstone   = { out = "minecraft:smooth_sandstone",   inputs = { "minecraft:sandstone" } },
-  smooth_quartz      = { out = "minecraft:smooth_quartz",      inputs = { "minecraft:quartz_block" } },
-  nether_brick       = { out = "minecraft:nether_brick",       inputs = { "minecraft:netherrack" } },
-  netherite_scrap    = { out = "minecraft:netherite_scrap",    inputs = { "minecraft:ancient_debris" } },
-  dried_kelp         = { out = "minecraft:dried_kelp",         inputs = { "minecraft:kelp" } },
-  green_dye          = { out = "minecraft:green_dye",          inputs = { "minecraft:cactus" } },
-  sponge             = { out = "minecraft:sponge",             inputs = { "minecraft:wet_sponge" } },
-}
-RECIPES.iron_ingot, RECIPES.gold_ingot, RECIPES.copper_ingot = RECIPES.iron, RECIPES.gold, RECIPES.copper
-local SMELT_FUELS = { "minecraft:charcoal", "minecraft:coal", "minecraft:coal_block", "minecraft:blaze_rod" }
-
-local smeltRules, smeltQueue = {}, {}  -- rules from smelt.txt; one-off jobs {recipe, left}
-local smeltNote = ""
-
--- Find (or make up) the recipe for a name like "stone", "iron" or "osmium"
-local function recipeFor(word)
-  word = word:lower():gsub("^minecraft:", "")
-  local r = RECIPES[word]
-  if r then return word, r end
-  -- Modded metals: raw_<x> -> <x>_ingot, in any mod
-  return word, { out = ":" .. word .. "_ingot", modded = true, pattern = ":raw_" .. word .. "$" }
-end
-
-local function outCount(r)
-  if not r.modded then return byName[r.out] or 0 end
-  local c = 0
-  for name, n in pairs(byName) do if name:find(r.out, 1, true) then c = c + n end end
-  return c
-end
-
--- Best input item in storage for a recipe (the one we have most of)
-local function inputFor(r)
-  local best, bestN = nil, 0
-  if r.inputs then
-    for _, name in ipairs(r.inputs) do
-      if (byName[name] or 0) > bestN then best, bestN = name, byName[name] end
-    end
-  else
-    for name, n in pairs(byName) do
-      if name:find(r.pattern) and n > bestN then best, bestN = name, n end
-    end
-  end
-  return best, bestN
-end
-
-local lastSmeltLoad = -100
-local function loadSmeltRules()
-  if not fs.exists(SMELT_FILE) then
-    local f = fs.open(SMELT_FILE, "w"); f.write(DEFAULT_SMELT); f.close()
-  end
-  local f = fs.open(SMELT_FILE, "r"); local text = f.readAll(); f.close()
-  local rules = {}
-  for line in text:gmatch("[^\r\n]+") do
-    local word, amount = line:gsub("#.*", ""):match("^%s*(%S+)%s+(%S+)%s*$")
-    if word then
-      local name, r = recipeFor(word)
-      if amount:lower() == "all" then rules[#rules + 1] = { name = name, r = r, all = true }
-      elseif tonumber(amount) then rules[#rules + 1] = { name = name, r = r, stacks = tonumber(amount) } end
-    end
-  end
-  smeltRules = rules
-  lastSmeltLoad = os.clock()
-end
-
-local function queueSmelt(word, amount)
-  local name, r = recipeFor(word)
-  smeltQueue[#smeltQueue + 1] = { name = name, r = r, left = amount }
-  return name
-end
-
--- What's sitting in furnace input slots right now, by item name (so targets don't overshoot)
-local function inFurnaces()
-  local t = {}
-  for _, fz in ipairs(furnaces) do
-    local d = call(fz, "getItemDetail", 1)
-    if d then t[d.name] = (t[d.name] or 0) + d.count end
-  end
-  return t
-end
-
--- Pick the next thing to smelt: one-off jobs first, then "keep N stacks", then "all" rules
-local function nextSmeltJob(busy)
-  for i, job in ipairs(smeltQueue) do
-    if job.left <= 0 then table.remove(smeltQueue, i); return nextSmeltJob(busy) end
-    local input, have = inputFor(job.r)
-    if input and have > 0 then return input, math.min(job.left, have, 64), job end
-  end
-  for _, rule in ipairs(smeltRules) do
-    local input, have = inputFor(rule.r)
-    if input and have > 0 then
-      if rule.all then
-        return input, math.min(have, 64)
-      else
-        local want = rule.stacks * 64 - outCount(rule.r) - (busy[input] or 0)
-        if want > 0 then return input, math.min(want, have, 64) end
-      end
-    end
-  end
-end
-
+-- Move a furnace slot back into storage (drawers holding it first, see targetsFor)
 local function storeFrom(fz, slot)
-  -- Move a furnace slot back into storage (drawers holding it first, see targetsFor)
   local d = call(fz, "getItemDetail", slot)
   if not d then return 0 end
   local moved = 0
@@ -626,79 +510,36 @@ local function storeFrom(fz, slot)
   return moved
 end
 
-local function smeltTick()
-  if os.clock() - lastSmeltLoad > FULL_SCAN then loadSmeltRules() end
-  if #furnaces == 0 then smeltNote = ""; return false end
-  local changed, active = false, 0
-  local busy = inFurnaces()
-  for _, fz in ipairs(furnaces) do
-    -- 1. Finished items back into storage
-    if storeFrom(fz, 3) > 0 then changed = true end
-    -- 2. Feed the input slot if it's empty
-    local cur = call(fz, "getItemDetail", 1)
-    if not cur then
-      local input, n, job = nextSmeltJob(busy)
-      if input then
-        local moved = retrieve(input, n, fz, 1)
-        if moved > 0 then
-          busy[input] = (busy[input] or 0) + moved
-          if job then job.left = job.left - moved end
-          cur = { name = input, count = moved }
-          changed = true
-        end
+-- ops: { op = "store", fz, slot } or { op = "fill", fz, slot, item, count }. Returns moved per op.
+local function runSmeltOps(ops)
+  local results = {}
+  for i, o in ipairs(ops or {}) do
+    local moved = 0
+    if type(o) == "table" and type(o.fz) == "string" and isFurnace(o.fz) then
+      if o.op == "store" then
+        moved = storeFrom(o.fz, tonumber(o.slot) or 3)
+      elseif o.op == "fill" and type(o.item) == "string" then
+        moved = retrieve(o.item, math.max(0, math.min(tonumber(o.count) or 0, 64)), o.fz, tonumber(o.slot))
       end
     end
-    -- 3. Keep it fuelled while it has work (1 coal smelts 8 items)
-    if cur then
-      active = active + 1
-      local fuelD = call(fz, "getItemDetail", 2)
-      local fuelHave = fuelD and fuelD.count or 0
-      local fuelWant = math.ceil(cur.count / 8)
-      if fuelHave < fuelWant then
-        for _, fuelName in ipairs(SMELT_FUELS) do
-          if (byName[fuelName] or 0) > 0 and (not fuelD or fuelD.name == fuelName) then
-            local per = fuelName == "minecraft:coal_block" and 10 or 1
-            if retrieve(fuelName, math.max(1, math.ceil((fuelWant - fuelHave) / per)), fz, 2) > 0 then changed = true end
-            break
-          end
-        end
-      end
-    end
+    results[i] = moved
   end
-  local queued = 0
-  for _, j in ipairs(smeltQueue) do queued = queued + math.max(0, j.left) end
-  smeltNote = active > 0 and ("Smelting %d/%d%s"):format(active, #furnaces, queued > 0 and (", " .. queued .. " queued") or "") or ""
-  return changed
-end
-
-local lastSmeltCmd = nil
-
-local function smeltStatus()
-  local lines = {}
-  lines[#lines + 1] = ("%d furnace(s). %s"):format(#furnaces, smeltNote ~= "" and smeltNote or "Idle")
-  for _, j in ipairs(smeltQueue) do
-    if j.left > 0 then lines[#lines + 1] = ("Queued: %d %s"):format(j.left, j.name) end
-  end
-  for _, rule in ipairs(smeltRules) do
-    if rule.all then
-      local input, have = inputFor(rule.r)
-      lines[#lines + 1] = ("Rule: all %s (%d waiting)"):format(rule.name, have or 0)
-    else
-      lines[#lines + 1] = ("Rule: keep %d stacks of %s (have %d)"):format(rule.stacks, rule.name, outCount(rule.r))
-    end
-  end
-  return lines
+  return results
 end
 
 -- Fill Rigger's supply barrel with what he asked for (items + fuel units).
 local lastRiggerSeq = nil
+local riggerReq = nil            -- latest "need" message from Rigger (set by the network loop)
+local function replyRigger(msg)
+  if rednet.isOpen() then rednet.broadcast(msg, "tanis-rigger") end
+end
 local function supplyRigger()
-  local req = _G.RIGGER_REQUEST
+  local req = riggerReq
   if not req or req.seq == lastRiggerSeq then return false end
   lastRiggerSeq = req.seq
   local got, missing = {}, {}
   if not cfg.rigger then
-    _G.RIGGER_SUPPLIED = { seq = req.seq, got = got, missing = req.items or {} }
+    replyRigger({ type = "supplied", seq = req.seq, got = got, missing = req.items or {} })
     return false
   end
   depositFrom(cfg.rigger)  -- take back whatever he handed in, then load the next batch
@@ -720,7 +561,7 @@ local function supplyRigger()
     end
   end
   if units >= 80 then missing[#missing + 1] = { "fuel", units } end
-  _G.RIGGER_SUPPLIED = { seq = req.seq, got = got, missing = missing }
+  replyRigger({ type = "supplied", seq = req.seq, got = got, missing = missing })
   return true
 end
 
@@ -792,8 +633,7 @@ local function draw()
   mon.setTextColour(C.accent); mon.write(" STORAGE")
   local pct = stats.total > 0 and math.floor(stats.used / stats.total * 100) or 0
   local right = ("%d items  %d/%d slots  %d%% "):format(stats.kinds, stats.used, stats.total, pct)
-  if smeltNote ~= "" then right = smeltNote .. "  " .. right end
-  if cfg.fuel then right = ("Fuel %d%%  "):format(math.floor(fuelUnits / ((_G.MINER_STATUS and tonumber(_G.MINER_STATUS.fuelLimit)) or REFILL) * 100)) .. right end
+  if cfg.fuel then right = ("Fuel %d%%  "):format(math.floor(fuelUnits / (minerFuelLimit or REFILL) * 100)) .. right end
   mon.setTextColour(pct >= 90 and C.warn or C.dim)
   mon.setCursorPos(math.max(1, w - #right + 1), 1); mon.write(right)
 
@@ -870,6 +710,36 @@ end
 ---------------------------------------------------------------------------
 -- Loops
 ---------------------------------------------------------------------------
+local jobs = {}                -- smelter requests waiting for the worker: { from, id, ops }
+local lastBroadcast = -100
+
+local function statusMsg()
+  local avail = 0
+  for _, fv in ipairs(FUEL_VALUES) do avail = avail + (byName[fv[1]] or 0) * fv[2] end
+  return {
+    type = "storage", id = os.getComputerID(), label = os.getComputerLabel(),
+    used = stats.used, total = stats.total, kinds = stats.kinds, inputStuck = inputStuck,
+    fuelUnits = cfg.fuel and fuelUnits or nil,
+    fuelTarget = cfg.fuel and (minerFuelLimit or REFILL) or nil,
+    fuelAvailable = avail, overcap = overCapList, items = byName, paused = paused,
+  }
+end
+
+local function broadcastStatus()
+  if rednet.isOpen() then rednet.broadcast(statusMsg(), BASE) end
+  lastBroadcast = os.clock()
+end
+
+-- Wait for the next tick, waking early when the network hands us work
+local function waitTick()
+  if not paused and (#jobs > 0 or (riggerReq and riggerReq.seq ~= lastRiggerSeq)) then return end
+  local t = os.startTimer(TICK)
+  while true do
+    local e, id = os.pullEvent()
+    if (e == "timer" and id == t) or e == "storage_work" then return end
+  end
+end
+
 local function workerLoop()
   local lastFull = os.clock()
   while true do
@@ -883,24 +753,44 @@ local function workerLoop()
       if topUpFuel() then buildItems() end
       if topUpDocks() then buildItems() end
       if supplyRigger() then buildItems() end
-      local sc = _G.SMELT_CMD                 -- "island smelt stone 400" from chat
-      if sc and sc.seq ~= lastSmeltCmd then
-        lastSmeltCmd = sc.seq
-        if sc.item and sc.amount then queueSmelt(sc.item, sc.amount) end
+      if #jobs > 0 then
+        while #jobs > 0 do
+          local j = table.remove(jobs, 1)
+          local results = runSmeltOps(j.ops)
+          if rednet.isOpen() then rednet.send(j.from, { type = "smelt_done", id = j.id, results = results }, BASE) end
+        end
+        buildItems()
+        broadcastStatus()   -- the smelter plans its next move from fresh totals
       end
-      if smeltTick() then buildItems() end
-      _G.SMELT_STATUS = smeltStatus()
-      local avail = 0
-      for _, fv in ipairs(FUEL_VALUES) do avail = avail + (byName[fv[1]] or 0) * fv[2] end
-      _G.STORAGE_STATS = { -- read by the mainframe alerts
-        used = stats.used, total = stats.total, kinds = stats.kinds, inputStuck = inputStuck,
-        fuelUnits = cfg.fuel and fuelUnits or nil,
-        fuelTarget = cfg.fuel and ((_G.MINER_STATUS and tonumber(_G.MINER_STATUS.fuelLimit)) or REFILL) or nil,
-        fuelAvailable = avail,
-      }
       draw()
     end
-    os.sleep(TICK)
+    waitTick()
+  end
+end
+
+local function netLoop()
+  local modem = peripheral.find("modem", function(_, m) return m.isWireless() end)
+  if not modem then
+    print("No wireless modem: the mainframe, smelter and turtles can't reach storage.")
+    return os.pullEvent("never")
+  end
+  rednet.open(peripheral.getName(modem))
+  while true do
+    local from, msg, proto = rednet.receive(1)
+    if type(msg) == "table" then
+      if proto == "tanis-miner" and msg.type == "status" then
+        minerFuelLimit = tonumber(msg.fuelLimit) or minerFuelLimit
+      elseif proto == "tanis-rigger" and msg.type == "status" then
+        riggerBill = type(msg.bill) == "table" and msg.bill or riggerBill
+      elseif proto == "tanis-rigger" and msg.type == "need" then
+        riggerReq = msg
+        os.queueEvent("storage_work")
+      elseif proto == BASE and msg.type == "smelt_ops" and type(msg.ops) == "table" then
+        jobs[#jobs + 1] = { from = from, id = msg.id, ops = msg.ops }
+        os.queueEvent("storage_work")
+      end
+    end
+    if os.clock() - lastBroadcast >= STATUS_EVERY then broadcastStatus() end
   end
 end
 
@@ -921,7 +811,6 @@ end
 local function help()
   print("Type a word to search, e.g. iron")
   print("Then: <number> [amount]  e.g. 2 32")
-  print("/smelt [item amount]  queue smelting, or show status")
   print("/sort      switch between quantity and A-Z")
   print("/setup     pick chests with marker items")
   print("/inputs    show which chest is which")
@@ -956,16 +845,6 @@ local function terminalLoop()
     elseif q == "/sort" then
       cfg.sort = cfg.sort == "az" and "qty" or "az"; saveCfg(); buildItems(); page = 1; draw()
       print(cfg.sort == "az" and "Sorted A-Z." or "Sorted by quantity.")
-    elseif q:sub(1, 6) == "/smelt" then
-      local item, amount = q:match("^/smelt%s+(%S+)%s+(%d+)")
-      if item then
-        local name = queueSmelt(item, tonumber(amount))
-        print(("Queued %d %s."):format(tonumber(amount), name))
-      else
-        if q:match("reload") then loadSmeltRules() end
-        for _, l in ipairs(smeltStatus()) do print(l) end
-        print("Edit smelt.txt for standing rules (stone 20, iron all).")
-      end
     elseif q == "/inputs" then
       for i, n in ipairs(cfg.inputs) do print(i .. "  " .. n) end
       print("Output: " .. tostring(cfg.output))
@@ -1011,4 +890,4 @@ if #cfg.inputs == 0 or not cfg.output then setup() end
 if mon then mon.setTextScale(TEXT_SCALE) end
 print("Scanning storage...")
 scanAll(); buildItems(); draw()
-parallel.waitForAny(workerLoop, touchLoop, terminalLoop)
+parallel.waitForAny(workerLoop, touchLoop, terminalLoop, netLoop)

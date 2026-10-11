@@ -1,12 +1,15 @@
--- base.lua  --  runs the Island Station, Storage and Miner Panel together on one computer.
--- (Started by startup.lua after it has pulled the latest files from GitHub.)
+-- mainframe.lua  --  the island's "server": chat commands, alerts, displays (CC:Tweaked, ATM10)
+-- Started by startup.lua after it has pulled the latest files from GitHub.
+--
+-- Needs: an Advanced Computer with a wireless or ender modem, an Environment Detector, and
+-- optionally a Chat Box. Storage and smelting run on their own computers; the mainframe hears
+-- from them over the network (base_link.lua) and shows everything.
 --
 -- Monitor wall layout:   [ island strip, 3 lines ]
 --                        [ divider               ]
---                        [ storage touch screen  ]
+--                        [ status board: every machine ]
 -- Miner panel: its own monitor (1x3 or 3x2). The first time two screens are attached,
 -- you're asked to tap the miner panel once so the computer knows which is which.
--- The keyboard belongs to storage (search, /setup, ...).
 -- Any program can be missing or crash; the others keep running.
 
 local STATION_LINES = 3
@@ -58,7 +61,7 @@ local function asMonitor(win)
   return setmetatable({ setTextScale = function() end }, { __index = win })
 end
 
-local stationTarget, storageTarget, panelTarget, offset
+local stationTarget, boardTarget, panelTarget, offset
 if wallName then
   local mon = peripheral.wrap(wallName)
   mon.setTextScale(TEXT_SCALE)          -- set before making windows: they keep their size
@@ -68,7 +71,7 @@ if wallName then
   mon.setBackgroundColour(colours.grey); mon.clearLine()
   offset = STATION_LINES + 1
   stationTarget = asMonitor(window.create(mon, 1, 1, w, STATION_LINES))
-  storageTarget = asMonitor(window.create(mon, 1, offset + 1, w, h - offset))
+  boardTarget = asMonitor(window.create(mon, 1, offset + 1, w, h - offset))
 else
   local w, h = term.getSize()
   stationTarget = asMonitor(window.create(term.current(), 1, 1, w, h, false)) -- hidden
@@ -125,9 +128,13 @@ local function runScript(path, env, label, target)
   end
 end
 
+term.clear(); term.setCursorPos(1, 1)
+print("Mainframe running: island station, status board, miner panel, links.")
+print("Reboot (hold Ctrl+R) to update. Type reset to give this computer a new role.")
 parallel.waitForAll(
   runScript("island.lua",       sandbox(stationTarget, true, nil),                 "Island station", wallName and stationTarget),
-  runScript("storage.lua",      sandbox(storageTarget, false, wallName, offset),   "Storage",        wallName and storageTarget),
+  runScript("board.lua",        sandbox(boardTarget, true, nil),                   "Status board",   wallName and boardTarget),
+  runScript("base_link.lua",    sandbox(nil, true, nil),                           "Base link",      nil),
   runScript("miner_panel.lua",  sandbox(panelTarget, true, panelName),             "Miner panel",    panelTarget),
   runScript("rigger_link.lua",  sandbox(nil, true, nil),                           "Rigger link",    nil),
   runScript("farm_link.lua",    sandbox(nil, true, nil),                           "Farm link",      nil)
