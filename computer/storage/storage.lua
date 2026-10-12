@@ -16,7 +16,7 @@
 --   * Or use the computer's own screen: type in the search bar at the bottom and the list filters
 --     as you type; click an item (or press Enter for the top one) to send it. Qty / A-Z sorting,
 --     x1 / x16 / Stack buttons and paging (scroll wheel, arrow keys) work the same as on the monitor.
---   * Commands: type / in the search bar to see them (/setup /addinput /fuel /inputs /rescan)
+--   * Commands: type / in the search bar to see them (/setup /addinput /fuel /inputs /rescan /drawers)
 -- Junk (cobble, deepslate, ...) is capped at JUNK_CAP; the miner is told to stop bringing more.
 --
 -- Storage is the only computer that moves items in or out of storage. Over the network it:
@@ -281,7 +281,8 @@ end
 local function scanAll()
   refreshStorageList()
   local fns = {}
-  for _, n in ipairs(storage) do fns[#fns + 1] = function() scanInv(n) end end
+  -- Sizes are re-read too: a drawer controller grows when you link more drawers to it
+  for _, n in ipairs(storage) do fns[#fns + 1] = function() sizes[n] = nil; scanInv(n) end end
   runBatched(fns)
 end
 
@@ -597,6 +598,7 @@ local COMMANDS = {
   { "/fuel",     "add a Digger fuel barrel" },
   { "/inputs",   "show which chest is which" },
   { "/rescan",   "re-read every chest now" },
+  { "/drawers",  "what storage sees in the drawers" },
 }
 
 local mon
@@ -962,6 +964,31 @@ function runCommand(cmd)
   local ok, err = pcall(function()
     if found == "/setup" then
       setup(); scanAll(); buildItems()
+    elseif found == "/drawers" then
+      print("Rescanning..."); scanAll(); buildItems()
+      local any = false
+      for _, n in ipairs(storage) do
+        if isDrawer(n) then
+          any = true
+          local list = cache[n] or {}
+          local used, totals, order = 0, {}, {}
+          for _, it in pairs(list) do
+            used = used + 1
+            if not totals[it.name] then order[#order + 1] = it.name; totals[it.name] = 0 end
+            totals[it.name] = totals[it.name] + it.count
+          end
+          table.sort(order, function(a, b) return totals[a] > totals[b] end)
+          print(("%s: %d slots, %d in use"):format(n, sizes[n] or 0, used))
+          if (sizes[n] or 0) == 0 then
+            printError("  No slots: no drawers are linked to it (Linking Tool).")
+          end
+          for i = 1, math.min(6, #order) do print(("  %6d %s"):format(totals[order[i]], order[i])) end
+          if #order > 6 then print(("  ...and %d more"):format(#order - 6)) end
+        end
+      end
+      if not any then printError("No drawers or drawer controller found on the cable.") end
+      print("Items held here get stored here first.")
+      waitEnter()
     elseif found == "/rescan" then
       print("Rescanning..."); scanAll(); buildItems()
       say(termView, "Rescanned.")
