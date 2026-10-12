@@ -16,7 +16,7 @@
 --   * Or use the computer's own screen: type in the search bar at the bottom and the list filters
 --     as you type; click an item (or press Enter for the top one) to send it. Qty / A-Z sorting,
 --     x1 / x16 / Stack buttons and paging (scroll wheel, arrow keys) work the same as on the monitor.
---   * Commands: type / in the search bar to see them (/setup /addinput /fuel /inputs /rescan /drawers /tidy)
+--   * Commands: type / in the search bar to see them (/setup /addinput /fuel /inputs /rescan /drawers /tidy /fuelinfo)
 -- Junk (cobble, deepslate, ...) is capped at JUNK_CAP; the miner is told to stop bringing more.
 --
 -- Storage is the only computer that moves items in or out of storage. Over the network it:
@@ -729,6 +729,7 @@ local COMMANDS = {
   { "/rescan",   "re-read every chest now" },
   { "/drawers",  "what storage sees in the drawers" },
   { "/tidy",     "fill big drawers first; barrels in" },
+  { "/fuelinfo", "Digger fuel barrels and fuel stock" },
 }
 
 local mon
@@ -1144,6 +1145,32 @@ function runCommand(cmd)
       local full = {}
       for name in pairs(stuck) do full[#full + 1] = name end
       if #full > 0 then printError("Drawer full, some left in barrels: " .. table.concat(full, ", ")) end
+      waitEnter()
+    elseif found == "/fuelinfo" then
+      print("Rescanning..."); scanAll(); buildItems()
+      local target = minerFuelLimit or REFILL
+      print(("Each Digger fuel barrel is kept at %d fuel"):format(target))
+      print(minerFuelLimit and "(a Digger's full tank)." or "(default: no Digger heard yet).")
+      local value = {}
+      for _, fv in ipairs(FUEL_VALUES) do value[fv[1]] = fv[2] end
+      if #cfg.fuels == 0 then printError("No fuel barrels set: use /fuel or /setup (lava bucket).") end
+      for _, b in ipairs(cfg.fuels) do
+        local have, parts = 0, {}
+        for _, it in pairs(call(b, "list") or {}) do
+          have = have + (value[it.name] or 0) * it.count
+          parts[it.name] = (parts[it.name] or 0) + it.count
+        end
+        local txt = {}
+        for name, c in pairs(parts) do txt[#txt + 1] = c .. " " .. name:gsub("^minecraft:", "") end
+        print(("%s: %d fuel (%d%%)"):format(b, have, math.floor(have / target * 100)))
+        print("  " .. (#txt > 0 and table.concat(txt, ", ") or "empty"))
+      end
+      print("In storage (best first):")
+      for _, fv in ipairs(FUEL_VALUES) do
+        local c = byName[fv[1]] or 0
+        local keep = SMELTER_RESERVE[fv[1]]
+        print(("  %5d %s%s"):format(c, fv[1]:gsub("^minecraft:", ""), keep and (" (last " .. keep .. " kept for the smelter)") or ""))
+      end
       waitEnter()
     elseif found == "/rescan" then
       print("Rescanning..."); scanAll(); buildItems()
