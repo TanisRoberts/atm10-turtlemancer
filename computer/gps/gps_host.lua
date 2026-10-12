@@ -6,8 +6,14 @@
 --
 -- First run asks for this computer's coordinates (F3, the computer block itself) and saves them.
 -- If other GPS towers already work, it fills them in for you. Delete gps.cfg to re-enter them.
+--
+-- Aircraft warning light: a redstone lamp touching the computer (on top by default) flashes like a
+-- pylon light. Every tower flashes in time with the others (they all use the real-world clock).
+-- To use another side, or none, edit lamp = "top" in gps.cfg ("none" turns it off).
 
 local CFG = "gps.cfg"
+local FLASH_EVERY = 3000   -- ms between flashes
+local FLASH_ON    = 800    -- ms the lamp stays lit
 
 local function readCfg()
   if not fs.exists(CFG) then return nil end
@@ -43,8 +49,13 @@ if not pos then
     write("Z: "); local pz = tonumber(read())
     if px and py and pz then pos = { x = px, y = py, z = pz } else printError("Numbers only, try again.") end
   end
+  pos.lamp = "top"
   local f = fs.open(CFG, "w"); f.write(textutils.serialize(pos)); f.close()
 end
+local lampSide = pos.lamp or "top"
+local SIDES = {}
+for _, s in ipairs(rs.getSides()) do SIDES[s] = true end
+if not SIDES[lampSide] then lampSide = nil end
 
 term.clear(); term.setCursorPos(1, 1)
 if term.isColour() then term.setTextColour(colours.lime) end
@@ -52,4 +63,23 @@ print(("GPS host at %d %d %d"):format(pos.x, pos.y, pos.z))
 term.setTextColour(colours.white)
 print("Turtles ask me where they are. Leave me running.")
 print("Delete gps.cfg and reboot if I'm moved.")
-shell.run("gps", "host", tostring(pos.x), tostring(pos.y), tostring(pos.z))
+if lampSide then print("Warning light: lamp on my " .. lampSide .. " side.") end
+
+local function host()
+  shell.run("gps", "host", tostring(pos.x), tostring(pos.y), tostring(pos.z))
+end
+
+-- Flash the lamp on a shared beat: all towers light up together
+local function blink()
+  if not lampSide then return os.pullEvent("never") end
+  while true do
+    local t = os.epoch("utc") % FLASH_EVERY
+    local on = t < FLASH_ON
+    rs.setOutput(lampSide, on)
+    local wait = on and (FLASH_ON - t) or (FLASH_EVERY - t)
+    os.sleep(math.max(0.05, wait / 1000))
+  end
+end
+
+parallel.waitForAny(host, blink)
+if lampSide then rs.setOutput(lampSide, false) end
