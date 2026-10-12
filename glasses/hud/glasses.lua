@@ -49,10 +49,12 @@ end
 
 -- Call safely; report errors instead of crashing.
 local function try(label, fn, ...)
-  if type(fn) ~= "function" then out(label .. ": not available"); return end
+  -- Always returns a value (nil on failure): tostring()/dump() with NO argument throws.
+  if type(fn) ~= "function" then out(label .. ": not available"); return nil end
   local ok, a, b = pcall(fn, ...)
   if ok then return a, b end
   out(label .. " ERROR: " .. tostring(a))
+  return nil
 end
 
 out("== Smart Glasses report ==")
