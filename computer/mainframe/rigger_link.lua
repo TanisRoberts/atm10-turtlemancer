@@ -17,9 +17,10 @@ local function saveCfg()
   local f = fs.open(CONFIG, "w"); f.write(textutils.serialize(cfg)); f.close()
 end
 
-local modem = peripheral.find("modem", function(_, m) return m.isWireless() end)
+-- Talk on every modem: wireless/ender for turtles and far machines, wired for computers on the same cable
+local modem
+peripheral.find("modem", function(name, m) rednet.open(name); modem = modem or m; return false end)
 if not modem then return os.pullEvent("never") end
-rednet.open(peripheral.getName(modem))
 
 local function sendCmd()
   rednet.broadcast({ type = "cmd", want = cfg.want, seq = cfg.seq }, PROTOCOL)

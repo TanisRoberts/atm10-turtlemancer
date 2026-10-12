@@ -2,9 +2,10 @@
 -- Keeps their status for alerts/chat and passes on orders from chat (island <name> rounds|survey|stop|go).
 
 local PROTOCOL = "tanis-farm"
-local modem = peripheral.find("modem", function(_, m) return m.isWireless() end)
+-- Talk on every modem: wireless/ender for turtles and far machines, wired for computers on the same cable
+local modem
+peripheral.find("modem", function(name, m) rednet.open(name); modem = modem or m; return false end)
 if not modem then return os.pullEvent("never") end
-rednet.open(peripheral.getName(modem))
 
 _G.FARM_STATUS = _G.FARM_STATUS or {}
 _G.FARM_SEEN = _G.FARM_SEEN or {}

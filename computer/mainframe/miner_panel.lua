@@ -42,7 +42,7 @@ end
 -- State
 ---------------------------------------------------------------------------
 local mon = peripheral.find("monitor")
-local modem = peripheral.find("modem", function(_, m) return m.isWireless() end)
+local modem = peripheral.find("modem") -- any modem; netLoop opens them all
 local status, lastSeen = nil, nil
 local sendNow = true
 
@@ -237,7 +237,7 @@ local function netLoop()
   if not modem then
     while true do draw(); os.sleep(5) end
   end
-  rednet.open(peripheral.getName(modem))
+  peripheral.find("modem", function(name) rednet.open(name); return false end)
   local lastSend = -100
   while true do
     local _, msg = rednet.receive(PROTOCOL, 1)

@@ -201,7 +201,7 @@ local function watch()
   -- The storage and smelter computers (heard via base_link)
   if _G.STORAGE_SEEN then
     condition("storageSilent", os.clock() - _G.STORAGE_SEEN > SILENT_AFTER,
-      "Lost contact with the storage computer. Is it running, with its wireless modem on?")
+      "Lost contact with the storage computer. Is it running, with its modem on?")
   end
   if _G.SMELTER_SEEN then
     condition("smelterSilent", os.clock() - _G.SMELTER_SEEN > SILENT_AFTER, "Lost contact with the smelter computer.")
