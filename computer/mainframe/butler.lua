@@ -35,7 +35,7 @@ local DEFAULTS = {
   { "AUTO_LOCK", "yes", "Lock the storage monitor while you're away (yes/no). /lock and /unlock on storage work either way." },
   { "POCKET_DUMP", "storage", "Where $dump goes: storage = storage's main input chest over the cable, or a side of the Inventory Manager (up/down/north/south/east/west) with its own chest." },
   { "POCKET_RESTOCK", "storage", "Where torch top-ups come from: storage = storage's restock chest (its output chest if none is set), or a side of the manager." },
-  { "HOTBAR_FIRST", 0, "Number of the first hotbar slot as the manager counts them. $pocket shows what it sees." },
+  { "HOTBAR_FIRST", 1, "Number of the first hotbar slot as the manager counts them (AP 0.8 in ATM10: 1). $pocket shows what it sees." },
   { "TORCH_ITEM", "minecraft:torch", "What to keep topped up." },
   { "TORCH_MIN", 10, "Top up when you're carrying fewer than this many (0 = off)." },
   { "TORCH_FILL", 64, "...back up to this many." },
