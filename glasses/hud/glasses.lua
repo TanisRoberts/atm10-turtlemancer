@@ -366,7 +366,8 @@ local function drawScreen()
     if diag.err then
       line1, line2 = "HUD error:", diag.err
     else
-      line1 = ("HUD at %s,%s (%s obj)"):format(num(diag.x), num(diag.y), num(n))
+      line1 = ("HUD at %s,%s (%s obj)%s"):format(num(diag.x), num(diag.y), num(n),
+        diag.equipped == false and " off" or "")
       line2 = ("Screen %sx%s /%s"):format(num(diag.w), num(diag.h), num(diag.scale))
     end
     at(2, H - 2, line1:sub(1, W - 2), colours.grey, colours.black)
@@ -388,10 +389,36 @@ readEnv()
 findHardware()
 call(overlay, "clear")   -- drop the HUD left over from before the reboot
 
+-- AP wipes every overlay object when the glasses come off (incl. opening the terminal with them
+-- in your hand). So: rebuild the HUD the moment they go back on, and check now and then that our
+-- object still exists.
+local wasEquipped = nil
+local function equipped()
+  if smartglasses and smartglasses.isEquipped then
+    local ok, v = pcall(smartglasses.isEquipped)
+    if ok then return v and true or false end
+  end
+  return true
+end
+
+local function hudAlive()
+  if not hudText or not overlay then return false end
+  local id = call(hudText, "getId")
+  if id == nil or type(overlay.getObject) ~= "function" then return true end   -- can't tell: assume fine
+  return call(overlay, "getObject", id) ~= nil
+end
+
 local ticks = 0
 local function tick()
   ticks = ticks + 1
-  if ticks % 30 == 0 then shown = {} end   -- now and then, check the HUD object still exists
+  local eq = equipped()
+  diag.equipped = eq
+  if eq and wasEquipped == false then
+    call(overlay, "clear"); hudText = nil; shown = {}   -- just put back on: start the HUD fresh
+  elseif hudText and ticks % 3 == 0 and not hudAlive() then
+    hudText = nil; shown = {}
+  end
+  wasEquipped = eq
   refreshEnv()
   apply(decide())
   drawHud()
