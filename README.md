@@ -38,7 +38,7 @@ and land on the device under their own names. Adding a role = adding its folder 
 - **Night vision** needs the Night Vision Module (it's on by default when fitted). Modes, switched on the glasses' screen (click, or 1 / 2 / 3; H toggles the HUD, Q stops):
   - **AUTO**: on when the light where you stand is `NV_DARK` (7) or less, or you're in the Deep Dark; off again at `NV_BRIGHT` (10) or more. In between it keeps doing what it was doing, so torch-lit edges don't flicker. Needs an **Environment Detector** in the glasses; without one AUTO just stays on.
   - **ON** / **OFF**: always / never. While the module is switched off, night vision potions don't work either (that's the module).
-- **HUD**: with an **Overlay Module**, a line in the top-left corner shows `NV AUTO: on` (green when on). Position: `HUD_X`, `HUD_Y`.
+- **HUD**: with an **Overlay Module**, a line in the top-right corner, under the potion effect icons, shows `NV AUTO: on` (green when on). Position: `HUD_CORNER` (top-right / top-left / bottom-right / bottom-left), `HUD_EDGE_X`, `HUD_EDGE_Y` (GUI pixels from the edges; it right-aligns itself to your screen size and GUI scale).
 - To change modes while wearing them, use a **Smart Glasses Interface** (right-click opens the worn glasses' screen), or take them off and right-click them.
 - Settings: `glasses.env`, made on first run, same rules as `butler.env` (edit live; your lines are never overwritten; the mode buttons rewrite the `NV_MODE` line).
 

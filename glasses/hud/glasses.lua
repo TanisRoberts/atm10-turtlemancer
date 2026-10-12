@@ -6,7 +6,8 @@
 --         and daytime don't get washed out. Without a detector, AUTO just keeps it on.
 --   ON    always on.        OFF   always off (night vision potions don't work either while off:
 --                                that's the module, not this script).
--- A small HUD line (Overlay Module) shows the mode and whether night vision is on right now.
+-- A small HUD line (Overlay Module) shows the mode and whether night vision is on right now, in the
+-- top-right corner under the potion effect icons (HUD_CORNER / HUD_EDGE_X / HUD_EDGE_Y).
 --
 -- Switch modes on the glasses' screen: click a button or press 1 / 2 / 3. H toggles the HUD,
 -- Q quits. Open the screen with the glasses in your hand (right-click), or while wearing them
@@ -24,8 +25,9 @@ local DEFAULTS = {
   { "NV_BRIGHT", 10, "AUTO: ...and goes off again at this light or higher (keep it above NV_DARK so it doesn't flicker)." },
   { "NV_DEEP_DARK", "yes", "AUTO: always on in the Deep Dark biome (yes/no)." },
   { "HUD", "yes", "Show the night vision line on your screen (yes/no). H on the glasses' screen toggles it." },
-  { "HUD_X", 4, "HUD position from the left of the screen, in GUI pixels." },
-  { "HUD_Y", 4, "HUD position from the top of the screen, in GUI pixels." },
+  { "HUD_CORNER", "top-right", "Where the HUD sits: top-right, top-left, bottom-right or bottom-left." },
+  { "HUD_EDGE_X", 4, "Gap from the left/right edge of the screen, in GUI pixels." },
+  { "HUD_EDGE_Y", 52, "Gap from the top/bottom edge, in GUI pixels. 52 clears both rows of potion effect icons in the top-right." },
   { "CHECK_EVERY", 1, "Seconds between light checks." },
 }
 
@@ -217,25 +219,63 @@ local function hideHud()
   if hudText then call(hudText, "setEnabled", false) end
 end
 
+-- Minecraft's default font: most characters are 6 GUI pixels wide (5 + 1 spacing). Used to
+-- right-align the HUD, since text objects only know left and centre.
+local NARROW = { ["i"] = 2, ["!"] = 2, ["."] = 2, [","] = 2, [":"] = 2, [";"] = 2, ["'"] = 2, ["|"] = 2,
+  ["l"] = 3, ["`"] = 3, ["I"] = 4, ["t"] = 4, ["["] = 4, ["]"] = 4, [" "] = 4,
+  ["f"] = 5, ["k"] = 5, ["<"] = 5, [">"] = 5, ["("] = 5, [")"] = 5, ["{"] = 5, ["}"] = 5, ["*"] = 5 }
+local function textWidth(str)
+  local w = 0
+  for ch in tostring(str):gmatch(".") do w = w + (NARROW[ch] or 6) end
+  return math.max(0, w - 1)   -- no spacing after the last character
+end
+
+-- Screen size in GUI pixels (the overlay reports the window in real pixels + the GUI scale)
+local function guiSize()
+  local ok, w, h, scale = pcall(overlay.getGuiSize)
+  if not ok or type(w) ~= "number" or w <= 0 then return nil end
+  scale = (type(scale) == "number" and scale > 0) and scale or 1
+  return w / scale, h / scale
+end
+
+local function hudPos(content)
+  local corner = tostring(E.HUD_CORNER):lower()
+  local right = corner:find("right", 1, true) ~= nil
+  local bottom = corner:find("bottom", 1, true) ~= nil
+  local gw, gh = guiSize()
+  local x, y = E.HUD_EDGE_X, E.HUD_EDGE_Y
+  if gw then
+    if right then x = gw - E.HUD_EDGE_X - textWidth(content) end
+    if bottom then y = gh - E.HUD_EDGE_Y - 9 end   -- text is 9 GUI pixels tall
+  end
+  return math.floor(x + 0.5), math.floor(y + 0.5)
+end
+
+local shown = {}   -- what the HUD object currently has, so it's only updated when something changes
+
 local function drawHud()
   if not overlay then hudText = nil; return end
-  if not yes("HUD") then hideHud(); return end
+  if not yes("HUD") then hideHud(); shown.enabled = false; return end
   local content, colour = hudContent(), hudColour()
+  local x, y = hudPos(content)
   if hudText then
     -- Object may have vanished (module pulled and put back): recreate if a setter fails
     local ok = pcall(function()
-      hudText.setEnabled(true)
-      hudText.setContent(content)
-      hudText.setColor(colour)
-      hudText.setPos(E.HUD_X, E.HUD_Y, 0)
+      if shown.enabled ~= true then hudText.setEnabled(true); shown.enabled = true end
+      if shown.content ~= content then hudText.setContent(content); shown.content = content end
+      if shown.colour ~= colour then hudText.setColor(colour); shown.colour = colour end
+      if shown.x ~= x or shown.y ~= y then hudText.setPos(x, y, 0); shown.x, shown.y = x, y end
     end)
     if ok then return end
     hudText = nil
   end
   local ok, obj = pcall(overlay.createText, {
-    gui = true, x = E.HUD_X, y = E.HUD_Y, content = content, color = colour, shadow = true,
+    gui = true, x = x, y = y, content = content, color = colour, shadow = true,
   })
-  if ok and type(obj) == "table" then hudText = obj end
+  if ok and type(obj) == "table" then
+    hudText = obj
+    shown = { enabled = true, content = content, colour = colour, x = x, y = y }
+  end
 end
 
 ---------------------------------------------------------------------------
@@ -324,7 +364,10 @@ readEnv()
 findHardware()
 call(overlay, "clear")   -- drop the HUD left over from before the reboot
 
+local ticks = 0
 local function tick()
+  ticks = ticks + 1
+  if ticks % 30 == 0 then shown = {} end   -- now and then, check the HUD object still exists
   refreshEnv()
   apply(decide())
   drawHud()
@@ -357,7 +400,8 @@ while true do
     end
   elseif e == "glasses_module" or e == "glasses_module_detach" or e == "peripheral" or e == "peripheral_detach" then
     findHardware()
-    act = function() end   -- drawHud recreates the HUD text if its object went away
+    shown = {}             -- resend everything: a failing setter means the HUD object went away
+    act = function() end   -- ...and drawHud recreates it
   elseif e == "term_resize" then
     W, H = term.getSize()
     act = function() end
