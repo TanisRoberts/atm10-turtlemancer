@@ -59,6 +59,7 @@ end
 local function nameOf(num) return ("Digger-%02d"):format(num) end
 
 local live = {}        -- id -> { s = last status, seen = os.clock() }
+local radioOK = nil    -- false = no ender/wireless modem on this computer: Diggers can't hear it
 local capped = {}      -- junk storage has plenty of (from the storage computer)
 local storageSeen = nil
 local sendNow = {}     -- id -> true: send its order on the next pass
@@ -152,6 +153,13 @@ local function digIds(showRetired)
     if (d.retired == true) == (showRetired == true) then out[#out + 1] = id end
   end
   table.sort(out, function(a, b) return cfg.diggers[a].num < cfg.diggers[b].num end)
+  if not showRetired then
+    -- Heard on the air but never asked for a number: running an old program
+    local odd = {}
+    for id in pairs(live) do if not cfg.diggers[id] then odd[#odd + 1] = id end end
+    table.sort(odd)
+    for _, id in ipairs(odd) do out[#out + 1] = id end
+  end
   return out
 end
 
@@ -227,6 +235,9 @@ local function say(text, colour) ui.notice = { text = text, colour = colour or K
 ---------------------------------------------------------------------------
 local function drawOverview(w, h)
   local ids = digIds(ui.showRetired)
+  if radioOK == false and not (ui.notice and os.clock() < ui.notice.untilT) then
+    ui.notice = { text = "No ender modem on me: Diggers can't hear me", colour = K.red, untilT = os.clock() + 1e9 }
+  end
   local active, retiredN = 0, 0
   for _, dd in pairs(cfg.diggers) do if dd.retired then retiredN = retiredN + 1 else active = active + 1 end end
   local storageTxt = storageSeen and (os.clock() - storageSeen < 30) and "storage ok" or "storage ?"
@@ -251,8 +262,9 @@ local function drawOverview(w, h)
   for i = 1, per do
     local id = ids[(ui.scroll - 1) * per + i]
     if not id then break end
-    local dd, l = cfg.diggers[id], live[id]
+    local l = live[id]
     local s = l and l.s
+    local dd = cfg.diggers[id] or { unknown = true, label = (s and s.label or "?") .. "?", num = 0 }
     local y = top + (i - 1) * rowH
     local name = dd.label or nameOf(dd.num)
     local st, colour = stateOf(id)
@@ -282,7 +294,9 @@ local function drawOverview(w, h)
         if s.dim and s.dim ~= "overworld" then where = where .. " " .. (DIMS[s.dim] or s.dim) end
       end
       local left
-      if stale then
+      if dd.unknown then
+        left = "No number: old program? Reboot it to update"
+      elseif stale then
         left = l and ("not heard for " .. fmtAgo(math.floor(os.clock() - l.seen))) or "never heard from"
       elseif s and s.state == "mining" and s.layer and s.layers then
         left = ("%s, layer %s/%s"):format(rangeText(s.minY, s.maxY), s.layer, s.layers)
@@ -293,7 +307,13 @@ local function drawOverview(w, h)
       at(4, y + 1, pad(left, roomL), stale and K.grey or K.lightGrey)
       if #where > 0 then at(w - #where, y + 1, where, K.grey) end
     end
-    hit(1, y, w, y + rowH - 1, function() ui.page, ui.id, ui.confirmRetire = "digger", id, nil end)
+    if dd.unknown then
+      hit(1, y, w, y + rowH - 1, function()
+        say((s and s.label or "It") .. ": old program. Hold Ctrl+R on it to update.", K.orange)
+      end)
+    else
+      hit(1, y, w, y + rowH - 1, function() ui.page, ui.id, ui.confirmRetire = "digger", id, nil end)
+    end
   end
 
   -- Footer: dock everyone, show retired, pages
@@ -488,7 +508,12 @@ end
 
 local function netLoop()
   local opened = 0
-  peripheral.find("modem", function(name) rednet.open(name); opened = opened + 1; return false end)
+  radioOK = false
+  peripheral.find("modem", function(name, m)
+    rednet.open(name); opened = opened + 1
+    if m.isWireless() then radioOK = true end
+    return false
+  end)
   if opened == 0 then
     say("No modem! I need an ender modem to reach the Diggers.", K.red)
     while true do draw(); os.sleep(5) end
