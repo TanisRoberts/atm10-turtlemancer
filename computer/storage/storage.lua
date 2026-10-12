@@ -16,7 +16,7 @@
 --   * Or use the computer's own screen: type in the search bar at the bottom and the list filters
 --     as you type; click an item (or press Enter for the top one) to send it. Qty / A-Z sorting,
 --     x1 / x16 / Stack buttons and paging (scroll wheel, arrow keys) work the same as on the monitor.
---   * Commands: type / in the search bar to see them (/setup /addinput /fuel /inputs /rescan /drawers)
+--   * Commands: type / in the search bar to see them (/setup /addinput /fuel /inputs /rescan /drawers /tidy)
 -- Junk (cobble, deepslate, ...) is capped at JUNK_CAP; the miner is told to stop bringing more.
 --
 -- Storage is the only computer that moves items in or out of storage. Over the network it:
@@ -404,6 +404,38 @@ local function depositFrom(input, skip)
   return movedTotal, leftTotal
 end
 
+-- Move everything sitting in barrels into the drawers that already hold that item.
+-- Returns { [item id] = moved }, and the items that didn't all fit (drawers full).
+local function tidyDrawers(progress)
+  local drawers, barrels = {}, {}
+  for _, n in ipairs(storage) do
+    if isDrawer(n) then drawers[#drawers + 1] = n else barrels[#barrels + 1] = n end
+  end
+  local moved, stuck = {}, {}
+  for bi, b in ipairs(barrels) do
+    if progress then progress(bi, #barrels) end
+    local touched = false
+    for slot, it in pairs(cache[b] or {}) do
+      local key, left = keyOf(it), it.count
+      for _, d in ipairs(drawers) do
+        if left <= 0 then break end
+        if holds(d, key) then
+          local m = call(b, "pushItems", d, slot, left) or 0
+          if m > 0 then
+            left = left - m
+            moved[it.name] = (moved[it.name] or 0) + m
+            touched = true
+            scanInv(d)
+          end
+        end
+      end
+      if left > 0 and left < it.count then stuck[it.name] = true end
+    end
+    if touched then scanInv(b) end
+  end
+  return moved, stuck
+end
+
 -- Turtle docks: storage takes everything except fuel, which stays for the turtle
 local DOCK_FUELS = { ["minecraft:coal"] = 80, ["minecraft:charcoal"] = 80, ["minecraft:coal_block"] = 800 }
 local DOCK_FUEL_UNITS = 2560  -- about 32 coal
@@ -599,6 +631,7 @@ local COMMANDS = {
   { "/inputs",   "show which chest is which" },
   { "/rescan",   "re-read every chest now" },
   { "/drawers",  "what storage sees in the drawers" },
+  { "/tidy",     "move barrel stock into its drawers" },
 }
 
 local mon
@@ -988,6 +1021,28 @@ function runCommand(cmd)
       end
       if not any then printError("No drawers or drawer controller found on the cable.") end
       print("Items held here get stored here first.")
+      waitEnter()
+    elseif found == "/tidy" then
+      print("Rescanning..."); scanAll()
+      local _, py = term.getCursorPos()
+      local moved, stuck = tidyDrawers(function(i, n)
+        term.setCursorPos(1, py); term.clearLine(); write(("Checking barrels %d/%d"):format(i, n))
+      end)
+      print()
+      buildItems()
+      local order, total = {}, 0
+      for name, c in pairs(moved) do order[#order + 1] = name; total = total + c end
+      table.sort(order, function(a, b) return moved[a] > moved[b] end)
+      if total == 0 then
+        print("Nothing to move: no barrel holds anything your drawers hold.")
+      else
+        print(("Moved %d items into the drawers:"):format(total))
+        for i = 1, math.min(8, #order) do print(("  %6d %s"):format(moved[order[i]], order[i])) end
+        if #order > 8 then print(("  ...and %d more kinds"):format(#order - 8)) end
+      end
+      local full = {}
+      for name in pairs(stuck) do full[#full + 1] = name end
+      if #full > 0 then printError("Drawer full, some left in barrels: " .. table.concat(full, ", ")) end
       waitEnter()
     elseif found == "/rescan" then
       print("Rescanning..."); scanAll(); buildItems()
