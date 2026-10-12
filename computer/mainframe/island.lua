@@ -3,6 +3,7 @@
 --
 -- Chat commands (start with $ to keep them out of public chat, e.g. "$island miner"):
 --   island status | scan | miner (every Digger) | storage | alerts | test | help
+-- ($dump and $pocket are the butler's: see butler.lua)
 -- "island alerts" subscribes you to private alerts: storage filling up, the miner going quiet,
 -- getting lost, running out of fuel, finishing, or bringing home diamonds. Alerts you miss
 -- while offline are replayed the next time you say anything in chat.
@@ -66,13 +67,16 @@ end
 -- Chat
 ---------------------------------------------------------------------------
 -- Chat box has a ~1s cooldown between messages. Returns true if the message went out.
-local lastSend = -10
+-- The cooldown is shared with butler.lua through _G.CHAT_LAST, so the two never trip it.
 local function say(msg, player)
   local chat = chatBox()
   if not chat then return false end
-  local wait = 1.1 - (os.clock() - lastSend)
-  if wait > 0 then os.sleep(wait) end
-  lastSend = os.clock()
+  while true do
+    local wait = 1.1 - (os.clock() - (_G.CHAT_LAST or -10))
+    if wait <= 0 then break end
+    os.sleep(math.max(wait, 0.05))
+  end
+  _G.CHAT_LAST = os.clock()
   -- AP 0.8+ (ATM10): sendMessage(msg, {options}); sendMessageToPlayer was merged into it.
   local opts = { prefix = PREFIX, brackets = "[]", bracketsColor = "&b" }
   if player then opts.player = player else opts.range = ALERT_RANGE end
@@ -426,7 +430,8 @@ end
 ---------------------------------------------------------------------------
 -- Chat commands
 ---------------------------------------------------------------------------
-local HELP = "Commands: island status | scan | miner | storage | rigger | tigger | figger | smelt | alerts | test"
+local HELP = "Commands: island status | scan | miner | storage | rigger | tigger | figger | smelt | alerts | test."
+  .. " Your inventory: $dump | $pocket"
 
 local function chatLoop()
   while true do

@@ -15,7 +15,7 @@ ComputerCraft (CC:Tweaked + Advanced Peripherals) scripts for Tanis's ATM10 isla
 
 | Type | Role | Runs | What it does |
 |---|---|---|---|
-| Computer | Mainframe | `mainframe` | Chat commands, alerts, island strip, status board for every machine |
+| Computer | Mainframe | `mainframe` | Chat commands, alerts, island strip, status board for every machine, the butler (`$dump`, torch top-ups, warnings, welcomes, visitors, storage lock) |
 | Computer | Storage | `storage` | Sorts input chests, touch screen, fuels the turtles, fills Rigger's barrel, does the smelter's item moves |
 | Computer | Smelter | `smelter` | Auto-smelting rules (`smelt.txt`); asks storage to move the items |
 | Computer | Foreman | `foreman` | Mining control: overview of every Digger, tap one for its layers / START / DOCK / position / retire; hands out Digger numbers |
@@ -33,7 +33,16 @@ on the device under their own names. Adding a role = adding its folder and one m
 - **Mainframe and storage** need a wireless or ender modem: they talk on the `tanis-base` network (the smelter can use the storage cable instead, see below).
 - **Storage:** a wired modem on the storage cable (barrels, drawers, input/output chests), its own monitor for the touch screen, then `/setup` with the marker items.
 - **Smelter:** just a wired modem on the **same** storage cable, with the furnaces on that cable too. No wireless modem needed: it talks to storage over the cable, and storage passes its news to the mainframe. Storage is the only computer that moves items, so they never fight.
-- **Mainframe:** Environment Detector, optional Chat Box, monitor wall (island strip + status board).
+- **Mainframe:** Environment Detector, optional Chat Box, monitor wall (island strip + status board, plus a visitor column when the wall is at least 50 characters wide). For the butler: an **Inventory Manager** with your bound Memory Card and a **Player Detector**, both touching the mainframe.
+- **Butler's pocket chests:** two chests touching the **Inventory Manager**, each with a wired modem on the **storage** cable. On storage, `/pocket` picks them (or `/setup` with 1 flint in the dump chest and 1 feather in the restock chest). Which sides of the manager they're on goes in `butler.env` (`POCKET_DUMP`, default up; `POCKET_RESTOCK`, default down).
+
+## The butler (mainframe)
+
+- `$dump`: everything except your hotbar goes to storage (armour and offhand stay). `$pocket`: what the manager sees, to check the hotbar slots (`HOTBAR_FIRST`).
+- Torches: under 10 on you, storage tops you back up to 64 (any item, any numbers: `TORCH_ITEM`, `TORCH_MIN`, `TORCH_FILL`).
+- Private warnings: inventory nearly full / full; armour or a tool at 15% and again at 5%.
+- Player Detector: "welcome home" (with who dropped by), guests greeted, a visitor column on the wall, and the **storage monitor locks** (big padlock, taps ignored) while you're away. The storage computer's own screen always works. `/lock` and `/unlock` on storage do it by hand. If the mainframe goes quiet for a minute, the auto-lock lets go.
+- Settings: `butler.env` on the mainframe, made on first run. Edit it live; deleted keys come back with their defaults, your lines are never overwritten. The Inventory Manager only works while you're online.
 - **Foreman:** advanced computer, **ender modem** (reaches Diggers anywhere), advanced monitor touching it (any size; the computer's own screen works too).
 - **GPS hosts (optional, recommended):** 4 computers with ender modems, high up and not all at one height. Diggers then check their position against GPS, notice if they've been carried somewhere, and find their own way back.
 - **Each Digger:** pickaxe + ender modem, a dump barrel (storage input) and a fuel barrel next to its dock. Storage `/fuel` adds each fuel barrel (or `/setup` with a lava bucket in each); storage keeps one refill in every one, but never takes its last stack of coal/charcoal (the smelter needs it).

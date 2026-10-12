@@ -31,6 +31,7 @@ local function rows()
     local pct = (s.total and s.total > 0) and math.floor(s.used / s.total * 100) or 0
     local detail = ("%d%% full, %d item types"):format(pct, s.kinds or 0)
     if s.inputStuck then detail = detail .. ", INPUT STUCK" end
+    if s.locked then detail = detail .. ", screen locked" end
     out[#out + 1] = { s.label or "Storage", s.paused and "setup" or (pct >= 90 and "waiting" or "ok"), detail, _G.STORAGE_SEEN }
   else
     out[#out + 1] = { "Storage", "?", "not heard from yet", nil }

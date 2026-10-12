@@ -24,11 +24,13 @@ return {
           name = "Mainframe",
           about = "Chat, alerts, island strip, status board",
           details = "The server. Chat commands and alerts (Chat Box), weather and nearby players "
-            .. "(Environment Detector), and a monitor wall showing every machine. Needs an ender or "
-            .. "wireless modem.",
+            .. "(Environment Detector), a monitor wall showing every machine, and the butler: $dump, "
+            .. "torch top-ups and warnings (Inventory Manager), welcomes, visitors and the storage "
+            .. "lock (Player Detector). Needs an ender or wireless modem.",
           run = "mainframe",
           files = { "computer/mainframe/mainframe.lua", "computer/mainframe/island.lua",
-                    "computer/mainframe/board.lua", "computer/mainframe/base_link.lua",
+                    "computer/mainframe/board.lua", "computer/mainframe/butler.lua",
+                    "computer/mainframe/base_link.lua",
                     "computer/mainframe/dig_link.lua", "computer/mainframe/rigger_link.lua",
                     "computer/mainframe/farm_link.lua" },
         },

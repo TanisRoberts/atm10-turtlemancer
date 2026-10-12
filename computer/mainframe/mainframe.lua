@@ -5,15 +5,18 @@
 -- optionally a Chat Box. Storage and smelting run on their own computers; the mainframe hears
 -- from them over the network (base_link.lua) and shows everything.
 --
--- Monitor wall layout:   [ island strip, 3 lines ]
---                        [ divider               ]
---                        [ status board: every machine ]
+-- Monitor wall layout:   [ island strip, 3 lines                  ]
+--                        [ divider                                ]
+--                        [ status board: every machine | visitors ]
+-- The visitor column only appears when the wall is wide enough (VISITOR_W + 30 characters).
+-- butler.lua (Inventory Manager + Player Detector) draws the visitor column.
 -- Only monitors touching the computer count; the biggest one is the wall.
 -- Mining control lives on its own computer now (the Foreman); dig_link just listens to the Diggers.
 -- Any program can be missing or crash; the others keep running.
 
 local STATION_LINES = 3
 local TEXT_SCALE    = 0.5
+local VISITOR_W     = 20   -- width of the visitor column right of the status board (0 = none)
 
 -- Find the monitors: the biggest one is the wall.
 -- Only monitors touching the computer count: screens out on the cable belong to other computers.
@@ -37,7 +40,7 @@ local function asMonitor(win)
   return setmetatable({ setTextScale = function() end }, { __index = win })
 end
 
-local stationTarget, boardTarget, offset
+local stationTarget, boardTarget, visitorTarget, offset
 if wallName then
   local mon = peripheral.wrap(wallName)
   mon.setTextScale(TEXT_SCALE)          -- set before making windows: they keep their size
@@ -47,7 +50,15 @@ if wallName then
   mon.setBackgroundColour(colours.grey); mon.clearLine()
   offset = STATION_LINES + 1
   stationTarget = asMonitor(window.create(mon, 1, 1, w, STATION_LINES))
-  boardTarget = asMonitor(window.create(mon, 1, offset + 1, w, h - offset))
+  local boardW = w
+  if VISITOR_W > 0 and w >= VISITOR_W + 30 then
+    boardW = w - VISITOR_W - 1
+    mon.setBackgroundColour(colours.grey)                 -- 1-column divider
+    for y = offset + 1, h do mon.setCursorPos(boardW + 1, y); mon.write(" ") end
+    mon.setBackgroundColour(colours.black)
+    visitorTarget = asMonitor(window.create(mon, boardW + 2, offset + 1, VISITOR_W, h - offset))
+  end
+  boardTarget = asMonitor(window.create(mon, 1, offset + 1, boardW, h - offset))
 else
   local w, h = term.getSize()
   stationTarget = asMonitor(window.create(term.current(), 1, 1, w, h, false)) -- hidden
@@ -104,11 +115,12 @@ local function runScript(path, env, label, target)
 end
 
 term.clear(); term.setCursorPos(1, 1)
-print("Mainframe running: island station, status board, links.")
+print("Mainframe running: island station, status board, butler, links.")
 print("Reboot (hold Ctrl+R) to update. Type reset to give this computer a new role.")
 parallel.waitForAll(
   runScript("island.lua",       sandbox(stationTarget, true, nil),                 "Island station", wallName and stationTarget),
   runScript("board.lua",        sandbox(boardTarget, true, nil),                   "Status board",   wallName and boardTarget),
+  runScript("butler.lua",       sandbox(visitorTarget, true, nil),                 "Butler",         wallName and visitorTarget),
   runScript("base_link.lua",    sandbox(nil, true, nil),                           "Base link",      nil),
   runScript("dig_link.lua",     sandbox(nil, true, nil),                           "Digger link",    nil),
   runScript("rigger_link.lua",  sandbox(nil, true, nil),                           "Rigger link",    nil),

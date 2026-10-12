@@ -16,13 +16,19 @@
 --   * Or use the computer's own screen: type in the search bar at the bottom and the list filters
 --     as you type; click an item (or press Enter for the top one) to send it. Qty / A-Z sorting,
 --     x1 / x16 / Stack buttons and paging (scroll wheel, arrow keys) work the same as on the monitor.
---   * Commands: type / in the search bar to see them (/setup /addinput /fuel /inputs /rescan /drawers /tidy /fuelinfo)
+--   * Commands: type / in the search bar to see them
+--     (/setup /addinput /fuel /pocket /inputs /rescan /drawers /tidy /fuelinfo /lock /unlock)
 -- Junk (cobble, deepslate, ...) is capped at JUNK_CAP; the miner is told to stop bringing more.
 --
 -- Storage is the only computer that moves items in or out of storage. Over the network it:
 --   * broadcasts its status (fill level, item totals, junk caps) for the mainframe and smelter
 --   * fills Rigger's supply barrel when he asks, and keeps each Digger fuel barrel at one refill
 --   * carries out the smelter's moves (furnace output back to storage, inputs and fuel in)
+--   * the mainframe's butler: empties the POCKET DUMP chest ($dump) and fills the POCKET RESTOCK chest
+--     (torch top-ups). Both chests touch the mainframe's Inventory Manager and sit on this cable.
+--
+-- Screen lock: the monitor shows a big padlock (and ignores taps) while the butler says you're away
+-- from the island, or after /lock. The computer's own screen always works. /unlock lifts a /lock.
 --
 -- Drawers (Functional Storage / Storage Drawers) are bulk storage: an item a drawer already
 -- holds always goes there first, and empty drawers are only used when every barrel is full.
@@ -37,6 +43,7 @@ local JUNK_CAP     = 20 * 64 -- items of one kind before the miner stops bringin
 local REFILL       = 20000   -- fuel units in one turtle refill (updated live from the miner's tank size)
 local BASE         = "tanis-base"   -- network protocol shared by the base computers
 local STATUS_EVERY = 3              -- seconds between status broadcasts
+local PRESENCE_STALE = 60           -- seconds without news from the butler before auto-lock lets go
 
 -- Fuel value per item, best first. Used to keep the fuel barrel at exactly one refill.
 local FUEL_VALUES = {
@@ -95,7 +102,7 @@ local function listAdd(list, n)
 end
 
 local function isSpecial(n)
-  if n == cfg.output or n == cfg.rigger then return true end
+  if n == cfg.output or n == cfg.rigger or n == cfg.pocketIn or n == cfg.pocketOut then return true end
   for _, d in ipairs(cfg.docks or {}) do if d == n then return true end end
   for _, d in ipairs(cfg.fuels) do if d == n then return true end end
   if isMachine(n) then return true end
@@ -178,6 +185,8 @@ local MARKERS = {
   { key = "fuel",   item = "minecraft:lava_bucket", what = "1 lava bucket", label = "DIGGER FUEL", many = true },
   { key = "rigger", item = "minecraft:brick",       what = "1 brick",       label = "RIGGER SUPPLY" },
   { key = "docks",  item = "minecraft:coal",        what = "1 coal",        label = "TURTLE DOCK", many = true },
+  { key = "pocketIn",  item = "minecraft:flint",   what = "1 flint",       label = "POCKET DUMP",    keep = true },
+  { key = "pocketOut", item = "minecraft:feather", what = "1 feather",     label = "POCKET RESTOCK", keep = true },
 }
 
 local function markerScan()
@@ -224,6 +233,7 @@ local function setup()
         print(("  %-11s %s"):format(m.label, list[1]))
       elseif #list == 0 then
         if m.need then printError("  " .. m.label .. ": not found"); ok = false
+        elseif m.keep and cfg[m.key] then print(("  %-11s kept: %s"):format(m.label, cfg[m.key]))
         else print(("  %-11s none (skipped)"):format(m.label)) end
       else
         printError(("  %s: %d chests have it. Keep it in one."):format(m.label, #list)); ok = false
@@ -240,6 +250,8 @@ local function setup()
       end
       cfg.rigger = f.rigger and f.rigger[1] or nil
       cfg.docks = f.docks or {}
+      cfg.pocketIn = f.pocketIn and f.pocketIn[1] or cfg.pocketIn     -- no marker: keep the old one
+      cfg.pocketOut = f.pocketOut and f.pocketOut[1] or cfg.pocketOut
       saveCfg()
       break
     end
@@ -249,6 +261,7 @@ local function setup()
   print("Saved. Sorting is back on.")
   print("Stick and cobble get sorted away; the dirt stays in")
   print("the output; leave the lava bucket and dock coal, they're fuel.")
+  print("The flint gets sorted away; the feather can stay.")
   os.sleep(3)
 end
 
@@ -554,6 +567,11 @@ local function deposit()
     moved = moved + m
     if left > 0 then stuck = true end
   end
+  if cfg.pocketIn then                -- the butler's $dump lands here
+    local m, left = depositFrom(cfg.pocketIn)
+    moved = moved + m
+    if left > 0 then stuck = true end
+  end
   inputStuck = stuck
   return moved
 end
@@ -725,6 +743,45 @@ local function supplyRigger()
   return true
 end
 
+-- The butler's restock: make the POCKET RESTOCK chest hold `count` of an item (counting what's
+-- already in it), then tell it how many are waiting there. It pulls them into your inventory.
+local pocketReq, lastPocketSeq = nil, nil
+local function fillPocket()
+  local req = pocketReq
+  if not req or req.seq == lastPocketSeq then return false end
+  lastPocketSeq = req.seq
+  local item = tostring(req.item)
+  local want = math.max(0, math.min(tonumber(req.count) or 0, 27 * 64))
+  local have = 0
+  if cfg.pocketOut then
+    for _, it in pairs(call(cfg.pocketOut, "list") or {}) do
+      if it.name == item then have = have + it.count end
+    end
+    if have < want and (byName[item] or 0) > 0 then
+      local moved = retrieve(item, math.min(want - have, byName[item]), cfg.pocketOut)
+      have = have + moved
+    end
+  end
+  if rednet.isOpen() then
+    rednet.broadcast({ type = "pocket_filled", seq = req.seq, item = item, got = math.min(have, want),
+      ready = cfg.pocketOut ~= nil }, BASE)
+  end
+  return true
+end
+
+---------------------------------------------------------------------------
+-- Screen lock (the monitor only)
+---------------------------------------------------------------------------
+local presence = nil   -- latest news from the butler: { known, home, autoLock, at }
+local function isLocked()
+  if cfg.manualLock then return true, "manual" end
+  local p = presence
+  if p and p.known and p.autoLock and p.home == false and os.clock() - p.at < PRESENCE_STALE then
+    return true, "away"
+  end
+  return false
+end
+
 ---------------------------------------------------------------------------
 -- Screens: the monitor wall and the computer's own screen share one item-list design.
 -- Each screen ("view") has its own search, page and buttons.
@@ -742,6 +799,9 @@ local COMMANDS = {
   { "/drawers",  "what storage sees in the drawers" },
   { "/tidy",     "fill big drawers first; barrels in" },
   { "/fuelinfo", "Digger fuel barrels and fuel stock" },
+  { "/pocket",   "pick the butler's dump + restock chests" },
+  { "/lock",     "lock the monitor (padlock screen)" },
+  { "/unlock",   "lift a /lock" },
 }
 
 local mon
@@ -759,7 +819,7 @@ local function findMonitor()
     end
   end
   monView.dev, monView.touch, monView.hits = mon, mon and mon.isColour() or false, {}
-  if mon then mon.setTextScale(TEXT_SCALE) end
+  -- No setTextScale here: changing it fires monitor_resize, which calls this again. draw() sets it.
 end
 findMonitor()
 local termView = { dev = term, kind = "term", touch = term.isColour(), filter = "", page = 1, hits = {} }
@@ -843,6 +903,7 @@ local function drawView(v)
   local right = ("%d items  %d/%d slots  %d%% "):format(stats.kinds, stats.used, stats.total, pct)
   if #cfg.fuels > 0 then right = ("Fuel %d%%  "):format(math.floor(fuelUnits / (minerFuelLimit or REFILL) * 100)) .. right end
   if #right > w - 9 then right = ("%d/%d slots %d%% "):format(stats.used, stats.total, pct) end
+  if isTerm and isLocked() and #right + 9 <= w - 9 then right = "MONITOR LOCKED  " .. right end
   d.setTextColour(pct >= 90 and C.warn or C.dim)
   d.setCursorPos(math.max(1, w - #right + 1), 1); d.write(right)
 
@@ -951,10 +1012,61 @@ local function drawView(v)
   end
 end
 
+-- The padlock. Drawn at the biggest text scale it fits (worked out from the current size, so the
+-- scale is only set once per lock: every scale change fires a monitor_resize).
+local LOCK_ART = {
+  "   .-----.   ",
+  "  / .---. \\  ",
+  "  | |   | |  ",
+  "  | |   | |  ",
+  ".-'-'---'-'-.",
+  "|           |",
+  "|    .-.    |",
+  "|    '-'    |",
+  "|     |     |",
+  "|     |     |",
+  "'-----------'",
+}
+local LOCK_W, LOCK_H = 13, #LOCK_ART + 4
+
+local function drawLock(d, why)
+  local cur = d.getTextScale and d.getTextScale() or TEXT_SCALE
+  local w, h = d.getSize()
+  local scale = 0.5
+  for _, sc in ipairs({ 3, 2.5, 2, 1.5, 1, 0.5 }) do
+    if math.floor(w * cur / sc) >= LOCK_W + 2 and math.floor(h * cur / sc) >= LOCK_H + 1 then scale = sc; break end
+  end
+  if scale ~= cur then d.setTextScale(scale) end
+  w, h = d.getSize()
+  monView.hits = {}
+  d.setCursorBlink(false)
+  d.setBackgroundColour(colours.black); d.clear()
+  local function centre(y, text, colour)
+    if y < 1 or y > h then return end
+    d.setCursorPos(math.max(1, math.floor((w - #text) / 2) + 1), y)
+    d.setTextColour(colour); d.write(text)
+  end
+  if h < LOCK_H or w < LOCK_W then           -- tiny monitor: just the word
+    centre(math.floor(h / 2) + 1, "LOCKED", colours.red)
+    return
+  end
+  local top = math.floor((h - LOCK_H) / 2) + 1
+  local x = math.floor((w - LOCK_W) / 2) + 1
+  for i, line in ipairs(LOCK_ART) do
+    d.setCursorPos(x, top + i - 1)
+    d.setTextColour(i <= 4 and colours.lightGrey or colours.yellow)
+    d.write(line)
+  end
+  centre(top + #LOCK_ART + 1, "L O C K E D", colours.red)
+  centre(top + #LOCK_ART + 3, why == "manual" and "locked from the computer" or "owner away", colours.grey)
+end
+
 local function draw()
   -- A broken screen must never stop the sorting, so each one is drawn on its own
   if mon then
-    local ok = pcall(drawView, monView)
+    local locked, why = isLocked()
+    local ok
+    if locked then ok = pcall(drawLock, mon, why) else ok = pcall(drawView, monView) end
     if not ok then findMonitor() end
   end
   if not uiBusy then
@@ -982,6 +1094,7 @@ local function statusMsg()
     fuelTarget = #cfg.fuels > 0 and (minerFuelLimit or REFILL) or nil,
     fuelBarrels = #cfg.fuels,
     fuelAvailable = avail, overcap = overCapList, items = byName, paused = paused,
+    locked = (isLocked()), pocketDump = cfg.pocketIn ~= nil, pocketRestock = cfg.pocketOut ~= nil,
   }
 end
 
@@ -992,7 +1105,8 @@ end
 
 -- Wait for the next tick, waking early when the network hands us work
 local function waitTick()
-  if not paused and (#jobs > 0 or (riggerReq and riggerReq.seq ~= lastRiggerSeq)) then return end
+  if not paused and (#jobs > 0 or (riggerReq and riggerReq.seq ~= lastRiggerSeq)
+    or (pocketReq and pocketReq.seq ~= lastPocketSeq)) then return end
   local t = os.startTimer(TICK)
   while true do
     local e, id = os.pullEvent()
@@ -1016,6 +1130,7 @@ local function workerLoop()
       if topUpFuel() then buildItems() end
       if topUpDocks() then buildItems() end
       if supplyRigger() then buildItems() end
+      if fillPocket() then buildItems() end
       if #jobs > 0 then
         while #jobs > 0 do
           local j = table.remove(jobs, 1)
@@ -1122,6 +1237,13 @@ local function netLoop()
       elseif proto == "tanis-rigger" and msg.type == "need" then
         riggerReq = msg
         os.queueEvent("storage_work")
+      elseif proto == BASE and msg.type == "pocket_fill" and msg.seq then
+        pocketReq = msg
+        os.queueEvent("storage_work")
+      elseif proto == BASE and msg.type == "presence" then
+        local was = isLocked()
+        presence = { known = msg.known == true, home = msg.home, autoLock = msg.autoLock ~= false, at = os.clock() }
+        if isLocked() ~= was then os.queueEvent("storage_work") end   -- redraw now, not next tick
       elseif proto == BASE and msg.type == "smelt_ops" and type(msg.ops) == "table" then
         jobs[#jobs + 1] = { from = from, id = msg.id, ops = msg.ops }
         os.queueEvent("storage_work")
@@ -1151,7 +1273,7 @@ local function touchLoop()
   while true do
     local e, side, x, y = os.pullEvent()
     if e == "monitor_touch" then
-      if monView.touch and mon and side == peripheral.getName(mon) and clickIn(monView, x, y) then draw() end
+      if monView.touch and mon and not isLocked() and side == peripheral.getName(mon) and clickIn(monView, x, y) then draw() end
     elseif e == "peripheral" or e == "peripheral_detach" or e == "monitor_resize" then
       findMonitor(); draw()
     end
@@ -1282,12 +1404,36 @@ function runCommand(cmd)
         cfg.fuels[#cfg.fuels + 1] = n; saveCfg(); scanAll(); buildItems()
         say(termView, ("Fuel barrel added (%d now). I'll keep one refill in each."):format(#cfg.fuels))
       end
+    elseif found == "/lock" then
+      cfg.manualLock = true; saveCfg()
+      say(termView, "Monitor locked. /unlock to open it again.", C.warn)
+    elseif found == "/unlock" then
+      cfg.manualLock = false; saveCfg()
+      if isLocked() then
+        say(termView, "Unlocked, but the butler says you're away so it stays locked (AUTO_LOCK).", C.warn)
+      else
+        say(termView, "Monitor unlocked.")
+      end
+    elseif found == "/pocket" then
+      print("The butler's pocket chests: two chests touching the")
+      print("mainframe's Inventory Manager, each with a wired modem")
+      print("on this storage cable.")
+      local function free(n) return not isSpecial(n) or n == cfg.pocketIn or n == cfg.pocketOut end
+      local a = pickChest("POCKET DUMP chest ($dump sends your stuff here)")
+      if not free(a) then printError("That one's already in use."); waitEnter(); return end
+      local b = pickChest("POCKET RESTOCK chest (torch top-ups wait here)")
+      if not free(b) then printError("That one's already in use."); waitEnter(); return end
+      if a == b then printError("That's the same chest twice. Use two."); waitEnter(); return end
+      cfg.pocketIn, cfg.pocketOut = a, b
+      saveCfg(); scanAll(); buildItems()
+      say(termView, "Pocket chests set. Take the test items back out of the restock chest.")
     elseif found == "/inputs" then
       for i, n in ipairs(cfg.inputs) do print(i .. "  " .. n) end
       print("Output: " .. tostring(cfg.output))
       print("Fuel:   " .. (#cfg.fuels > 0 and table.concat(cfg.fuels, ", ") or "not set"))
       print("Rigger: " .. tostring(cfg.rigger or "not set"))
       print("Docks:  " .. (#(cfg.docks or {}) > 0 and table.concat(cfg.docks, ", ") or "none"))
+      print("Pocket: dump " .. tostring(cfg.pocketIn or "not set") .. ", restock " .. tostring(cfg.pocketOut or "not set"))
       local dn = 0
       for _, n in ipairs(storage) do if isDrawer(n) then dn = dn + 1 end end
       print(("Drawers: %d (filled first for items they hold)"):format(dn))
