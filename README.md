@@ -5,7 +5,7 @@ ComputerCraft (CC:Tweaked + Advanced Peripherals) scripts for Tanis's ATM10 isla
 ## Setting up any device
 
 1. Drag `startup.lua` onto the computer or turtle (or `wget https://raw.githubusercontent.com/TanisRoberts/atm10-turtlemancer/main/startup.lua startup.lua`).
-2. Reboot (hold Ctrl+R). Setup asks: turtle or computer, which role, and a label.
+2. Reboot (hold Ctrl+R). Setup asks: turtle or computer, which role (click, or arrows + Enter; each role is described underneath), and a label. Diggers skip the label: the Foreman numbers them.
 3. It reboots, downloads that role's files and starts.
 
 **Updating:** reboot. Every boot pulls the device's latest files from `main` (raw GitHub links can cache ~5 min after a push).
@@ -15,10 +15,12 @@ ComputerCraft (CC:Tweaked + Advanced Peripherals) scripts for Tanis's ATM10 isla
 
 | Type | Role | Runs | What it does |
 |---|---|---|---|
-| Computer | Mainframe | `mainframe` | Chat commands, alerts, island strip, status board for every machine, miner panel |
+| Computer | Mainframe | `mainframe` | Chat commands, alerts, island strip, status board for every machine |
 | Computer | Storage | `storage` | Sorts input chests, touch screen, fuels the turtles, fills Rigger's barrel, does the smelter's item moves |
 | Computer | Smelter | `smelter` | Auto-smelting rules (`smelt.txt`); asks storage to move the items |
-| Turtle | Digger | `miner` | Shaft + expanding-square mining (`junk.txt`) |
+| Computer | Foreman | `foreman` | Mining control: overview of every Digger, tap one for its layers / START / DOCK / position / retire; hands out Digger numbers |
+| Computer | GPS host | `gps_host` | One of 4 GPS towers so turtles know their exact X/Y/Z |
+| Turtle | Digger | `miner` | Shaft + expanding-square mining (`junk.txt`); numbered Digger-01, -02... by the Foreman; reports its exact position |
 | Turtle | Rigger | `rigger` | Builds from a plan file (`mossy.plan`) |
 | Turtle | Tigger | `lumberjack` | Tree farm |
 | Turtle | Figger | `farmer` | Crop farm |
@@ -31,7 +33,17 @@ on the device under their own names. Adding a role = adding its folder and one m
 - **Mainframe and storage** need a wireless or ender modem: they talk on the `tanis-base` network (the smelter can use the storage cable instead, see below).
 - **Storage:** a wired modem on the storage cable (barrels, drawers, input/output chests), its own monitor for the touch screen, then `/setup` with the marker items.
 - **Smelter:** just a wired modem on the **same** storage cable, with the furnaces on that cable too. No wireless modem needed: it talks to storage over the cable, and storage passes its news to the mainframe. Storage is the only computer that moves items, so they never fight.
-- **Mainframe:** Environment Detector, optional Chat Box, monitor wall (island strip + status board), miner panel monitor.
+- **Mainframe:** Environment Detector, optional Chat Box, monitor wall (island strip + status board).
+- **Foreman:** advanced computer, **ender modem** (reaches Diggers anywhere), advanced monitor touching it (any size; the computer's own screen works too).
+- **GPS hosts (optional, recommended):** 4 computers with ender modems, high up and not all at one height. Diggers then check their position against GPS, notice if they've been carried somewhere, and find their own way back.
+- **Each Digger:** pickaxe + ender modem, a dump barrel (storage input) and a fuel barrel next to its dock. Storage `/fuel` adds each fuel barrel (or `/setup` with a lava bucket in each); storage keeps one refill in every one, but never takes its last stack of coal/charcoal (the smelter needs it).
+
+## Diggers and the Foreman
+
+- **Numbers:** a new Digger asks the Foreman for one when it first starts (Digger-01, -02...). It keeps it when moved or reset. **Retire** (tap twice on its page) docks it for good; its number is never handed out again.
+- **Position:** set up at its dock, it learns X/Y/Z (from GPS, or typed in), which way it faces and the dimension, and reports where it is all the time.
+- **Carried off?** With GPS it notices on restart, works out which way it faces by stepping once, and waits. Press START or DOCK on its Foreman page: it digs down to Y 0, tunnels under everything to its shaft and comes up. Put it down outside, not on a floor you care about. Without GPS it counts its moves, so carry it back to its dock instead.
+- **Older Diggers** fill in their dock's X/Z and facing by themselves on the first boot with GPS, or ask once on their screen without it.
 
 ## Safety
 

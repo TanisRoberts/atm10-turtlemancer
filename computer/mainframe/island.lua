@@ -2,7 +2,7 @@
 -- Needs an Environment Detector next to the computer. Optional: a Chat Box and a monitor.
 --
 -- Chat commands (start with $ to keep them out of public chat, e.g. "$island miner"):
---   island status | scan | miner | storage | alerts | test | help
+--   island status | scan | miner (every Digger) | storage | alerts | test | help
 -- "island alerts" subscribes you to private alerts: storage filling up, the miner going quiet,
 -- getting lost, running out of fuel, finishing, or bringing home diamonds. Alerts you miss
 -- while offline are replayed the next time you say anything in chat.
@@ -135,13 +135,24 @@ end
 
 local function minerName(m) return (m and m.label) or "The miner" end
 
-local function minerLine(m)
-  if not m then return "No miner has checked in yet." end
-  local ago = _G.MINER_SEEN and math.floor(os.clock() - _G.MINER_SEEN) or 0
+-- Every Digger the mainframe has heard (dig_link), sorted by number, retired ones left out
+local function diggers()
+  local out = {}
+  for id, e in pairs(_G.DIGGERS or {}) do
+    if e.s.state ~= "retired" then out[#out + 1] = { id = id, s = e.s, seen = e.seen } end
+  end
+  table.sort(out, function(a, b) return (a.s.num or 999) < (b.s.num or 999) end)
+  return out
+end
+
+local function minerLine(e)
+  local m = e.s
+  local ago = math.floor(os.clock() - e.seen)
   local function v(x) return x == nil and "-" or tostring(x) end
-  return ("%s: %s%s. Y %s, layer %s/%s, ring %s/%s. Fuel %s, cargo %s/16. Seen %ds ago."):format(
+  local at = m.pos and (" At %d %d %d."):format(m.pos.x, m.pos.y, m.pos.z) or ""
+  return ("%s: %s%s. Y %s, layer %s/%s, ring %s/%s. Fuel %s, cargo %s/16.%s Seen %ds ago."):format(
     minerName(m), v(m.state):upper(), (m.msg and m.msg ~= "") and (" (" .. m.msg .. ")") or "",
-    v(m.y), v(m.layer), v(m.layers), v(m.ring), v(m.maxRing), v(m.fuel), v(m.slots), ago)
+    v(m.y), v(m.layer), v(m.layers), v(m.ring), v(m.maxRing), v(m.fuel), v(m.slots), at, ago)
 end
 
 local function storageLine(s)
@@ -181,7 +192,7 @@ local function farmLine(st)
   return ("%s %s Fuel %s. Seen %ds ago."):format(head, body, tostring(st.fuel), ago)
 end
 
-local lastHaul = nil
+local lastHaul = {}   -- per Digger
 local function watch()
   local s = _G.STORAGE_STATS
   if s and s.total and s.total > 0 then
@@ -194,7 +205,7 @@ local function watch()
     condition("inputStuck", s.inputStuck == true, "Storage is full: items are piling up in the input chests.")
     if s.fuelTarget then
       condition("fuelDry", (s.fuelUnits or 0) < s.fuelTarget * 0.25 and (s.fuelAvailable or 0) == 0,
-        "The miner's fuel barrel is running dry and storage has no coal or lava buckets left.")
+        "A Digger fuel barrel is running dry and storage has no coal or lava buckets left.")
     end
   end
 
@@ -207,37 +218,39 @@ local function watch()
     condition("smelterSilent", os.clock() - _G.SMELTER_SEEN > SILENT_AFTER, "Lost contact with the smelter computer.")
   end
 
-  local m = _G.MINER_STATUS
-  if m then
+  for _, e in ipairs(diggers()) do
+    local m, k = e.s, tostring(e.id)
     local name = minerName(m)
-    local ago = _G.MINER_SEEN and (os.clock() - _G.MINER_SEEN) or 0
-    condition("minerSilent", ago > SILENT_AFTER,
+    local ago = os.clock() - e.seen
+    condition("minerSilent:" .. k, ago > SILENT_AFTER,
       ("Lost contact with %s (last seen at Y %s, %s)."):format(name, tostring(m.y), tostring(m.state)))
-    condition("minerLost", m.state == "lost",
-      name .. " lost track of which way he's facing. Carry him to the dock and press Enter on him.")
-    condition("minerError", m.state == "error", name .. " hit a problem: " .. tostring(m.msg))
-    condition("minerFuel", m.state == "waiting" and tostring(m.msg):find("fuel") ~= nil,
+    condition("minerLost:" .. k, m.state == "lost",
+      name .. (m.gps and (" is stuck: " .. tostring(m.msg)) or " lost track of which way he's facing. Carry him to the dock and press Enter on him."))
+    condition("minerError:" .. k, m.state == "error", name .. " hit a problem: " .. tostring(m.msg))
+    condition("minerFuel:" .. k, m.state == "waiting" and tostring(m.msg):find("fuel") ~= nil,
       name .. " is waiting at the dock for fuel.")
-    condition("minerDump", m.state == "waiting" and tostring(m.msg):find("Dump") ~= nil,
+    condition("minerDump:" .. k, m.state == "waiting" and tostring(m.msg):find("Dump") ~= nil,
       name .. "'s dump barrel is full. Is storage running?")
-    condition("minerDone", m.done == true and m.state == "docked",
-      name .. " finished the range and is docked. Pick a new one on the panel.")
+    condition("minerMoved:" .. k, m.offPath == true and m.state == "waiting",
+      name .. " was moved by hand. Press START or DOCK for him on the Foreman to send him home.")
+    condition("minerDone:" .. k, m.done == true and m.state == "docked",
+      name .. " finished the range and is docked. Pick a new one on the Foreman.")
 
     -- Valuables in a fresh haul
     local parts = {}
-    for _, e in ipairs(m.haul or {}) do parts[#parts + 1] = tostring(e[1]) .. "=" .. tostring(e[2]) end
+    for _, h in ipairs(m.haul or {}) do parts[#parts + 1] = tostring(h[1]) .. "=" .. tostring(h[2]) end
     local sig = table.concat(parts, ",")
-    if sig ~= lastHaul then
-      if lastHaul ~= nil and sig ~= "" then
+    if sig ~= lastHaul[k] then
+      if lastHaul[k] ~= nil and sig ~= "" then
         local found = {}
-        for _, e in ipairs(m.haul or {}) do
+        for _, h in ipairs(m.haul or {}) do
           for _, v in ipairs(VALUABLE) do
-            if tostring(e[1]):find(v) then found[#found + 1] = e[2] .. "x " .. pretty(e[1]); break end
+            if tostring(h[1]):find(v) then found[#found + 1] = h[2] .. "x " .. pretty(h[1]); break end
           end
         end
         if #found > 0 then notify(name .. " brought home " .. table.concat(found, ", ") .. "!") end
       end
-      lastHaul = sig
+      lastHaul[k] = sig
     end
   end
 
@@ -448,8 +461,10 @@ local function chatLoop()
           names[#names + 1] = ("%s %.0fm"):format(state.near[i].name, state.near[i].d)
         end
         say(#names > 0 and table.concat(names, ", ") or "Nothing nearby.", user)
-      elseif cmd == "miner" then
-        say(minerLine(_G.MINER_STATUS), user)
+      elseif cmd == "miner" or cmd == "diggers" or cmd == "digger" then
+        local list = diggers()
+        if #list == 0 then say("No Digger has checked in yet.", user) end
+        for _, e in ipairs(list) do say(minerLine(e), user) end
       elseif cmd == "storage" then
         say(storageLine(_G.STORAGE_STATS), user)
       elseif (_G.FARM_STATUS and _G.FARM_STATUS[cmd]) or cmd == "tigger" or cmd == "figger" then

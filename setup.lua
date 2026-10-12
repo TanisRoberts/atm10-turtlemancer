@@ -1,11 +1,21 @@
 -- setup.lua  --  first-time setup for a device. Run by startup.lua when the device has no role.
 -- Asks turtle or computer, then which role, then a label. Saves device.cfg and reboots;
 -- startup.lua then downloads that role's files.
+--
+-- Advanced computers/turtles: click an option (click again or "Next" to go on).
+-- Keyboard works everywhere: arrows to move, Enter to pick, Backspace on a menu to go back.
 
 local REPO = "https://raw.githubusercontent.com/TanisRoberts/atm10-turtlemancer/main/"
 local CFG  = "device.cfg"
 
-local function colour(c) if term.isColour() then term.setTextColour(c) end end
+local W, H = term.getSize()
+local COLOUR = term.isColour()
+local K = {
+  bg = colours.black, bar = colours.grey, title = colours.cyan, text = colours.white,
+  dim = colours.lightGrey, faint = colours.grey, pick = colours.cyan, pickText = colours.black,
+  guess = colours.lime, warn = colours.orange, good = colours.lime,
+}
+if not COLOUR then for k in pairs(K) do K[k] = (k == "bg" or k == "pickText") and colours.black or colours.white end end
 
 local function fetchManifest()
   if not http then return nil, "HTTP is turned off on this server" end
@@ -20,31 +30,164 @@ local function fetchManifest()
   return m
 end
 
--- Numbered menu. options = { { key, title, about }, ... }. Enter picks the default.
-local function menu(title, options, default)
+---------------------------------------------------------------------------
+-- Drawing helpers
+---------------------------------------------------------------------------
+local hits = {}
+local function at(x, y, s, fg, bg)
+  term.setCursorPos(x, y)
+  term.setBackgroundColour(bg or K.bg); term.setTextColour(fg or K.text)
+  term.write(s)
+end
+local function fill(y, bg) at(1, y, (" "):rep(W), K.text, bg) end
+local function wrap(text, width)
+  local lines, line = {}, ""
+  for word in tostring(text or ""):gmatch("%S+") do
+    if #line == 0 then line = word
+    elseif #line + 1 + #word <= width then line = line .. " " .. word
+    else lines[#lines + 1] = line; line = word end
+  end
+  if #line > 0 then lines[#lines + 1] = line end
+  return lines
+end
+local function button(x, y, label, bg, action)
+  at(x, y, " " .. label .. " ", bg == K.bar and K.text or colours.black, bg)
+  hits[#hits + 1] = { y = y, x1 = x, x2 = x + #label + 1, action = action }
+  return x + #label + 3
+end
+
+-- The frame every step shares: title bar with the step, a question, a footer with buttons.
+local function frame(step, steps, question)
+  hits = {}
+  term.setBackgroundColour(K.bg); term.clear()
+  fill(1, K.bar)
+  at(2, 1, "TURTLEMANCER SETUP", K.title, K.bar)
+  local s = ("%d/%d"):format(step, steps)
+  at(W - #s, 1, s, K.dim, K.bar)
+  at(2, 3, question, K.text)
+end
+
+---------------------------------------------------------------------------
+-- A menu: options = { { key, name, about, details, note } }. Returns a key, or nil for "back".
+---------------------------------------------------------------------------
+local function menu(step, steps, question, options, default, canBack)
+  local sel = 1
+  for i, o in ipairs(options) do if o[1] == default then sel = i end end
+  local small = H <= 13                -- a turtle's screen: squeeze the spacing
+  local listTop = small and 4 or 5
+  local nameW = 2
+  for _, o in ipairs(options) do nameW = math.max(nameW, #o[2]) end
+  nameW = math.min(nameW, math.floor(W / 2))
   while true do
-    print()
-    colour(colours.yellow); print(title); colour(colours.white)
-    local defIdx
+    frame(step, steps, question)
     for i, o in ipairs(options) do
-      if o[1] == default then defIdx = i end
-      colour(o[1] == default and colours.lime or colours.white)
-      write((" %d) %s"):format(i, o[2]))
-      colour(colours.lightGrey)
-      print(o[3] and ("  " .. o[3]) or "")
+      local y = listTop + i - 1
+      local on = i == sel
+      local bg = on and K.pick or K.bg
+      fill(y, bg)
+      local mark = (o[1] == default) and "*" or " "
+      at(2, y, mark, on and K.pickText or K.guess, bg)
+      at(3, y, o[2]:sub(1, nameW), on and K.pickText or K.text, bg)
+      local room = W - nameW - 6
+      if o[3] and room > 8 then
+        local about = o[3]
+        if #about > room then about = about:sub(1, room - 2):match("^(.*%S)%s") or about:sub(1, room - 2); about = about .. ".." end
+        at(nameW + 5, y, about, on and K.pickText or K.dim, bg)
+      end
+      hits[#hits + 1] = { y = y, x1 = 1, x2 = W, action = function()
+        if sel == i then return "pick" end
+        sel = i
+      end }
     end
-    colour(colours.white)
-    write(defIdx and ("Pick a number [" .. defIdx .. "]: ") or "Pick a number: ")
-    local a = read()
-    if a == "" and defIdx then return options[defIdx][1] end
-    local n = tonumber(a)
-    if n and options[n] then return options[n][1] end
-    printError("Type one of the numbers.")
+    -- Details of the highlighted option
+    local o = options[sel]
+    local y = listTop + #options + 1
+    if not small and y < H - 1 then
+      at(2, y, ("\140"):rep(W - 2), K.faint)
+      y = y + 1
+    end
+    local last = small and H - 1 or H - 2
+    for _, line in ipairs(wrap(o[4] or o[3] or "", W - 2)) do
+      if y > last then break end
+      at(2, y, line, K.dim); y = y + 1
+    end
+    for _, line in ipairs(o[5] and wrap(o[5], W - 2) or {}) do
+      if y > last then break end
+      at(2, y, line, K.warn); y = y + 1
+    end
+    -- Footer
+    fill(H, K.bg)
+    if canBack then button(2, H, "< Back", K.bar, function() return "back" end) end
+    local hint = COLOUR and "click twice or Enter" or "arrows + Enter"
+    if W >= 45 then at(math.floor((W - #hint) / 2) + 1, H, hint, K.faint) end
+    button(W - 7, H, "Next >", K.pick, function() return "pick" end)
+
+    local e, a, b, c = os.pullEvent()
+    local act
+    if e == "key" then
+      if a == keys.up then sel = (sel - 2) % #options + 1
+      elseif a == keys.down then sel = sel % #options + 1
+      elseif a == keys.enter or a == keys.numPadEnter then act = "pick"
+      elseif a == keys.backspace and canBack then act = "back" end
+    elseif e == "char" and tonumber(a) and options[tonumber(a)] then
+      sel = tonumber(a)
+    elseif e == "mouse_click" then
+      for _, r in ipairs(hits) do
+        if c == r.y and b >= r.x1 and b <= r.x2 then act = r.action(); break end
+      end
+    elseif e == "mouse_scroll" then
+      sel = math.max(1, math.min(#options, sel + a))
+    end
+    if act == "pick" then return options[sel][1] end
+    if act == "back" then return nil end
   end
 end
 
-term.clear(); term.setCursorPos(1, 1)
-colour(colours.cyan); print("TURTLEMANCER SETUP"); colour(colours.white)
+---------------------------------------------------------------------------
+-- A text box. Returns the text, or nil for "back".
+---------------------------------------------------------------------------
+local function ask(step, steps, question, about, default)
+  local text = default or ""
+  while true do
+    frame(step, steps, question)
+    local y = 5
+    for _, line in ipairs(wrap(about, W - 2)) do at(2, y, line, K.dim); y = y + 1 end
+    y = y + 1
+    fill(y, K.bar)
+    at(2, y, text:sub(-(W - 3)), K.text, K.bar)
+    fill(H, K.bg)
+    button(2, H, "< Back", K.bar, function() return "back" end)
+    button(W - 7, H, "Next >", K.pick, function() return "pick" end)
+    term.setCursorPos(2 + math.min(#text, W - 3), y)
+    term.setTextColour(K.text); term.setBackgroundColour(K.bar)
+    term.setCursorBlink(true)
+    local e, a, b, c = os.pullEvent()
+    term.setCursorBlink(false)
+    local act
+    if e == "char" then text = text .. a
+    elseif e == "paste" then text = text .. a
+    elseif e == "key" then
+      if a == keys.backspace then text = text:sub(1, -2)
+      elseif a == keys.enter or a == keys.numPadEnter then act = "pick" end
+    elseif e == "mouse_click" then
+      for _, r in ipairs(hits) do
+        if c == r.y and b >= r.x1 and b <= r.x2 then act = r.action(); break end
+      end
+    end
+    if act == "back" then return nil end
+    if act == "pick" then
+      text = text:match("^%s*(.-)%s*$")
+      if text ~= "" then return text end
+    end
+  end
+end
+
+---------------------------------------------------------------------------
+-- Start
+---------------------------------------------------------------------------
+term.setBackgroundColour(K.bg); term.clear(); term.setCursorPos(1, 1)
+at(2, 1, "TURTLEMANCER SETUP", K.title)
+term.setCursorPos(1, 3)
 
 local M, why
 while true do
@@ -67,46 +210,60 @@ for tk, t in pairs(M.types) do
 end
 if not isTurtle and guessType == "turtle" then guessType, guessRole = "computer", nil end
 
--- 1. Type
 local typeOptions = {}
 for _, tk in ipairs({ "computer", "turtle" }) do
-  if M.types[tk] then typeOptions[#typeOptions + 1] = { tk, M.types[tk].name } end
+  local t = M.types[tk]
+  if t then
+    local note = (tk == "turtle" and not isTurtle) and "This is a computer: turtle roles won't work here." or nil
+    typeOptions[#typeOptions + 1] = { tk, t.name, t.about, t.details, note }
+  end
 end
-local tk
+
+local tk, rk, T, R, l
+local step = 1
 while true do
-  tk = menu("What are you setting up?", typeOptions, guessType)
-  if tk == "turtle" and not isTurtle then
-    printError("This is a computer, not a turtle: turtle roles won't work here.")
-  else break end
+  if step == 1 then
+    tk = menu(1, 3, "What are you setting up?", typeOptions, tk or guessType, false)
+    if tk == "turtle" and not isTurtle then tk = nil else step = 2 end
+    T = tk and M.types[tk]
+  elseif step == 2 then
+    local opts = {}
+    for _, k in ipairs(T.order) do
+      local r = T.roles[k]
+      if r then opts[#opts + 1] = { k, r.name, r.about, r.details } end
+    end
+    rk = menu(2, 3, "Which role?", opts, rk or (guessType == tk and guessRole or nil), true)
+    if rk then R = T.roles[rk]; step = 3 else step = 1 end
+  elseif step == 3 then
+    if R.label == "auto" then
+      -- Named by its own program (Diggers get their number from the Foreman)
+      local keep = label and label:lower():find(R.name:lower(), 1, true) and label or R.name
+      local opts = { { "ok", "Save and reboot", "Label: " .. keep,
+        ("A %s gets its name from the network when it starts, so there's nothing to type."):format(R.name) } }
+      local a = menu(3, 3, "Ready", opts, "ok", true)
+      if a then l = keep; break else step = 2 end
+    else
+      local suggest = (label and label:lower():find(R.name:lower(), 1, true)) and label or R.name
+      l = ask(3, 3, "Name this " .. T.name:lower(), "Shown on the status board and in chat. Enter keeps the suggestion.", l or suggest)
+      if l then break else step = 2 end
+    end
+  end
 end
-local T = M.types[tk]
 
--- 2. Role
-local roleOptions = {}
-for _, rk in ipairs(T.order) do
-  local r = T.roles[rk]
-  if r then roleOptions[#roleOptions + 1] = { rk, r.name, r.about } end
-end
-local rk = menu("Which role?", roleOptions, guessType == tk and guessRole or nil)
-local R = T.roles[rk]
-
--- 3. Label
-print()
-local suggest = (label and label:lower():find(R.name:lower(), 1, true)) and label or R.name
-write(("Label for this %s [%s]: "):format(tk, suggest))
-local l = read()
-if l == "" then l = suggest end
 os.setComputerLabel(l)
-
 local f = fs.open(CFG, "w")
 f.write(textutils.serialize({ type = tk, role = rk, setAt = os.epoch("utc") }))
 f.close()
 if fs.exists("setup.lua") then fs.delete("setup.lua") end
 
-print()
-colour(colours.lime)
-print(("Saved: %s, %s, labelled %s."):format(T.name, R.name, l))
-colour(colours.white)
-print("Rebooting to download its files...")
+term.setBackgroundColour(K.bg); term.clear()
+fill(1, K.bar)
+at(2, 1, "TURTLEMANCER SETUP", K.title, K.bar)
+local y = 3
+for _, line in ipairs(wrap(("Saved: %s, %s, labelled %s."):format(T.name, R.name, l), W - 2)) do
+  at(2, y, line, K.good); y = y + 1
+end
+at(2, y + 1, "Rebooting to download its files...", K.text)
+term.setCursorPos(1, y + 3)
 os.sleep(2)
 os.reboot()

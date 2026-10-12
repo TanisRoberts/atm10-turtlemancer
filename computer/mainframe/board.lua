@@ -41,10 +41,15 @@ local function rows()
   else
     out[#out + 1] = { "Smelter", "?", "not heard from yet", nil }
   end
-  local m = _G.MINER_STATUS
-  if m then
+  local digs = {}
+  for _, e in pairs(_G.DIGGERS or {}) do
+    if e.s.state ~= "retired" then digs[#digs + 1] = e end
+  end
+  table.sort(digs, function(a, b) return (a.s.num or 999) < (b.s.num or 999) end)
+  for _, e in ipairs(digs) do
+    local m = e.s
     out[#out + 1] = { m.label or "Digger", m.state, ("Y %s, fuel %s, cargo %s/16%s"):format(tostring(m.y), tostring(m.fuel),
-      tostring(m.slots), (m.msg and m.msg ~= "") and (". " .. m.msg) or ""), _G.MINER_SEEN }
+      tostring(m.slots), (m.msg and m.msg ~= "") and (". " .. m.msg) or ""), e.seen }
   end
   local r = _G.RIGGER_STATUS
   if r then

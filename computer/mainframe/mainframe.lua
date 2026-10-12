@@ -8,50 +8,24 @@
 -- Monitor wall layout:   [ island strip, 3 lines ]
 --                        [ divider               ]
 --                        [ status board: every machine ]
--- Miner panel: its own monitor (1x3 or 3x2). The first time two screens are attached,
--- you're asked to tap the miner panel once so the computer knows which is which.
+-- Only monitors touching the computer count; the biggest one is the wall.
+-- Mining control lives on its own computer now (the Foreman); dig_link just listens to the Diggers.
 -- Any program can be missing or crash; the others keep running.
 
 local STATION_LINES = 3
 local TEXT_SCALE    = 0.5
-local MON_CONFIG    = "monitors.cfg"
 
--- Find monitors and decide which is the wall and which is the miner panel.
+-- Find the monitors: the biggest one is the wall.
 -- Only monitors touching the computer count: screens out on the cable belong to other computers.
 local names = {}
 for _, n in ipairs(rs.getSides()) do
   if peripheral.hasType(n, "monitor") then names[#names + 1] = n end
 end
 
-local mcfg = {}
-if fs.exists(MON_CONFIG) then
-  local f = fs.open(MON_CONFIG, "r"); mcfg = textutils.unserialize(f.readAll()) or {}; f.close()
-end
-local function present(n) for _, m in ipairs(names) do if m == n then return true end end return false end
-
-local panelName
-if #names >= 2 then
-  if not (mcfg.panel and present(mcfg.panel)) then
-    for _, n in ipairs(names) do
-      local m = peripheral.wrap(n)
-      m.setTextScale(1); m.setBackgroundColour(colours.black); m.clear()
-      m.setCursorPos(1, 1); m.setTextColour(colours.yellow); m.write("Miner panel?")
-      m.setCursorPos(1, 2); m.write("Tap me if so")
-    end
-    print("Two screens found. Tap the MINER PANEL screen.")
-    local side
-    repeat _, side = os.pullEvent("monitor_touch") until present(side)
-    mcfg.panel = side
-    local f = fs.open(MON_CONFIG, "w"); f.write(textutils.serialize(mcfg)); f.close()
-    print("Saved: miner panel is " .. side)
-  end
-  panelName = mcfg.panel
-end
-
--- The wall is the biggest monitor that isn't the panel
+-- The wall is the biggest monitor
 local wallName, best = nil, -1
 for _, n in ipairs(names) do
-  if n ~= panelName then
+  do
     local m = peripheral.wrap(n); m.setTextScale(TEXT_SCALE)
     local w, h = m.getSize()
     if w * h > best then wallName, best = n, w * h end
@@ -63,7 +37,7 @@ local function asMonitor(win)
   return setmetatable({ setTextScale = function() end }, { __index = win })
 end
 
-local stationTarget, boardTarget, panelTarget, offset
+local stationTarget, boardTarget, offset
 if wallName then
   local mon = peripheral.wrap(wallName)
   mon.setTextScale(TEXT_SCALE)          -- set before making windows: they keep their size
@@ -78,7 +52,6 @@ else
   local w, h = term.getSize()
   stationTarget = asMonitor(window.create(term.current(), 1, 1, w, h, false)) -- hidden
 end
-if panelName then panelTarget = peripheral.wrap(panelName) end
 
 -- Give a script its own view of the world: its own "monitor", optional silenced print,
 -- only the touches from its own screen, shifted so its window's top row is y = 1.
@@ -131,13 +104,13 @@ local function runScript(path, env, label, target)
 end
 
 term.clear(); term.setCursorPos(1, 1)
-print("Mainframe running: island station, status board, miner panel, links.")
+print("Mainframe running: island station, status board, links.")
 print("Reboot (hold Ctrl+R) to update. Type reset to give this computer a new role.")
 parallel.waitForAll(
   runScript("island.lua",       sandbox(stationTarget, true, nil),                 "Island station", wallName and stationTarget),
   runScript("board.lua",        sandbox(boardTarget, true, nil),                   "Status board",   wallName and boardTarget),
   runScript("base_link.lua",    sandbox(nil, true, nil),                           "Base link",      nil),
-  runScript("miner_panel.lua",  sandbox(panelTarget, true, panelName),             "Miner panel",    panelTarget),
+  runScript("dig_link.lua",     sandbox(nil, true, nil),                           "Digger link",    nil),
   runScript("rigger_link.lua",  sandbox(nil, true, nil),                           "Rigger link",    nil),
   runScript("farm_link.lua",    sandbox(nil, true, nil),                           "Farm link",      nil)
 )

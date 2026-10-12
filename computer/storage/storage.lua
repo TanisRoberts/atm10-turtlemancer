@@ -4,7 +4,7 @@
 --   * An Advanced Computer
 --   * Storage: any chests/barrels/drawers, each with a wired modem, joined with networking cable
 --   * INPUT chest(s) and one OUTPUT chest, also on the network
---   * Optional: a FUEL barrel for the miner turtle (kept at exactly one refill)
+--   * Optional: a FUEL barrel for each Digger (each kept at exactly one refill)
 --   * Optional: an advanced monitor wall (touch screen). Normal monitors work as display-only.
 --   * A wireless or ender modem, so it can talk to the mainframe and the turtles. The smelter can use the
 --     wired cable instead: storage talks on every modem and passes the smelter's news on to the mainframe
@@ -21,7 +21,7 @@
 --
 -- Storage is the only computer that moves items in or out of storage. Over the network it:
 --   * broadcasts its status (fill level, item totals, junk caps) for the mainframe and smelter
---   * fills Rigger's supply barrel when he asks, and keeps Digger's fuel barrel at one refill
+--   * fills Rigger's supply barrel when he asks, and keeps each Digger fuel barrel at one refill
 --   * carries out the smelter's moves (furnace output back to storage, inputs and fuel in)
 --
 -- Drawers (Functional Storage / Storage Drawers) are bulk storage: an item a drawer already
@@ -46,6 +46,8 @@ local FUEL_VALUES = {
   { "minecraft:coal", 80 },
   { "minecraft:charcoal", 80 },
 }
+-- Digger fuel barrels never take the last of these: the smelter burns them in the furnaces
+local SMELTER_RESERVE = { ["minecraft:coal"] = 64, ["minecraft:charcoal"] = 64 }
 
 ---------------------------------------------------------------------------
 -- Config
@@ -60,6 +62,9 @@ local function loadCfg()
   if cfg.input and not cfg.inputs then cfg.inputs = { cfg.input } end -- older config
   cfg.input = nil
   cfg.inputs = cfg.inputs or {}
+  if cfg.fuel and not cfg.fuels then cfg.fuels = { cfg.fuel } end -- older config: one fuel barrel
+  cfg.fuel = nil
+  cfg.fuels = cfg.fuels or {}
 end
 local function saveCfg()
   local f = fs.open(CONFIG, "w")
@@ -82,8 +87,9 @@ local function isDrawer(n)
 end
 
 local function isSpecial(n)
-  if n == cfg.output or n == cfg.fuel or n == cfg.rigger then return true end
+  if n == cfg.output or n == cfg.rigger then return true end
   for _, d in ipairs(cfg.docks or {}) do if d == n then return true end end
+  for _, d in ipairs(cfg.fuels) do if d == n then return true end end
   if isMachine(n) then return true end
   for _, i in ipairs(cfg.inputs) do if i == n then return true end end
   return false
@@ -160,8 +166,8 @@ end
 local MARKERS = {
   { key = "input",  item = "minecraft:stick",       what = "1 stick",       label = "MAIN INPUT",   need = true },
   { key = "output", item = "minecraft:dirt",        what = "1 dirt",        label = "OUTPUT",       need = true },
-  { key = "dump",   item = "minecraft:cobblestone", what = "1 cobblestone", label = "MINER DUMP" },
-  { key = "fuel",   item = "minecraft:lava_bucket", what = "1 lava bucket", label = "MINER FUEL" },
+  { key = "dump",   item = "minecraft:cobblestone", what = "1 cobblestone", label = "DIGGER DUMP", many = true },
+  { key = "fuel",   item = "minecraft:lava_bucket", what = "1 lava bucket", label = "DIGGER FUEL", many = true },
   { key = "rigger", item = "minecraft:brick",       what = "1 brick",       label = "RIGGER SUPPLY" },
   { key = "docks",  item = "minecraft:coal",        what = "1 coal",        label = "TURTLE DOCK", many = true },
 }
@@ -217,9 +223,9 @@ local function setup()
     end
     if ok then
       cfg.inputs = { f.input[1] }
-      if f.dump then cfg.inputs[2] = f.dump[1] end
+      for _, n in ipairs(f.dump or {}) do cfg.inputs[#cfg.inputs + 1] = n end
       cfg.output = f.output[1]
-      cfg.fuel = f.fuel and f.fuel[1] or nil
+      cfg.fuels = f.fuel or {}
       cfg.rigger = f.rigger and f.rigger[1] or nil
       cfg.docks = f.docks or {}
       saveCfg()
@@ -448,7 +454,7 @@ local function retrieve(key, amount, target, toSlot)
   return got, full
 end
 
--- Keep the miner's fuel barrel at (as close as possible to) exactly one refill.
+-- Emptiest Digger fuel barrel, in fuel units (see topUpFuel)
 local fuelUnits = 0
 -- Keep each turtle dock stocked with ~32 coal worth of fuel (charcoal first, then coal)
 local function topUpDocks()
@@ -471,30 +477,38 @@ local function topUpDocks()
   return changed
 end
 
+-- Keep every Digger fuel barrel at (as close as possible to) one refill.
+-- fuelUnits = the emptiest barrel, for the screen and the mainframe's "running dry" alert.
 local function topUpFuel()
-  if not cfg.fuel then return false end
+  if #cfg.fuels == 0 then return false end
   local target = minerFuelLimit or REFILL
   local value = {}
   for _, fv in ipairs(FUEL_VALUES) do value[fv[1]] = fv[2] end
-  local have = 0
-  local list = call(cfg.fuel, "list")
-  if not list then return false end
-  for _, it in pairs(list) do have = have + (value[it.name] or 0) * it.count end
-  fuelUnits = have
-  local deficit = target - have
-  local changed = false
-  for _, fv in ipairs(FUEL_VALUES) do
-    local name, v = fv[1], fv[2]
-    local n = math.floor(deficit / v)
-    if n > 0 and (byName[name] or 0) > 0 then
-      local moved = retrieve(name, math.min(n, byName[name]), cfg.fuel)
-      if moved > 0 then
-        deficit = deficit - moved * v
-        fuelUnits = fuelUnits + moved * v
-        changed = true
+  local changed, lowest = false, nil
+  for _, barrel in ipairs(cfg.fuels) do
+    local list = call(barrel, "list")
+    if list then
+      local have = 0
+      for _, it in pairs(list) do have = have + (value[it.name] or 0) * it.count end
+      local deficit = target - have
+      for _, fv in ipairs(FUEL_VALUES) do
+        local name, v = fv[1], fv[2]
+        local n = math.floor(deficit / v)
+        local spare = (byName[name] or 0) - (SMELTER_RESERVE[name] or 0)
+        if n > 0 and spare > 0 then
+          local moved = retrieve(name, math.min(n, spare), barrel)
+          if moved > 0 then
+            deficit = deficit - moved * v
+            have = have + moved * v
+            byName[name] = byName[name] - moved
+            changed = true
+          end
+        end
       end
+      lowest = math.min(lowest or have, have)
     end
   end
+  fuelUnits = lowest or 0
   return changed
 end
 
@@ -580,7 +594,7 @@ local uiBusy   = false        -- a command (/setup...) is using the computer's s
 local COMMANDS = {
   { "/setup",    "pick chests with marker items" },
   { "/addinput", "add one more input chest" },
-  { "/fuel",     "set the miner's fuel barrel" },
+  { "/fuel",     "add a Digger fuel barrel" },
   { "/inputs",   "show which chest is which" },
   { "/rescan",   "re-read every chest now" },
 }
@@ -682,7 +696,7 @@ local function drawView(v)
   d.setTextColour(C.accent); d.write(" STORAGE")
   local pct = stats.total > 0 and math.floor(stats.used / stats.total * 100) or 0
   local right = ("%d items  %d/%d slots  %d%% "):format(stats.kinds, stats.used, stats.total, pct)
-  if cfg.fuel then right = ("Fuel %d%%  "):format(math.floor(fuelUnits / (minerFuelLimit or REFILL) * 100)) .. right end
+  if #cfg.fuels > 0 then right = ("Fuel %d%%  "):format(math.floor(fuelUnits / (minerFuelLimit or REFILL) * 100)) .. right end
   if #right > w - 9 then right = ("%d/%d slots %d%% "):format(stats.used, stats.total, pct) end
   d.setTextColour(pct >= 90 and C.warn or C.dim)
   d.setCursorPos(math.max(1, w - #right + 1), 1); d.write(right)
@@ -819,8 +833,9 @@ local function statusMsg()
   return {
     type = "storage", id = os.getComputerID(), label = os.getComputerLabel(),
     used = stats.used, total = stats.total, kinds = stats.kinds, inputStuck = inputStuck,
-    fuelUnits = cfg.fuel and fuelUnits or nil,
-    fuelTarget = cfg.fuel and (minerFuelLimit or REFILL) or nil,
+    fuelUnits = #cfg.fuels > 0 and fuelUnits or nil,
+    fuelTarget = #cfg.fuels > 0 and (minerFuelLimit or REFILL) or nil,
+    fuelBarrels = #cfg.fuels,
     fuelAvailable = avail, overcap = overCapList, items = byName, paused = paused,
   }
 end
@@ -957,15 +972,20 @@ function runCommand(cmd)
         say(termView, "Input added. Anything dropped in it gets sorted.")
       end
     elseif found == "/fuel" then
-      local n = pickChest("miner FUEL barrel")
-      if isSpecial(n) and n ~= cfg.fuel then printError("That one's already in use."); waitEnter() else
-        cfg.fuel = n; saveCfg(); scanAll(); buildItems()
-        say(termView, "Fuel barrel set. I'll keep one refill in it.")
+      local n = pickChest("Digger FUEL barrel (pick one that's already a fuel barrel to remove it)")
+      local idx
+      for i, f in ipairs(cfg.fuels) do if f == n then idx = i end end
+      if idx then
+        table.remove(cfg.fuels, idx); saveCfg(); scanAll(); buildItems()
+        say(termView, "Fuel barrel removed. It's normal storage again.", C.warn)
+      elseif isSpecial(n) then printError("That one's already in use."); waitEnter() else
+        cfg.fuels[#cfg.fuels + 1] = n; saveCfg(); scanAll(); buildItems()
+        say(termView, ("Fuel barrel added (%d now). I'll keep one refill in each."):format(#cfg.fuels))
       end
     elseif found == "/inputs" then
       for i, n in ipairs(cfg.inputs) do print(i .. "  " .. n) end
       print("Output: " .. tostring(cfg.output))
-      print("Fuel:   " .. tostring(cfg.fuel or "not set"))
+      print("Fuel:   " .. (#cfg.fuels > 0 and table.concat(cfg.fuels, ", ") or "not set"))
       print("Rigger: " .. tostring(cfg.rigger or "not set"))
       print("Docks:  " .. (#(cfg.docks or {}) > 0 and table.concat(cfg.docks, ", ") or "none"))
       local dn = 0

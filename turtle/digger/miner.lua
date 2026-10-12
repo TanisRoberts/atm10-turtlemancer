@@ -1,10 +1,18 @@
 -- miner.lua  --  shaft + expanding-square mining turtle (CC:Tweaked, ATM10 / MC 1.21.1)
 --
--- Needs: a mining turtle (diamond pickaxe) with a wireless or ender modem on its other side.
+-- Needs: a mining turtle (diamond pickaxe) with an ender modem on its other side.
 -- Dock: place the turtle where the shaft should start. Put the DUMP barrel (a storage input)
 -- on one side and the FUEL barrel on another side (or above). Below must be free to dig.
 --
--- What it does, once you press START on the panel:
+-- Orders come from the Foreman computer (one per Digger: its own layers, START, STOP + DOCK).
+-- Its name (Digger-04) comes from the Foreman too, the first time it starts, and is kept for good.
+--
+-- Position: it knows its dock's X/Y/Z, the way it faced and the dimension, and reports its exact
+-- position. With GPS towers (the "GPS host" role, 4 of them) it also checks itself against GPS:
+-- if it was carried somewhere it notices, works out which way it faces, and waits for an order;
+-- then it digs down to Y 0, tunnels to its shaft and comes up it. Without GPS it counts its moves.
+--
+-- What it does, once you press START on the Foreman:
 --   * digs a shaft straight down from the dock to the chosen Y range
 --   * mines expanding squares around the shaft (3x3, 5x5 ... up to 101x101), 3 levels per pass:
 --     it walks the middle level and digs the block above/below only if it's an ore
@@ -112,6 +120,72 @@ local function setStatus(st, msg)
 end
 
 ---------------------------------------------------------------------------
+-- Where am I: S.x/y/z are relative to the dock (heading 0 = the way it faced at setup).
+-- S.home = the dock's world X/Y/Z, S.facing = compass direction of heading 0 (0 N, 1 E, 2 S, 3 W).
+---------------------------------------------------------------------------
+local COMPASS = { [0] = "north", "east", "south", "west" }
+
+-- Rotate a flat offset by f quarter turns clockwise (north -> east)
+local function rot(x, z, f)
+  for _ = 1, f % 4 do x, z = -z, x end
+  return x, z
+end
+
+local function absPos()
+  if not (S.home and S.facing) then return nil end
+  local ax, az = rot(S.x, S.z, S.facing)
+  return S.home.x + ax, S.home.y + S.y, S.home.z + az
+end
+
+local function setFromAbs(x, y, z)
+  local rx, rz = rot(x - S.home.x, z - S.home.z, 4 - S.facing)
+  S.x, S.y, S.z = rx, y - S.home.y, rz
+end
+
+local gpsSeen = false
+local function locate()
+  if not gps then return nil end
+  local ok, x, y, z = pcall(gps.locate, 2)
+  if ok and x then
+    gpsSeen = true
+    return math.floor(x + 0.5), math.floor(y + 0.5), math.floor(z + 0.5)
+  end
+end
+
+local function dirOf(dx, dz)
+  if dz < 0 then return 0 elseif dx > 0 then return 1 elseif dz > 0 then return 2 elseif dx < 0 then return 3 end
+end
+
+-- Which way am I facing? Step one block (turning to find a free side), ask GPS, step back.
+-- allowDig: may dig the block in front (only underground).
+-- Returns the compass direction it now faces (or nil), how many right turns it made looking, and
+-- true if it couldn't step back (it's then one block further on, in the direction it faces).
+local function compassByStep(allowDig)
+  local x0, _, z0 = locate()
+  if not x0 then return nil, 0 end
+  for turns = 0, 3 do
+    local moved = false
+    if not turtle.detect() then moved = turtle.forward()
+    elseif allowDig and turtle.dig() then moved = turtle.forward() end
+    if moved then
+      local x1, _, z1 = locate()
+      local stuck = not turtle.back()
+      if stuck and allowDig then
+        -- Something fell in behind: turn round, clear it, step back, turn round again
+        turtle.turnRight(); turtle.turnRight()
+        turtle.dig()
+        stuck = not turtle.forward()
+        turtle.turnRight(); turtle.turnRight()
+      end
+      if x1 and (x1 ~= x0 or z1 ~= z0) then return dirOf(x1 - x0, z1 - z0), turns, stuck end
+      return nil, turns, stuck
+    end
+    turtle.turnRight()
+  end
+  return nil, 4
+end
+
+---------------------------------------------------------------------------
 -- Movement (position is relative to the dock: x/z flat, y up; heading 0 = facing at setup)
 ---------------------------------------------------------------------------
 local DX = { [0] = 0, 1, 0, -1 }
@@ -208,7 +282,20 @@ end
 
 local function atDock() return S.x == 0 and S.y == 0 and S.z == 0 end
 
+-- Carried somewhere (S.offPath): don't walk through whatever is around. Dig down to Y 0
+-- (well under the island and the sea floor), tunnel to below the shaft, then come up it.
+local function tunnelDepth()
+  local y = math.min(S.y, -4)
+  if S.home then y = math.min(y, -S.home.y) end
+  if S.home then y = math.max(y, -60 - S.home.y) end -- stay above bedrock
+  return y
+end
+
 local function goHome()
+  if S.offPath and (S.x ~= 0 or S.z ~= 0) then
+    local ok, why = goY(tunnelDepth())
+    if not ok then error("Can't dig down to tunnel home: " .. tostring(why), 0) end
+  end
   if S.x ~= 0 or S.z ~= 0 then
     local ok = goToXZ(0, 0)
     if not ok then
@@ -219,6 +306,8 @@ local function goHome()
   local ok, why = goY(0)
   if not ok then error("Shaft blocked: " .. tostring(why), 0) end
   face(0)
+  S.offPath = nil
+  save()
 end
 
 ---------------------------------------------------------------------------
@@ -340,7 +429,9 @@ end
 -- Commands from the panel
 ---------------------------------------------------------------------------
 local function applyCtrl()
-  if not ctrl or ctrl.seq == nil or ctrl.seq == S.seq then return end
+  if not ctrl or ctrl.seq == nil then return end
+  if (ctrl.retired == true) ~= (S.retired == true) then S.retired = ctrl.retired == true or nil; save() end
+  if ctrl.seq == S.seq then return end
   S.seq = ctrl.seq
   if ctrl.want == "run" then
     local changed = ctrl.minY ~= S.minY or ctrl.maxY ~= S.maxY
@@ -466,6 +557,15 @@ end
 ---------------------------------------------------------------------------
 local function dockService()
   setStatus("docked", "Unloading")
+  if gpsSeen then
+    local x, y, z = locate()
+    local ex, ey, ez = absPos()
+    if x and ex and (x ~= ex or y ~= ey or z ~= ez) then
+      print(("GPS says %d %d %d, I counted %d %d %d. Trusting GPS."):format(x, y, z, ex, ey, ez))
+      S.home = { x = x - (ex - S.home.x), y = y - (ey - S.home.y), z = z - (ez - S.home.z) }
+      S.dockY = S.home.y
+    end
+  end
   loadJunk()            -- pick up any edits to junk.txt
   valuableCache = {}
   local haul = {}
@@ -537,20 +637,73 @@ local function sideName(dir)
   return ({ [0] = "in front", "on my right", "behind me", "on my left" })[dir]
 end
 
+local function title(text)
+  if term.isColour() then term.setTextColour(colours.cyan) end
+  print(text)
+  term.setTextColour(colours.white)
+end
+
+local function askNumber(prompt)
+  while true do
+    write(prompt)
+    local n = tonumber(read())
+    if n then return math.floor(n) end
+    printError("A number, please.")
+  end
+end
+
+local function askChoice(prompt, options)
+  while true do
+    for i, o in ipairs(options) do print(("  %d) %s"):format(i, o)) end
+    write(prompt)
+    local a = read()
+    local n = tonumber(a)
+    if n and options[n] then return n end
+    for i, o in ipairs(options) do if a ~= "" and o:lower():sub(1, #a) == a:lower() then return i end end
+    printError("Pick one of the numbers.")
+  end
+end
+
+local function askFacing()
+  print("Which way am I facing? (stand behind me, look the same")
+  print("way, read 'Facing' on F3)")
+  return askChoice("Facing: ", { "North", "East", "South", "West" }) - 1
+end
+
+local function askDimension()
+  local d = askChoice("Dimension [1]: ", { "Overworld", "Nether", "End", "Other" })
+  if d == 4 then write("Its name: "); return read() end
+  return ({ "overworld", "the_nether", "the_end" })[d]
+end
+
 local function setupDock()
   term.clear(); term.setCursorPos(1, 1)
-  print("MINER SETUP")
+  title("DIGGER SETUP")
   print("I'm sitting on top of my future shaft.")
   print("I need two barrels next to me (sides or above):")
   print(" - DUMP barrel (a storage input, empty)")
   print(" - FUEL barrel (with some coal in it)")
   print()
-  local y
-  repeat
-    write("My Y level (F3, block I'm in): ")
-    y = tonumber(read())
-  until y
-  S = { dockY = math.floor(y), x = 0, y = 0, z = 0, h = 0, want = "dock", seq = nil }
+  S = { x = 0, y = 0, z = 0, h = 0, want = "dock", seq = nil }
+  local x, y, z = locate()
+  if x then
+    print(("GPS says I'm at %d %d %d."):format(x, y, z))
+    S.home = { x = x, y = y, z = z }
+    local c, _, stuck = compassByStep(false)
+    S.facing = c
+    if stuck then apply("f") end -- couldn't step back onto the dock; goHome fixes it later
+    if S.facing then print("I'm facing " .. COMPASS[S.facing] .. ".") else S.facing = askFacing() end
+  else
+    print("No GPS towers heard. Type my position (F3, the block I'm in):")
+    local hx = askNumber("X: ")
+    local hy = askNumber("Y: ")
+    local hz = askNumber("Z: ")
+    S.home = { x = hx, y = hy, z = hz }
+    S.facing = askFacing()
+  end
+  S.dockY = S.home.y
+  print("Which dimension am I in?")
+  S.dim = askDimension()
   save()
   while true do
     local found = {}
@@ -581,7 +734,8 @@ local function setupDock()
     read()
   end
   save()
-  print("Setup done. Press START on the panel.")
+  print("Setup done. I'll get my number from the Foreman;")
+  print("then pick my layers and press START there.")
 end
 
 local function recover()
@@ -606,6 +760,67 @@ local function lostFlow()
   read()
   S.x, S.y, S.z, S.h, S.lost = 0, 0, 0, 0, nil
   S.k, S.step = 1, 1
+  save()
+end
+
+-- Older Diggers only knew their dock's Y. Fill in X/Z, facing and dimension once.
+local function migrateHome()
+  if S.home and S.facing then return end
+  setStatus("waiting", "Working out where my dock is")
+  local x, y, z = locate()
+  if x and not S.lost then
+    local c, turns, stuck = compassByStep(S.y <= -2)
+    S.h = (S.h + turns) % 4
+    if stuck then apply("f") end
+    if c then
+      S.facing = (c - S.h) % 4
+      x, y, z = locate()
+      if x then
+        local ax, az = rot(S.x, S.z, S.facing)
+        S.home = { x = x - ax, y = y - S.y, z = z - az }
+        S.dockY = S.home.y
+        S.dim = S.dim or "overworld"
+        save()
+        return
+      end
+    end
+  end
+  setStatus("waiting", "Type my dock's position on my screen (one time)")
+  term.clear(); term.setCursorPos(1, 1)
+  title("ONE-TIME: WHERE IS MY DOCK?")
+  print(("My dock is at Y %d. I need its X and Z (F3 on the"):format(S.dockY))
+  print("block I sit in when docked), and which way I face there.")
+  local hx = askNumber("Dock X: ")
+  local hz = askNumber("Dock Z: ")
+  S.home = { x = hx, y = S.dockY, z = hz }
+  S.facing = askFacing()
+  print("Which dimension?")
+  S.dim = askDimension()
+  save()
+  print("Thanks! Carrying on.")
+end
+
+-- Check my counted position against GPS. If I've been carried off, re-learn where I am and
+-- which way I face, then wait for an order before going anywhere.
+local function checkPosition()
+  if not (S.home and S.facing) then return end
+  local x, y, z = locate()
+  if not x then return end
+  local ex, ey, ez = absPos()
+  local moved = x ~= ex or y ~= ey or z ~= ez
+  if moved then
+    setFromAbs(x, y, z)
+    S.lost, S.offPath, S.heldSeq = true, true, S.seq
+  end
+  if S.lost then
+    save()
+    local c = compassByStep(not S.offPath and S.y <= -2)
+    if c then
+      S.h, S.lost = (c - S.facing) % 4, nil
+      local x2, y2, z2 = locate()
+      if x2 then setFromAbs(x2, y2, z2) end
+    end
+  end
   save()
 end
 
@@ -647,10 +862,29 @@ local function runOnce()
 end
 
 local function mainLoop()
+  migrateHome()
+  checkPosition()
   while true do
     applyCtrl()
-    if S.lost then
+    if S.lost and gpsSeen then
+      checkPosition()
+      if S.lost then
+        setStatus("lost", "Can't tell which way I face: no free side to step into")
+        waitCtrl(30)
+      end
+    elseif S.lost then
       lostFlow()
+    elseif S.offPath and S.seq == S.heldSeq then
+      setStatus("waiting", "Moved by hand. START or DOCK on the Foreman to send me home")
+      waitCtrl(10)
+    elseif S.offPath then
+      setStatus("returning", "Tunnelling back to my shaft")
+      safeHome()
+      if not atDock() then waitCtrl(30) end
+    elseif S.retired then
+      if not atDock() then setStatus("returning", "Retiring: heading home"); safeHome() end
+      if atDock() then dockService(); setStatus("retired", "Retired. Thanks for your service") end
+      waitCtrl(30)
     elseif S.want ~= "run" or S.done then
       if not atDock() then setStatus("returning", "Heading home"); safeHome() end
       if atDock() then
@@ -674,8 +908,12 @@ local function statusMsg()
   table.sort(haul, function(a, b) return a[2] > b[2] end)
   while #haul > 8 do table.remove(haul) end
   local f, l = turtle.getFuelLevel(), turtle.getFuelLimit()
+  local px, py, pz = absPos()
   return {
-    type = "status", id = os.getComputerID(), label = os.getComputerLabel(),
+    type = "status", id = os.getComputerID(), label = os.getComputerLabel(), num = S.num,
+    pos = px and { x = px, y = py, z = pz } or nil, dim = S.dim, home = S.home,
+    facing = S.facing and COMPASS[(S.facing + (S.h or 0)) % 4], gps = gpsSeen,
+    offPath = S.offPath, retired = S.retired,
     state = S.status, msg = S.msg, seq = S.seq,
     fuel = f, fuelLimit = l, slots = used,
     y = S.dockY and (S.dockY + (S.y or 0)), x = S.x, z = S.z,
@@ -684,17 +922,27 @@ local function statusMsg()
   }
 end
 
+local function labelNum()
+  return tonumber(((os.getComputerLabel() or ""):match("^[Dd]igger%-(%d+)$")))
+end
+
 local function netLoop()
   local modem = peripheral.find("modem", function(_, m) return m.isWireless() end)
   if not modem then
-    print("No wireless modem: running without the panel.")
+    print("No ender/wireless modem: no Foreman, no orders.")
     return os.pullEvent("never")
   end
   rednet.open(peripheral.getName(modem))
+  local me = os.getComputerID()
   local lastSend = -100
   while true do
     local _, msg = rednet.receive(PROTOCOL, 1)
-    if type(msg) == "table" and msg.type == "cmd" then
+    if type(msg) == "table" and msg.type == "assigned" and msg.id == me and not S.num and tonumber(msg.num) then
+      S.num = tonumber(msg.num)
+      os.setComputerLabel(msg.label or ("Digger-%02d"):format(S.num))
+      print("The Foreman named me " .. os.getComputerLabel() .. ".")
+      save()
+    elseif type(msg) == "table" and msg.type == "cmd" and msg.to == me then
       ctrl = msg
       if type(msg.capped) == "table" then
         local set = {}
@@ -703,6 +951,10 @@ local function netLoop()
       end
     end
     if os.clock() - lastSend >= STATUS_EVERY then
+      if not S.num then
+        -- No number yet: ask the Foreman (a label like Digger-04 is offered back, e.g. after a reset)
+        rednet.broadcast({ type = "register", id = me, want = labelNum(), label = os.getComputerLabel() }, PROTOCOL)
+      end
       rednet.broadcast(statusMsg(), PROTOCOL)
       lastSend = os.clock()
     end
