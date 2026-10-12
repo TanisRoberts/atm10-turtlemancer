@@ -743,8 +743,9 @@ local function supplyRigger()
   return true
 end
 
--- The butler's restock: make the POCKET RESTOCK chest hold `count` of an item (counting what's
--- already in it), then tell it how many are waiting there. It pulls them into your inventory.
+-- The butler's restock: make the POCKET RESTOCK chest (or, if none is set, the output chest) hold
+-- `count` of an item (counting what's already in it), then tell it how many are waiting there.
+-- It pulls them into your inventory.
 local pocketReq, lastPocketSeq = nil, nil
 local function fillPocket()
   local req = pocketReq
@@ -753,18 +754,19 @@ local function fillPocket()
   local item = tostring(req.item)
   local want = math.max(0, math.min(tonumber(req.count) or 0, 27 * 64))
   local have = 0
-  if cfg.pocketOut then
-    for _, it in pairs(call(cfg.pocketOut, "list") or {}) do
+  local chest = cfg.pocketOut or cfg.output   -- no restock chest set: the normal output chest
+  if chest then
+    for _, it in pairs(call(chest, "list") or {}) do
       if it.name == item then have = have + it.count end
     end
     if have < want and (byName[item] or 0) > 0 then
-      local moved = retrieve(item, math.min(want - have, byName[item]), cfg.pocketOut)
+      local moved = retrieve(item, math.min(want - have, byName[item]), chest)
       have = have + moved
     end
   end
   if rednet.isOpen() then
     rednet.broadcast({ type = "pocket_filled", seq = req.seq, item = item, got = math.min(have, want),
-      ready = cfg.pocketOut ~= nil }, BASE)
+      ready = chest ~= nil }, BASE)
   end
   return true
 end
@@ -1095,7 +1097,7 @@ local function statusMsg()
     fuelBarrels = #cfg.fuels,
     fuelAvailable = avail, overcap = overCapList, items = byName, paused = paused,
     locked = (isLocked()), pocketDump = cfg.pocketIn ~= nil, pocketRestock = cfg.pocketOut ~= nil,
-    mainInput = cfg.inputs[1], restockChest = cfg.pocketOut,   -- the butler can use these over the cable
+    mainInput = cfg.inputs[1], restockChest = cfg.pocketOut or cfg.output,   -- the butler uses these over the cable
   }
 end
 

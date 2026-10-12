@@ -1,20 +1,19 @@
 -- butler.lua  --  your inventory from anywhere, and who's on the island (runs from mainframe.lua)
 -- CC:Tweaked + Advanced Peripherals 0.8 (ATM10 / MC 1.21.1)
 --
--- Hardware, all touching the mainframe:
+-- Hardware, all touching the mainframe (directly or on its full-block wired modem):
 --   * Inventory Manager with a Memory Card bound to you (right-click the card, put it in the manager).
---     Two chests touching the MANAGER that are also on the storage cable (wired modem on each),
---     picked on the storage computer with /pocket (or /setup with flint + feather):
---       POCKET DUMP     storage empties it like an input chest ($dump puts your stuff here)
---       POCKET RESTOCK  storage fills it with what the butler asks for (torch top-ups)
 --   * Player Detector (range is measured from the detector block).
+-- Where items go (butler.env, default "storage" for both): the manager has to reach the chest, so the
+-- modem the mainframe's blocks sit on must be joined to the STORAGE cable. Then $dump goes straight into
+-- storage's main input chest, and torch top-ups come out of storage's restock chest (/pocket on storage),
+-- or its normal output chest if none is set. Or give either one its own chest touching the manager and
+-- set it to that side ($pocket dump north).
 --
 -- What it does:
 --   $dump      everything except your hotbar (armour and offhand stay too) goes to storage
 --   $pocket    what the butler sees: your hotbar slots, and which sides of the manager have chests
---   $pocket dump <side> / $pocket restock <side>   tell it where the pocket chests are (saved to butler.env)
--- No chest on those sides? If the mainframe has a wired modem on the storage cable, $dump goes straight
--- into storage's main input chest and restocks come from storage's restock chest, wherever it is.
+--   $pocket dump <storage|side> / $pocket restock <storage|side>   change where they go (saved to butler.env)
 --   torches    under TORCH_MIN torches -> topped back up to TORCH_FILL from storage
 --   warnings   inventory (nearly) full; armour or a tool close to breaking
 --   presence   "welcome home" when you get back, guests greeted, storage monitor locks while you're away
@@ -34,8 +33,8 @@ local DEFAULTS = {
   { "WELCOME_AFTER", 300, "Only say welcome home after being away at least this many seconds." },
   { "GREET_GUESTS", "yes", "Say hello to other players who land on the island (yes/no)." },
   { "AUTO_LOCK", "yes", "Lock the storage monitor while you're away (yes/no). /lock and /unlock on storage work either way." },
-  { "POCKET_DUMP", "up", "Side of the Inventory Manager with the POCKET DUMP chest: up/down/north/south/east/west." },
-  { "POCKET_RESTOCK", "down", "Side of the Inventory Manager with the POCKET RESTOCK chest." },
+  { "POCKET_DUMP", "storage", "Where $dump goes: storage = storage's main input chest over the cable, or a side of the Inventory Manager (up/down/north/south/east/west) with its own chest." },
+  { "POCKET_RESTOCK", "storage", "Where torch top-ups come from: storage = storage's restock chest (its output chest if none is set), or a side of the manager." },
   { "HOTBAR_FIRST", 0, "Number of the first hotbar slot as the manager counts them. $pocket shows what it sees." },
   { "TORCH_ITEM", "minecraft:torch", "What to keep topped up." },
   { "TORCH_MIN", 10, "Top up when you're carrying fewer than this many (0 = off)." },
@@ -146,8 +145,10 @@ end
 -- Where $dump / restock go: the chest on the configured side of the manager, or (no chest there)
 -- storage's own chest by name, when the mainframe is on the storage cable and can see it.
 local function pocketTarget(m, key)
-  local t = side(E[key])
-  if hasChest(m, t) then return t end
+  if tostring(E[key]):lower() ~= "storage" then
+    local t = side(E[key])
+    if hasChest(m, t) then return t end
+  end
   local st = _G.STORAGE_STATS
   local name = st and (key == "POCKET_DUMP" and st.mainInput or st.restockChest)
   if type(name) == "string" and peripheral.isPresent(name) and hasChest(m, name) then return name, true end
@@ -512,6 +513,20 @@ end
 
 -- No chest where butler.env says: look around the manager and say how to fix it
 local function explainMissing(m, which, key, user)
+  if tostring(E[key]):lower() == "storage" then
+    local st = _G.STORAGE_STATS
+    local name = st and (key == "POCKET_DUMP" and st.mainInput or st.restockChest)
+    if not st then
+      say("&eI haven't heard from the storage computer yet. Is it running?", user)
+    elseif not name then
+      say("&eStorage didn't tell me its chest names. Reboot the storage computer so it updates.", user)
+    else
+      say(("&eI can't reach storage's %s chest (%s) from the mainframe. Is the modem the Inventory Manager sits "
+        .. "under joined to the storage cable, and switched on (right-click: red ring)?"):format(
+        key == "POCKET_DUMP" and "input" or "restock", name), user)
+    end
+    return
+  end
   local found = chestSides(m)
   local other = key == "POCKET_DUMP" and tostring(E.POCKET_RESTOCK):lower() or tostring(E.POCKET_DUMP):lower()
   local spare = {}
@@ -654,18 +669,18 @@ local function pocketInfo(user)
   end
   say(("Chests touching the manager: %s. Dump: %s. Restock: %s."):format(
     #found > 0 and table.concat(found, ", ") or "none", mark("POCKET_DUMP"), mark("POCKET_RESTOCK")), user)
-  say("&7Fix with: $pocket dump <side> | $pocket restock <side>. Wrong hotbar? HOTBAR_FIRST in butler.env.", user)
+  say("&7Change with: $pocket dump storage|<side>, $pocket restock storage|<side>. Wrong hotbar? HOTBAR_FIRST in butler.env.", user)
 end
 
 -- $pocket dump north / $pocket restock west
 local function setPocket(user, which, sd)
-  if not SIDE_OK[sd] and not sd:find("[:_]") then
-    say("Sides are up, down, north, south, east or west (or a chest's network name). E.g. $pocket " .. which .. " north", user)
+  if not SIDE_OK[sd] and sd ~= "storage" and not sd:find("[:_]") then
+    say("Use storage, or a side: up, down, north, south, east, west. E.g. $pocket " .. which .. " storage", user)
     return
   end
   local key = which == "dump" and "POCKET_DUMP" or "POCKET_RESTOCK"
   local other = which == "dump" and E.POCKET_RESTOCK or E.POCKET_DUMP
-  if tostring(other):lower() == sd then
+  if sd ~= "storage" and tostring(other):lower() == sd then
     say(("That's the %s chest's side already. Use two different chests."):format(which == "dump" and "restock" or "dump"), user)
     return
   end
@@ -673,7 +688,8 @@ local function setPocket(user, which, sd)
   local m = liveManager()
   local there = true
   if m then
-    there = hasChest(m, side(sd))
+    local key2 = which == "dump" and "POCKET_DUMP" or "POCKET_RESTOCK"
+    there = pocketTarget(m, key2) ~= nil
   end
   say(("%s chest set to %s.%s"):format(which == "dump" and "Dump" or "Restock", sd,
     there and "" or " (I can't see a chest there yet, mind.)"), user)
