@@ -11,7 +11,10 @@
 --
 -- What it does:
 --   $dump      everything except your hotbar (armour and offhand stay too) goes to storage
---   $pocket    what the butler sees in your inventory: check the hotbar slots are right
+--   $pocket    what the butler sees: your hotbar slots, and which sides of the manager have chests
+--   $pocket dump <side> / $pocket restock <side>   tell it where the pocket chests are (saved to butler.env)
+-- No chest on those sides? If the mainframe has a wired modem on the storage cable, $dump goes straight
+-- into storage's main input chest and restocks come from storage's restock chest, wherever it is.
 --   torches    under TORCH_MIN torches -> topped back up to TORCH_FILL from storage
 --   warnings   inventory (nearly) full; armour or a tool close to breaking
 --   presence   "welcome home" when you get back, guests greeted, storage monitor locks while you're away
@@ -102,6 +105,61 @@ local function side(v)
   v = tostring(v)
   if v:find("[:_@]") then return v end
   return "@" .. v:lower()
+end
+
+-- Change one setting from chat: rewrites that KEY= line in place, leaves every other line alone
+local function setEnv(key, value)
+  local lines, done = {}, false
+  if fs.exists(ENV_FILE) then
+    local f = fs.open(ENV_FILE, "r")
+    while true do
+      local line = f.readLine()
+      if not line then break end
+      local k = line:match("^%s*([%w_]+)%s*=")
+      if k and k:upper() == key and not done then line = key .. "=" .. value; done = true end
+      lines[#lines + 1] = line
+    end
+    f.close()
+  end
+  if not done then lines[#lines + 1] = key .. "=" .. value end
+  local f = fs.open(ENV_FILE, "w")
+  f.write(table.concat(lines, "\n") .. "\n")
+  f.close()
+  readEnv()
+end
+
+local SIDES = { "up", "down", "north", "south", "east", "west" }
+local SIDE_OK = { up = true, down = true, north = true, south = true, east = true, west = true,
+  top = true, bottom = true, front = true, back = true, left = true, right = true }
+
+-- Which blocks touching the manager are inventories. It tries to move an item you can't be carrying:
+-- an empty side (or the computer, a modem...) errors "not an inventory", a chest just moves nothing.
+local function notInventory(err)
+  err = tostring(err):lower()
+  return err:find("not an inventory") ~= nil or err:find("target") ~= nil
+end
+local function hasChest(m, target)
+  local ok, err = pcall(m.exportItem, target, { name = "minecraft:structure_void", count = 1 })
+  return ok or not notInventory(err)
+end
+
+-- Where $dump / restock go: the chest on the configured side of the manager, or (no chest there)
+-- storage's own chest by name, when the mainframe is on the storage cable and can see it.
+local function pocketTarget(m, key)
+  local t = side(E[key])
+  if hasChest(m, t) then return t end
+  local st = _G.STORAGE_STATS
+  local name = st and (key == "POCKET_DUMP" and st.mainInput or st.restockChest)
+  if type(name) == "string" and peripheral.isPresent(name) and hasChest(m, name) then return name, true end
+end
+
+local function chestSides(m)
+  local found = {}
+  for _, sd in ipairs(SIDES) do
+    local ok, err = pcall(m.exportItem, "@" .. sd, { name = "minecraft:structure_void", count = 1 })
+    if ok or not notInventory(err) then found[#found + 1] = sd end
+  end
+  return found
 end
 
 ---------------------------------------------------------------------------
@@ -452,6 +510,26 @@ local function checkWear(m, list, owner)
   for name in pairs(wearLevel) do if not worst[name] then wearLevel[name] = nil end end
 end
 
+-- No chest where butler.env says: look around the manager and say how to fix it
+local function explainMissing(m, which, key, user)
+  local found = chestSides(m)
+  local other = key == "POCKET_DUMP" and tostring(E.POCKET_RESTOCK):lower() or tostring(E.POCKET_DUMP):lower()
+  local spare = {}
+  for _, sd in ipairs(found) do if sd ~= other then spare[#spare + 1] = sd end end
+  local head = ("No chest on the %s side of the Inventory Manager (%s=%s)."):format(tostring(E[key]), key, tostring(E[key]))
+  if #found == 0 then
+    say("&e" .. head .. " No chest touches the manager at all. Either put one against the manager block (wired modem "
+      .. "on the storage cable, then /pocket on storage), or put a wired modem on the mainframe joined to the "
+      .. "storage cable and I'll use storage's chests directly.", user)
+  elseif #spare == 1 then
+    say(("&e%s Chests touch it on: %s. Probably the %s one: $pocket %s %s"):format(head, table.concat(found, ", "),
+      spare[1], which, spare[1]), user)
+  else
+    say(("&e%s Chests touch it on: %s. Tell me which is the %s chest: $pocket %s <side>"):format(head,
+      table.concat(found, ", "), which, which), user)
+  end
+end
+
 -- Torches: ask storage to put them in the restock chest, then pull them into your inventory
 local restock = { nextTry = 0, warned = nil }
 local function topUpTorches(m, list, owner)
@@ -489,12 +567,17 @@ local function topUpTorches(m, list, owner)
     restock.nextTry = os.clock() + 300
     return
   end
-  local ok, moved = pcall(m.importItem, side(E.POCKET_RESTOCK), { name = name, count = math.min(want, reply.got) })
+  local from = pocketTarget(m, "POCKET_RESTOCK") or side(E.POCKET_RESTOCK)
+  local ok, moved = pcall(m.importItem, from, { name = name, count = math.min(want, reply.got) })
   if ok and (tonumber(moved) or 0) > 0 then
     say(("&7Topped up your %s (+%d)."):format(plural(name), moved), owner)
   elseif restock.warned ~= "pull" then
-    say("&eStorage filled the restock chest but I couldn't pull from it" .. (ok and "" or (": " .. tostring(moved)))
-      .. ". Check POCKET_RESTOCK in butler.env (which side of the manager it's on).", owner)
+    if not ok and notInventory(moved) then
+      explainMissing(m, "restock", "POCKET_RESTOCK", owner)
+    else
+      say("&eStorage filled the restock chest but I couldn't pull from it" .. (ok and "" or (": " .. tostring(moved)))
+        .. ". Is POCKET_RESTOCK the right side? $pocket shows where the chests are.", owner)
+    end
     restock.warned = "pull"
     restock.nextTry = os.clock() + 120
   end
@@ -504,6 +587,8 @@ end
 local function dump(user)
   local m = liveManager()
   if not m then say("I can't reach your inventory. Is the memory card in the Inventory Manager?", user); return end
+  local target, direct = pocketTarget(m, "POCKET_DUMP")
+  if not target then explainMissing(m, "dump", "POCKET_DUMP", user); return end
   local firstSlot, lastSlot = E.HOTBAR_FIRST + 9, E.HOTBAR_FIRST + 35
   local stacks, count, stuck = 0, 0, false
   for pass = 1, 5 do
@@ -513,8 +598,12 @@ local function dump(user)
     for slot = firstSlot, lastSlot do
       local it = list[slot]
       if it and (it.count or 0) > 0 then
-        local ok, moved = pcall(m.exportItem, side(E.POCKET_DUMP), { name = it.name, fromSlot = slot, count = it.count })
-        if not ok then say("Dump failed: " .. tostring(moved) .. ". Check POCKET_DUMP in butler.env.", user); return end
+        local ok, moved = pcall(m.exportItem, target, { name = it.name, fromSlot = slot, count = it.count })
+        if not ok then
+          if notInventory(moved) then explainMissing(m, "dump", "POCKET_DUMP", user)
+          else say("Dump failed: " .. tostring(moved), user) end
+          return
+        end
         moved = tonumber(moved) or 0
         if moved > 0 then movedThisPass = movedThisPass + moved; count = count + moved end
         if moved >= it.count then stacks = stacks + 1 else left = left + 1 end
@@ -530,7 +619,8 @@ local function dump(user)
     say(("Sent %d stack%s (%s items) to storage, but the dump chest is full, so some is still on you. Is storage running?")
       :format(stacks, stacks == 1 and "" or "s", commas(count)), user)
   else
-    say(("Sent %d stack%s (%s items) to storage. Hotbar untouched."):format(stacks, stacks == 1 and "" or "s", commas(count)), user)
+    say(("Sent %d stack%s (%s items) to storage%s. Hotbar untouched."):format(stacks, stacks == 1 and "" or "s",
+      commas(count), direct and " (straight into its input chest)" or ""), user)
   end
   spaceLevel = 0
 end
@@ -555,7 +645,39 @@ local function pocketInfo(user)
     hot[#hot + 1] = it and (label(it) .. (it.count > 1 and (" x" .. it.count) or "")) or "-"
   end
   say(("Hotbar = slots %d-%d: %s"):format(E.HOTBAR_FIRST, E.HOTBAR_FIRST + 8, table.concat(hot, ", ")), user)
-  say("&7Not your hotbar? Change HOTBAR_FIRST in butler.env on the mainframe.", user)
+  local found, at = chestSides(m), {}
+  for _, sd in ipairs(found) do at[sd] = true end
+  local function mark(key)
+    local t, direct = pocketTarget(m, key)
+    if not t then return tostring(E[key]) .. " (NO CHEST)" end
+    return direct and ("storage's " .. t .. " over the cable") or (tostring(E[key]) .. " (ok)")
+  end
+  say(("Chests touching the manager: %s. Dump: %s. Restock: %s."):format(
+    #found > 0 and table.concat(found, ", ") or "none", mark("POCKET_DUMP"), mark("POCKET_RESTOCK")), user)
+  say("&7Fix with: $pocket dump <side> | $pocket restock <side>. Wrong hotbar? HOTBAR_FIRST in butler.env.", user)
+end
+
+-- $pocket dump north / $pocket restock west
+local function setPocket(user, which, sd)
+  if not SIDE_OK[sd] and not sd:find("[:_]") then
+    say("Sides are up, down, north, south, east or west (or a chest's network name). E.g. $pocket " .. which .. " north", user)
+    return
+  end
+  local key = which == "dump" and "POCKET_DUMP" or "POCKET_RESTOCK"
+  local other = which == "dump" and E.POCKET_RESTOCK or E.POCKET_DUMP
+  if tostring(other):lower() == sd then
+    say(("That's the %s chest's side already. Use two different chests."):format(which == "dump" and "restock" or "dump"), user)
+    return
+  end
+  setEnv(key, sd)
+  local m = liveManager()
+  local there = true
+  if m then
+    there = hasChest(m, side(sd))
+  end
+  say(("%s chest set to %s.%s"):format(which == "dump" and "Dump" or "Restock", sd,
+    there and "" or " (I can't see a chest there yet, mind.)"), user)
+  if which == "restock" then restock.nextTry, restock.warned = 0, nil end
 end
 
 ---------------------------------------------------------------------------
@@ -597,13 +719,16 @@ local function chatLoop()
       user, msg = a, b
     end
     user = tostring(user)
-    local cmd = tostring(msg):lower():gsub("^%$", ""):match("^%s*(%a+)%s*$")
+    local text = tostring(msg):lower():gsub("^%$", "")
+    local cmd, arg1, arg2 = text:match("^%s*(%a+)%s*(%a*)%s*(%S*)%s*$")
     if cmd == "dump" or cmd == "pocket" then
       local owner = ownerName()
       if owner and not isOwner(user, owner) then
         say("Only " .. owner .. " can use that.", user)
       elseif cmd == "dump" then
         dump(user)
+      elseif arg1 == "dump" or arg1 == "restock" then
+        setPocket(user, arg1, arg2)
       else
         pocketInfo(user)
       end

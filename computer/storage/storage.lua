@@ -1095,6 +1095,7 @@ local function statusMsg()
     fuelBarrels = #cfg.fuels,
     fuelAvailable = avail, overcap = overCapList, items = byName, paused = paused,
     locked = (isLocked()), pocketDump = cfg.pocketIn ~= nil, pocketRestock = cfg.pocketOut ~= nil,
+    mainInput = cfg.inputs[1], restockChest = cfg.pocketOut,   -- the butler can use these over the cable
   }
 end
 
@@ -1415,9 +1416,9 @@ function runCommand(cmd)
         say(termView, "Monitor unlocked.")
       end
     elseif found == "/pocket" then
-      print("The butler's pocket chests: two chests touching the")
-      print("mainframe's Inventory Manager, each with a wired modem")
-      print("on this storage cable.")
+      print("The butler's pocket chests, each with a wired modem on")
+      print("this storage cable: touching the mainframe's Inventory")
+      print("Manager, or anywhere if the mainframe is on this cable.")
       local function free(n) return not isSpecial(n) or n == cfg.pocketIn or n == cfg.pocketOut end
       local a = pickChest("POCKET DUMP chest ($dump sends your stuff here)")
       if not free(a) then printError("That one's already in use."); waitEnter(); return end
