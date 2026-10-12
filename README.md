@@ -4,8 +4,8 @@ ComputerCraft (CC:Tweaked + Advanced Peripherals) scripts for Tanis's ATM10 isla
 
 ## Setting up any device
 
-1. Drag `startup.lua` onto the computer or turtle (or `wget https://raw.githubusercontent.com/TanisRoberts/atm10-turtlemancer/main/startup.lua startup.lua`).
-2. Reboot (hold Ctrl+R). Setup asks: turtle or computer, which role (click, or arrows + Enter; each role is described underneath), and a label. Diggers skip the label: the Foreman numbers them.
+1. Drag `startup.lua` onto the computer, turtle or Smart Glasses (or `wget https://raw.githubusercontent.com/TanisRoberts/atm10-turtlemancer/main/startup.lua startup.lua`).
+2. Reboot (hold Ctrl+R). Setup asks: computer, turtle or glasses, which role (click, or arrows + Enter; each role is described underneath), and a label. Diggers skip the label: the Foreman numbers them.
 3. It reboots, downloads that role's files and starts.
 
 **Updating:** reboot. Every boot pulls the device's latest files from `main` (raw GitHub links can cache ~5 min after a push).
@@ -24,9 +24,17 @@ ComputerCraft (CC:Tweaked + Advanced Peripherals) scripts for Tanis's ATM10 isla
 | Turtle | Rigger | `rigger` | Builds from a plan file (`mossy.plan`) |
 | Turtle | Tigger | `lumberjack` | Tree farm |
 | Turtle | Figger | `farmer` | Crop farm |
+| Glasses | HUD | `glasses` | Smart Glasses: night vision + heads-up display (for now: a module report saved to `glasses_report.txt`) |
 
-Every role is defined in `manifest.lua`: its files live under `computer/<role>/` or `turtle/<role>/` and land
-on the device under their own names. Adding a role = adding its folder and one manifest entry.
+Every role is defined in `manifest.lua`: its files live under `computer/<role>/`, `turtle/<role>/` or `glasses/<role>/`
+and land on the device under their own names. Adding a role = adding its folder and one manifest entry.
+
+## Smart Glasses
+
+- Advanced Peripherals Smart Glasses (incl. Netherite Reinforced) are a pocket computer you wear. Right-click them in your hand to open the terminal.
+- Setup only offers the Glasses type on actual glasses (it checks for the `smartglasses` API), and pre-picks the HUD role.
+- Wear them (head or Curios slot) when they boot: the `smart_glasses` peripheral only shows up while they're equipped.
+- Reboot from the glasses' terminal (hold Ctrl+R) to pull new versions.
 
 ## Hardware for the base computers
 
@@ -60,5 +68,3 @@ on the device under their own names. Adding a role = adding its folder and one m
 If GitHub can't be reached or a download is broken (empty, or a `.lua` that doesn't compile), the old file is
 kept and the device boots anyway. Files marked `once` in the manifest (`junk.txt`, `smelt.txt`, `mossy.plan`)
 are only downloaded if missing, so your edits stay. `reset` won't wipe anything if it can't download setup first.
-
-Test

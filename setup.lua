@@ -1,8 +1,8 @@
 -- setup.lua  --  first-time setup for a device. Run by startup.lua when the device has no role.
--- Asks turtle or computer, then which role, then a label. Saves device.cfg and reboots;
--- startup.lua then downloads that role's files.
+-- Asks what the device is (computer, turtle or glasses), then which role, then a label.
+-- Saves device.cfg and reboots; startup.lua then downloads that role's files.
 --
--- Advanced computers/turtles: click an option (click again or "Next" to go on).
+-- Advanced computers/turtles/glasses: click an option (click again or "Next" to go on).
 -- Keyboard works everywhere: arrows to move, Enter to pick, Backspace on a menu to go back.
 
 local REPO = "https://raw.githubusercontent.com/TanisRoberts/atm10-turtlemancer/main/"
@@ -198,24 +198,40 @@ while true do
   read()
 end
 
+-- What is this device? Turtles have the turtle API; Smart Glasses have the smartglasses API.
+local isTurtle  = turtle ~= nil
+local isGlasses = smartglasses ~= nil
+local function fits(tk)
+  if tk == "turtle" then return isTurtle end
+  if tk == "glasses" then return isGlasses end
+  return not isTurtle and not isGlasses
+end
+
 -- Best guess, so re-setting up an existing machine is mostly pressing Enter
-local isTurtle = turtle ~= nil
 local label = os.getComputerLabel()
 local first = ((label or ""):match("^%a+") or ""):lower()
-local guessType, guessRole = isTurtle and "turtle" or "computer", nil
+local guessType = isTurtle and "turtle" or (isGlasses and "glasses" or "computer")
+local guessRole = nil
 for tk, t in pairs(M.types) do
   for rk, r in pairs(t.roles) do
-    if first ~= "" and (rk == first or r.name:lower() == first) then guessType, guessRole = tk, rk end
+    if first ~= "" and (rk == first or r.name:lower() == first) and fits(tk) then guessType, guessRole = tk, rk end
   end
 end
-if not isTurtle and guessType == "turtle" then guessType, guessRole = "computer", nil end
+-- Only one role on this type? Pre-pick it.
+if not guessRole and M.types[guessType] and #(M.types[guessType].order or {}) == 1 then
+  guessRole = M.types[guessType].order[1]
+end
 
+local NOTES = {
+  computer = "This isn't a plain computer: computer roles may not work here.",
+  turtle   = "This is a computer: turtle roles won't work here.",
+  glasses  = "These aren't Smart Glasses: glasses roles won't work here.",
+}
 local typeOptions = {}
-for _, tk in ipairs({ "computer", "turtle" }) do
+for _, tk in ipairs({ "computer", "turtle", "glasses" }) do
   local t = M.types[tk]
   if t then
-    local note = (tk == "turtle" and not isTurtle) and "This is a computer: turtle roles won't work here." or nil
-    typeOptions[#typeOptions + 1] = { tk, t.name, t.about, t.details, note }
+    typeOptions[#typeOptions + 1] = { tk, t.name, t.about, t.details, (not fits(tk)) and NOTES[tk] or nil }
   end
 end
 
@@ -224,7 +240,8 @@ local step = 1
 while true do
   if step == 1 then
     tk = menu(1, 3, "What are you setting up?", typeOptions, tk or guessType, false)
-    if tk == "turtle" and not isTurtle then tk = nil else step = 2 end
+    -- Turtle and glasses roles need the real hardware; computer roles are allowed anywhere.
+    if (tk == "turtle" and not isTurtle) or (tk == "glasses" and not isGlasses) then tk = nil else step = 2 end
     T = tk and M.types[tk]
   elseif step == 2 then
     local opts = {}

@@ -95,5 +95,23 @@ return {
                    files = { "turtle/figger/farmer.lua" } },
       },
     },
+    glasses = {
+      name = "Glasses",
+      about = "Smart Glasses you wear",
+      details = "Advanced Peripherals Smart Glasses, worn on your head or in a Curios slot. "
+        .. "Night vision, HUD, and a link back to the mainframe.",
+      order = { "hud" },
+      roles = {
+        hud = {
+          name = "HUD",
+          about = "Night vision + heads-up display",
+          details = "Runs on the glasses themselves. For now it reports what modules the glasses "
+            .. "have (saved to glasses_report.txt) so the night vision toggle can be built on the "
+            .. "real API. Reboot the glasses to pick up new versions.",
+          run = "glasses",
+          files = { "glasses/hud/glasses.lua" },
+        },
+      },
+    },
   },
 }
