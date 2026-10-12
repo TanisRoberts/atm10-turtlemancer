@@ -16,9 +16,10 @@ local STATION_LINES = 3
 local TEXT_SCALE    = 0.5
 local MON_CONFIG    = "monitors.cfg"
 
--- Find monitors and decide which is the wall and which is the miner panel
+-- Find monitors and decide which is the wall and which is the miner panel.
+-- Only monitors touching the computer count: screens out on the cable belong to other computers.
 local names = {}
-for _, n in ipairs(peripheral.getNames()) do
+for _, n in ipairs(rs.getSides()) do
   if peripheral.hasType(n, "monitor") then names[#names + 1] = n end
 end
 
@@ -38,7 +39,8 @@ if #names >= 2 then
       m.setCursorPos(1, 2); m.write("Tap me if so")
     end
     print("Two screens found. Tap the MINER PANEL screen.")
-    local _, side = os.pullEvent("monitor_touch")
+    local side
+    repeat _, side = os.pullEvent("monitor_touch") until present(side)
     mcfg.panel = side
     local f = fs.open(MON_CONFIG, "w"); f.write(textutils.serialize(mcfg)); f.close()
     print("Saved: miner panel is " .. side)

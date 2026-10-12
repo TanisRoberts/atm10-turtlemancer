@@ -588,10 +588,17 @@ local COMMANDS = {
 local mon
 local monView  = { kind = "monitor", filter = "", page = 1, hits = {} }
 
--- (Re)find the monitor. A monitor on the wired cable can vanish or get a new name
--- (wall re-formed, chunk reloaded, modem toggled): calls to the old one then return nothing.
+-- (Re)find the monitor: only one touching the computer (screens out on the cable belong to other
+-- computers). Re-found when the wall re-forms or a monitor is added/removed.
 local function findMonitor()
-  mon = peripheral.find("monitor", function(_, m) local ok, w = pcall(m.getSize); return ok and w ~= nil end)
+  mon = nil
+  for _, side in ipairs(rs.getSides()) do
+    if not mon and peripheral.hasType(side, "monitor") then
+      local m = peripheral.wrap(side)
+      local ok, w = pcall(m.getSize)
+      if ok and w then mon = m end
+    end
+  end
   monView.dev, monView.touch, monView.hits = mon, mon and mon.isColour() or false, {}
   if mon then mon.setTextScale(TEXT_SCALE) end
 end
@@ -907,9 +914,9 @@ end
 
 local function touchLoop()
   while true do
-    local e, _, x, y = os.pullEvent()
+    local e, side, x, y = os.pullEvent()
     if e == "monitor_touch" then
-      if monView.touch and clickIn(monView, x, y) then draw() end
+      if monView.touch and mon and side == peripheral.getName(mon) and clickIn(monView, x, y) then draw() end
     elseif e == "peripheral" or e == "peripheral_detach" or e == "monitor_resize" then
       findMonitor(); draw()
     end

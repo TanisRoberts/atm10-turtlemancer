@@ -286,7 +286,11 @@ end
 ---------------------------------------------------------------------------
 -- Display
 ---------------------------------------------------------------------------
-local mon = peripheral.find("monitor")
+-- Only a monitor touching the computer (screens out on the cable belong to other computers)
+local mon
+for _, side in ipairs(rs.getSides()) do
+  if not mon and peripheral.hasType(side, "monitor") then mon = peripheral.wrap(side) end
+end
 local function draw()
   if not mon then return end
   mon.setTextScale(0.5)
