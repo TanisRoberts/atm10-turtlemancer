@@ -2,7 +2,8 @@
 --
 -- Hardware:
 --   * A computer with a WIRED modem on the storage cable network (so it can see the furnaces)
---     and a WIRELESS or ENDER modem (to talk to the storage computer and the mainframe).
+--     That's all it needs: it talks to the storage computer over the same cable, and storage passes
+--     its news on to the mainframe. A wireless/ender modem as well is fine but not needed.
 --   * Furnaces (incl. Iron Furnaces) on the storage cable network. Blast furnaces/smokers are ignored.
 --   * Optional: a monitor for the status.
 --
@@ -368,12 +369,13 @@ local function terminalLoop()
   end
 end
 
-local modem = peripheral.find("modem", function(_, m) return m.isWireless() end)
-if not modem then
-  printError("I need a wireless or ender modem to talk to the storage computer.")
+-- Talk on every modem: the wired one reaches storage over the cable, a wireless one (if any) the mainframe too
+local opened = 0
+peripheral.find("modem", function(name) rednet.open(name); opened = opened + 1; return false end)
+if opened == 0 then
+  printError("I need a modem: a wired modem on the storage cable is enough.")
   return
 end
-rednet.open(peripheral.getName(modem))
 loadSmeltRules()
 findFurnaces()
 parallel.waitForAny(workLoop, netLoop, terminalLoop)

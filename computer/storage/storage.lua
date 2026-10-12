@@ -6,7 +6,9 @@
 --   * INPUT chest(s) and one OUTPUT chest, also on the network
 --   * Optional: a FUEL barrel for the miner turtle (kept at exactly one refill)
 --   * Optional: an advanced monitor wall (touch screen). Normal monitors work as display-only.
---   * A wireless or ender modem, so it can talk to the mainframe, the smelter and the turtles
+--   * A wireless or ender modem, so it can talk to the mainframe and the turtles. The smelter can use the
+--     wired cable instead: storage talks on every modem and passes the smelter's news on to the mainframe
+--     (and the mainframe's smelt orders back).
 --
 -- Use:
 --   * Dump items into any INPUT chest. They get sorted into storage automatically.
@@ -860,12 +862,14 @@ local function workerLoop()
 end
 
 local function netLoop()
-  local modem = peripheral.find("modem", function(_, m) return m.isWireless() end)
-  if not modem then
-    print("No wireless modem: the mainframe, smelter and turtles can't reach storage.")
-    return os.pullEvent("never")
-  end
-  rednet.open(peripheral.getName(modem))
+  -- Every modem: wireless for the mainframe/turtles, the wired cable for the smelter
+  local wireless = false
+  peripheral.find("modem", function(name, m)
+    rednet.open(name)
+    if m.isWireless() then wireless = true end
+    return false
+  end)
+  if not wireless then print("No wireless modem: the mainframe and turtles can't reach storage.") end
   while true do
     local from, msg, proto = rednet.receive(1)
     if type(msg) == "table" then
@@ -879,6 +883,13 @@ local function netLoop()
       elseif proto == BASE and msg.type == "smelt_ops" and type(msg.ops) == "table" then
         jobs[#jobs + 1] = { from = from, id = msg.id, ops = msg.ops }
         os.queueEvent("storage_work")
+      end
+      -- Relay between the cable and the air, so a wired-only smelter still reaches the mainframe
+      if proto == BASE and (msg.type == "smelter" or msg.type == "smelt_cmd") and not msg.relayed then
+        local copy = {}
+        for k, v in pairs(msg) do copy[k] = v end
+        copy.relayed = true
+        rednet.broadcast(copy, BASE)
       end
     end
     if os.clock() - lastBroadcast >= STATUS_EVERY then broadcastStatus() end

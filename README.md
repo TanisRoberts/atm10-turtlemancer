@@ -28,9 +28,9 @@ on the device under their own names. Adding a role = adding its folder and one m
 
 ## Hardware for the base computers
 
-- **Every base computer** needs a wireless or ender modem: they talk on the `tanis-base` network.
+- **Mainframe and storage** need a wireless or ender modem: they talk on the `tanis-base` network (the smelter can use the storage cable instead, see below).
 - **Storage:** a wired modem on the storage cable (barrels, drawers, input/output chests), its own monitor for the touch screen, then `/setup` with the marker items.
-- **Smelter:** a wired modem on the **same** storage cable, with the furnaces on that cable too. Storage is the only computer that moves items, so they never fight.
+- **Smelter:** just a wired modem on the **same** storage cable, with the furnaces on that cable too. No wireless modem needed: it talks to storage over the cable, and storage passes its news to the mainframe. Storage is the only computer that moves items, so they never fight.
 - **Mainframe:** Environment Detector, optional Chat Box, monitor wall (island strip + status board), miner panel monitor.
 
 ## Safety
