@@ -408,9 +408,9 @@ local function dropTo(dir)
   if dir == "up" then return turtle.dropUp() end
   face(dir); return turtle.drop()
 end
-local function suckFrom(dir)
-  if dir == "up" then return turtle.suckUp() end
-  face(dir); return turtle.suck()
+local function suckFrom(dir, n)
+  if dir == "up" then return turtle.suckUp(n) end
+  face(dir); return turtle.suck(n)
 end
 
 local function isOre(ok, d)
@@ -552,6 +552,53 @@ local function mineRegion()
   save()
 end
 
+-- Tell storage which barrels are mine: with storage watching (sorting paused), take 1 item from
+-- my fuel barrel and drop it in my dump barrel. Storage registers whichever barrels changed.
+local function linkBarrels()
+  if not (S.fuelDir and S.dumpDir) then return false, "No barrels found at setup" end
+  if not rednet.isOpen() then
+    local m = peripheral.find("modem", function(_, x) return x.isWireless() end)
+    if not m then return false, "No ender modem" end
+    rednet.open(peripheral.getName(m))
+  end
+  local me = os.getComputerID()
+  local function waitFor(kind, seconds)
+    local deadline = os.clock() + seconds
+    while os.clock() < deadline do
+      local _, m = rednet.receive(PROTOCOL, math.max(0.1, deadline - os.clock()))
+      if type(m) == "table" and m.type == kind and m.id == me then return m end
+    end
+  end
+  setStatus("docked", "Showing storage my barrels")
+  rednet.broadcast({ type = "barrel_probe", step = "start", id = me }, PROTOCOL)
+  if not waitFor("probe_ready", 10) then
+    return false, "Storage didn't answer (needs a wireless/ender modem)"
+  end
+  for slot = 1, 16 do if turtle.getItemCount(slot) == 0 then turtle.select(slot); break end end
+  local item
+  if suckFrom(S.fuelDir, 1) then
+    local d = turtle.getItemDetail()
+    item = d and d.name
+    dropTo(S.dumpDir)
+  end
+  face(0)
+  rednet.broadcast({ type = "barrel_probe", step = "done", id = me, item = item }, PROTOCOL)
+  local r = waitFor("probe_result", 25)
+  turtle.select(1)
+  if not r then return false, "Storage didn't confirm" end
+  return r.ok == true, r.msg
+end
+
+local nextLinkTry = 0
+local function maybeLinkBarrels()
+  if S.barrelsLinked or os.clock() < nextLinkTry or not atDock() then return end
+  local ok, msg = linkBarrels()
+  S.barrelsLinked, S.linkNote = ok or nil, msg
+  save()
+  print((ok and "Barrels linked: " or "Barrel link failed: ") .. tostring(msg))
+  if not ok then nextLinkTry = os.clock() + 120 end
+end
+
 ---------------------------------------------------------------------------
 -- Dock: unload, refuel
 ---------------------------------------------------------------------------
@@ -592,6 +639,7 @@ local function dockService()
   end
   S.ores = 0
   if emptySlots() < 16 then face(0); save(); return false end -- couldn't unload everything
+  maybeLinkBarrels() -- before refuelling, while the fuel barrel still has something in it
 
   -- Refuel from the fuel barrel, taking only what fits in the tank
   local limit = fuelLimit()
@@ -913,7 +961,7 @@ local function statusMsg()
     type = "status", id = os.getComputerID(), label = os.getComputerLabel(), num = S.num,
     pos = px and { x = px, y = py, z = pz } or nil, dim = S.dim, home = S.home,
     facing = S.facing and COMPASS[(S.facing + (S.h or 0)) % 4], gps = gpsSeen,
-    offPath = S.offPath, retired = S.retired,
+    offPath = S.offPath, retired = S.retired, barrelsLinked = S.barrelsLinked, linkNote = S.linkNote,
     state = S.status, msg = S.msg, seq = S.seq,
     fuel = f, fuelLimit = l, slots = used,
     y = S.dockY and (S.dockY + (S.y or 0)), x = S.x, z = S.z,

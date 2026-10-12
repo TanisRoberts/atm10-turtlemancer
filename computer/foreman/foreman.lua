@@ -373,6 +373,13 @@ local function drawStatus(id, x, y, w, maxY)
     lr(x, y, w, "Dock", hm and ("%d, %d, %d"):format(hm.x, hm.y, hm.z) or "-", K.lightGrey, K.lightGrey)
   end)
   line(function() lr(x, y, w, "GPS", s and (s.gps and "yes" or "no, counting moves") or "-", K.grey, K.grey) end)
+  line(function()
+    local txt = not s and "-" or s.barrelsLinked and "linked to storage" or "not linked yet"
+    lr(x, y, w, "Barrels", txt, K.grey, s and not s.barrelsLinked and K.orange or K.grey)
+  end)
+  if s and not s.barrelsLinked and s.linkNote then
+    line(function() at(x, y, pad(s.linkNote, w), K.orange) end)
+  end
   if s and s.offPath then
     line(function() at(x, y, pad("Moved by hand. Goes home", w), K.orange) end)
     line(function() at(x, y, pad("by a tunnel at Y 0.", w), K.orange) end)

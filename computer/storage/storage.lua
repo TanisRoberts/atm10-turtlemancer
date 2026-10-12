@@ -86,6 +86,14 @@ local function isDrawer(n)
   return (n:find("drawer") or n:find("functionalstorage")) ~= nil
 end
 
+local function listRemove(list, n)
+  for i = #list, 1, -1 do if list[i] == n then table.remove(list, i) end end
+end
+local function listAdd(list, n)
+  for _, x in ipairs(list) do if x == n then return end end
+  list[#list + 1] = n
+end
+
 local function isSpecial(n)
   if n == cfg.output or n == cfg.rigger then return true end
   for _, d in ipairs(cfg.docks or {}) do if d == n then return true end end
@@ -226,6 +234,10 @@ local function setup()
       for _, n in ipairs(f.dump or {}) do cfg.inputs[#cfg.inputs + 1] = n end
       cfg.output = f.output[1]
       cfg.fuels = f.fuel or {}
+      for _, b in pairs(cfg.diggerBarrels or {}) do  -- barrels Diggers registered themselves
+        if b.fuel then listAdd(cfg.fuels, b.fuel) end
+        if b.dump then listAdd(cfg.inputs, b.dump) end
+      end
       cfg.rigger = f.rigger and f.rigger[1] or nil
       cfg.docks = f.docks or {}
       saveCfg()
@@ -988,10 +1000,13 @@ local function waitTick()
   end
 end
 
+local workerBusy = false -- a sorting pass is running (a barrel probe waits for it to finish)
+
 local function workerLoop()
   local lastFull = os.clock()
   while true do
     if not paused then
+      workerBusy = true
       local moved = deposit()
       if os.clock() - lastFull >= FULL_SCAN then
         scanAll(); lastFull = os.clock()
@@ -1010,10 +1025,71 @@ local function workerLoop()
         buildItems()
         broadcastStatus()   -- the smelter plans its next move from fresh totals
       end
+      workerBusy = false
       draw()
     end
     waitTick()
   end
+end
+
+---------------------------------------------------------------------------
+-- Digger barrel probe: a Digger takes 1 item from its fuel barrel and drops it in its dump barrel
+-- while sorting is paused. The barrel that lost it is its fuel barrel, the one that gained it its
+-- dump barrel; both get registered (fuel barrel kept topped up, dump barrel emptied like an input).
+---------------------------------------------------------------------------
+local probe = nil   -- { id, snap, untilT }
+
+local function snapshotAll()
+  local snap, fns = {}, {}
+  for _, n in ipairs(inventories()) do
+    fns[#fns + 1] = function()
+      local t = {}
+      for _, it in pairs(call(n, "list") or {}) do t[it.name] = (t[it.name] or 0) + it.count end
+      snap[n] = t
+    end
+  end
+  runBatched(fns)
+  return snap
+end
+
+local function registerDiggerBarrels(id, fuel, dump)
+  cfg.diggerBarrels = cfg.diggerBarrels or {}
+  if fuel then
+    listRemove(cfg.inputs, fuel); listRemove(cfg.docks or {}, fuel)
+    listAdd(cfg.fuels, fuel)
+  end
+  if dump and dump ~= fuel then
+    listRemove(cfg.fuels, dump); listRemove(cfg.docks or {}, dump)
+    listAdd(cfg.inputs, dump)
+  end
+  cfg.diggerBarrels[tostring(id)] = { fuel = fuel, dump = dump }
+  saveCfg()
+  scanAll(); buildItems()
+end
+
+local function probeFinish(from, item)
+  local after = snapshotAll()
+  local fuel, dump, fuelN, dumpN = nil, nil, 0, 0
+  if item then
+    for n, before in pairs(probe.snap) do
+      local delta = ((after[n] or {})[item] or 0) - (before[item] or 0)
+      if delta == -1 then fuel, fuelN = n, fuelN + 1 end
+      if delta == 1 then dump, dumpN = n, dumpN + 1 end
+    end
+  end
+  probe = nil
+  local ok, msg = false, nil
+  if not item then
+    msg = "Fuel barrel empty: put one coal in it and try again"
+  elseif fuelN ~= 1 or dumpN ~= 1 then
+    msg = "Couldn't tell which barrels moved. Are both on the storage cable with modems on?"
+  else
+    registerDiggerBarrels(from, fuel, dump)
+    ok, msg = true, "Storage knows my barrels: fuel " .. fuel .. ", dump " .. dump
+  end
+  paused = false
+  rednet.send(from, { type = "probe_result", id = from, ok = ok, msg = msg, fuel = fuel, dump = dump }, "tanis-miner")
+  os.queueEvent("storage_work")
 end
 
 local function netLoop()
@@ -1027,7 +1103,18 @@ local function netLoop()
   if not wireless then print("No wireless modem: the mainframe and turtles can't reach storage.") end
   while true do
     local from, msg, proto = rednet.receive(1)
-    if type(msg) == "table" then
+    if probe and os.clock() > probe.untilT then probe = nil; paused = false end -- Digger never finished
+    if type(msg) == "table" and proto == "tanis-miner" and msg.type == "barrel_probe" and msg.id == from then
+      if msg.step == "start" and not probe then
+        paused = true
+        local t = os.clock() + 20
+        while workerBusy and os.clock() < t do os.sleep(0.2) end
+        probe = { id = from, snap = snapshotAll(), untilT = os.clock() + 30 }
+        rednet.send(from, { type = "probe_ready", id = from }, "tanis-miner")
+      elseif msg.step == "done" and probe and probe.id == from then
+        probeFinish(from, msg.item)
+      end
+    elseif type(msg) == "table" then
       if proto == "tanis-miner" and msg.type == "status" then
         minerFuelLimit = tonumber(msg.fuelLimit) or minerFuelLimit
       elseif proto == "tanis-rigger" and msg.type == "status" then
@@ -1151,6 +1238,9 @@ function runCommand(cmd)
       local target = minerFuelLimit or REFILL
       print(("Each Digger fuel barrel is kept at %d fuel"):format(target))
       print(minerFuelLimit and "(a Digger's full tank)." or "(default: no Digger heard yet).")
+      if not minerFuelLimit then
+        printError("Storage hasn't heard a Digger: it needs a wireless or ender modem on it.")
+      end
       local value = {}
       for _, fv in ipairs(FUEL_VALUES) do value[fv[1]] = fv[2] end
       if #cfg.fuels == 0 then printError("No fuel barrels set: use /fuel or /setup (lava bucket).") end
