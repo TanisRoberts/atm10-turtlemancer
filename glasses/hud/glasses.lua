@@ -231,8 +231,10 @@ local function textWidth(str)
 end
 
 -- Screen size in GUI pixels (the overlay reports the window in real pixels + the GUI scale)
+local diag = {}   -- what the overlay told us last, shown on the glasses' screen
 local function guiSize()
   local ok, w, h, scale = pcall(overlay.getGuiSize)
+  diag.w, diag.h, diag.scale = ok and w or nil, ok and h or nil, ok and scale or nil
   if not ok or type(w) ~= "number" or w <= 0 then return nil end
   scale = (type(scale) == "number" and scale > 0) and scale or 1
   return w / scale, h / scale
@@ -258,6 +260,7 @@ local function drawHud()
   if not yes("HUD") then hideHud(); shown.enabled = false; return end
   local content, colour = hudContent(), hudColour()
   local x, y = hudPos(content)
+  diag.x, diag.y = x, y
   if hudText then
     -- Object may have vanished (module pulled and put back): recreate if a setter fails
     local ok = pcall(function()
@@ -269,9 +272,11 @@ local function drawHud()
     if ok then return end
     hudText = nil
   end
+  diag.x, diag.y = x, y
   local ok, obj = pcall(overlay.createText, {
     gui = true, x = x, y = y, content = content, color = colour, shadow = true,
   })
+  diag.err = (not ok) and tostring(obj) or ((type(obj) ~= "table") and ("createText gave " .. type(obj)) or nil)
   if ok and type(obj) == "table" then
     hudText = obj
     shown = { enabled = true, content = content, colour = colour, x = x, y = y }
@@ -347,6 +352,25 @@ local function drawScreen()
   else
     at(2, y, "No Environment Detector:", colours.orange, colours.black); y = y + 1
     at(2, y, "AUTO keeps it on.", colours.orange, colours.black)
+  end
+
+  -- HUD diagnostics: where it's drawn, the screen size the client reported, objects on screen
+  if overlay then
+    local n = call(overlay, "getObjectsCount")
+    local function num(v)
+      if type(v) ~= "number" then return "?" end
+      if v == math.floor(v) then return ("%d"):format(v) end
+      return ("%.2f"):format(v)
+    end
+    local line1, line2
+    if diag.err then
+      line1, line2 = "HUD error:", diag.err
+    else
+      line1 = ("HUD at %s,%s (%s obj)"):format(num(diag.x), num(diag.y), num(n))
+      line2 = ("Screen %sx%s /%s"):format(num(diag.w), num(diag.h), num(diag.scale))
+    end
+    at(2, H - 2, line1:sub(1, W - 2), colours.grey, colours.black)
+    at(2, H - 1, line2:sub(1, W - 2), colours.grey, colours.black)
   end
 
   -- Footer: HUD toggle

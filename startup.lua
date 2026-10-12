@@ -12,6 +12,7 @@
 local REPO     = "https://raw.githubusercontent.com/TanisRoberts/atm10-turtlemancer/main/"
 local CFG      = "device.cfg"
 local MANIFEST = "manifest.cache"   -- last good manifest, for booting offline
+local BOOT_PAUSE = 1                 -- seconds to leave the update summary on screen before the role starts
 
 local function readFile(path)
   if not fs.exists(path) then return nil end
@@ -140,6 +141,7 @@ end
 if not offline then for _, p in ipairs(problems) do printError("Kept old " .. p) end end
 
 if fs.exists(R.run .. ".lua") then
+  if BOOT_PAUSE > 0 then os.sleep(BOOT_PAUSE) end
   shell.run(R.run)
 else
   printError(R.run .. ".lua is missing and couldn't be downloaded. Reboot to try again.")
