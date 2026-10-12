@@ -431,7 +431,7 @@ end
 -- Chat commands
 ---------------------------------------------------------------------------
 local HELP = "Commands: island status | scan | miner | storage | rigger | tigger | figger | smelt | alerts | test."
-  .. " Your inventory: $dump | $pocket"
+  .. " Your inventory: $get [n] <item> | $dump | $pocket"
 
 local function chatLoop()
   while true do

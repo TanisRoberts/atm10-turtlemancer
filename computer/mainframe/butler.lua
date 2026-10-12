@@ -11,6 +11,7 @@
 -- set it to that side ($pocket dump north).
 --
 -- What it does:
+--   $get [n] <item>   n of an item from storage straight into your inventory (no n = one stack)
 --   $dump      everything except your hotbar (armour and offhand stay too) goes to storage
 --   $pocket    what the butler sees: your hotbar slots, and which sides of the manager have chests
 --   $pocket dump <storage|side> / $pocket restock <storage|side>   change where they go (saved to butler.env)
@@ -547,6 +548,20 @@ end
 
 -- Torches: ask storage to put them in the restock chest, then pull them into your inventory
 local restock = { nextTry = 0, warned = nil }
+-- Ask storage to put `count` of an item in the restock chest (stack = "one stack, whatever that is
+-- for this item"). Returns its reply { got, ready } or nil if storage didn't answer in 10 s.
+local reqSeq = 0
+local function requestPocket(item, count, stack)
+  reqSeq = reqSeq + 1
+  local seq = os.epoch("utc") * 100 + reqSeq % 100
+  rednet.broadcast({ type = "pocket_fill", item = item, count = count, stack = stack, seq = seq }, BASE)
+  local untilT = os.clock() + 10
+  while os.clock() < untilT do
+    local _, msg = rednet.receive(BASE, math.max(0.1, untilT - os.clock()))
+    if type(msg) == "table" and msg.type == "pocket_filled" and msg.seq == seq then return msg end
+  end
+end
+
 local function topUpTorches(m, list, owner)
   local name = E.TORCH_ITEM
   if E.TORCH_MIN <= 0 or os.clock() < restock.nextTry then return end
@@ -557,14 +572,7 @@ local function topUpTorches(m, list, owner)
   restock.nextTry = os.clock() + 20
   if not _G.STORAGE_SEEN or os.clock() - _G.STORAGE_SEEN > 30 then return end   -- storage isn't around
 
-  local seq = os.epoch("utc")
-  rednet.broadcast({ type = "pocket_fill", item = name, count = want, seq = seq }, BASE)
-  local reply
-  local untilT = os.clock() + 10
-  while os.clock() < untilT do
-    local _, msg = rednet.receive(BASE, math.max(0.1, untilT - os.clock()))
-    if type(msg) == "table" and msg.type == "pocket_filled" and msg.seq == seq then reply = msg; break end
-  end
+  local reply = requestPocket(name, want)
   if not reply then return end
   if reply.ready == false then
     if restock.warned ~= "chest" then
@@ -595,6 +603,79 @@ local function topUpTorches(m, list, owner)
     end
     restock.warned = "pull"
     restock.nextTry = os.clock() + 120
+  end
+end
+
+-- Match what you typed against what storage holds: "iron ingot", "iron_ingot", "minecraft:iron_ingot"
+-- all work; a vaguer word ("iron") lists the options. Returns a list of item ids, best first.
+local function findItem(query)
+  local items = _G.STORAGE_STATS and _G.STORAGE_STATS.items
+  if type(items) ~= "table" then return nil end
+  local q = query:lower():gsub("^%s+", ""):gsub("%s+$", "")
+  local qid = q:gsub("%s+", "_")
+  local tiers = { {}, {}, {}, {} }
+  for id, c in pairs(items) do
+    if (tonumber(c) or 0) > 0 then
+      local path = id:gsub("^.-:", "")
+      if id == q or id == qid then table.insert(tiers[1], id)
+      elseif path == qid then table.insert(tiers[2], id)
+      elseif path == qid:gsub("es$", "") or path == qid:gsub("s$", "") then table.insert(tiers[3], id)   -- plurals
+      elseif path:find(qid, 1, true) or id:find(qid, 1, true) then table.insert(tiers[4], id) end
+    end
+  end
+  for _, t in ipairs(tiers) do
+    if #t > 0 then
+      table.sort(t, function(a, b) return (items[a] or 0) > (items[b] or 0) end)
+      return t
+    end
+  end
+  return {}
+end
+
+-- $get [count] <item>: storage puts it in its restock (or output) chest, the manager hands it to you
+local function getItem(user, args)
+  local m = liveManager()
+  if not m then say("I can't reach your inventory. Is the memory card in the Inventory Manager?", user); return end
+  args = args:gsub("^%s+", ""):gsub("%s+$", "")
+  local n, what = args:match("^(%d+)%s+(.+)$")
+  if not n then what, n = args:match("^(.-)%s+x?(%d+)$") end
+  what = what or args
+  local count = tonumber(n)
+  if what == "" or (count and count <= 0) then
+    say("Say what you want: $get 32 iron ingot  (no number = one stack)", user); return
+  end
+  if not _G.STORAGE_SEEN or os.clock() - _G.STORAGE_SEEN > 30 then
+    say("I can't hear the storage computer right now.", user); return
+  end
+  local found = findItem(what)
+  if not found then say("Storage hasn't told me what it holds yet. Give it a few seconds.", user); return end
+  if #found == 0 then say("Storage has no " .. what .. ".", user); return end
+  if #found > 1 then
+    local opts = {}
+    for i = 1, math.min(5, #found) do opts[i] = pretty(found[i]):lower() end
+    say(("Which one? %s%s. E.g. $get 16 %s"):format(table.concat(opts, ", "), #found > 5 and ", ..." or "", opts[1]), user)
+    return
+  end
+  local id = found[1]
+  local from = pocketTarget(m, "POCKET_RESTOCK")
+  if not from then explainMissing(m, "restock", "POCKET_RESTOCK", user); return end
+  local reply = requestPocket(id, count, count == nil)
+  if not reply then say("Storage didn't answer. Is it running?", user); return end
+  if reply.ready == false then say("Storage has no chest to hand things over from (no output chest set?).", user); return end
+  if (reply.got or 0) <= 0 then say("Storage is out of " .. pretty(id):lower() .. ".", user); return end
+  local function many(k) return k == 1 and pretty(id):lower() or plural(id) end
+  local ok, moved = pcall(m.importItem, from, { name = id, count = reply.got })
+  moved = ok and (tonumber(moved) or 0) or 0
+  if not ok then
+    say("Couldn't hand it over: " .. tostring(select(2, pcall(m.importItem, from, { name = id, count = 1 }))), user)
+  elseif moved == 0 then
+    say(("No room in your inventory: %d %s waiting in storage's chest."):format(reply.got, many(reply.got)), user)
+  elseif moved < reply.got then
+    say(("Here's %d %s. Your inventory's full: %d more waiting in storage's chest."):format(
+      moved, many(moved), reply.got - moved), user)
+  else
+    local short = count and reply.got < count and (" (all storage had)") or ""
+    say(("Here's %d %s%s."):format(moved, many(moved), short), user)
   end
 end
 
@@ -737,7 +818,12 @@ local function chatLoop()
     user = tostring(user)
     local text = tostring(msg):lower():gsub("^%$", "")
     local cmd, arg1, arg2 = text:match("^%s*(%a+)%s*(%a*)%s*(%S*)%s*$")
-    if cmd == "dump" or cmd == "pocket" then
+    local getArgs = text:match("^%s*get%s*(.*)$")
+    if getArgs then
+      local owner = ownerName()
+      if owner and not isOwner(user, owner) then say("Only " .. owner .. " can use that.", user)
+      else getItem(user, getArgs) end
+    elseif cmd == "dump" or cmd == "pocket" then
       local owner = ownerName()
       if owner and not isOwner(user, owner) then
         say("Only " .. owner .. " can use that.", user)

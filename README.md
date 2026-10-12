@@ -38,6 +38,7 @@ on the device under their own names. Adding a role = adding its folder and one m
 
 ## The butler (mainframe)
 
+- `$get [n] <item>`: straight from storage into your inventory (`$get 32 iron ingot`, `$get torches`; no number = one stack; a vague name lists the options).
 - `$dump`: everything except your hotbar goes to storage (armour and offhand stay). `$pocket`: what the manager sees, to check the hotbar slots (`HOTBAR_FIRST`).
 - Torches: under 10 on you, storage tops you back up to 64 (any item, any numbers: `TORCH_ITEM`, `TORCH_MIN`, `TORCH_FILL`).
 - Private warnings: inventory nearly full / full; armour or a tool at 15% and again at 5%.

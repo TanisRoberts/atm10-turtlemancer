@@ -753,6 +753,7 @@ local function fillPocket()
   lastPocketSeq = req.seq
   local item = tostring(req.item)
   local want = math.max(0, math.min(tonumber(req.count) or 0, 27 * 64))
+  if req.stack then want = (info[item] and info[item].max) or 64 end   -- $get with no number: one stack
   local have = 0
   local chest = cfg.pocketOut or cfg.output   -- no restock chest set: the normal output chest
   if chest then
