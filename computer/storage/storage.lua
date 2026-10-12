@@ -246,6 +246,7 @@ end
 local storage = {}   -- storage inventory names (everything except inputs/output/fuel)
 local cache   = {}   -- name -> list() result
 local sizes   = {}   -- name -> slot count
+local limits  = {}   -- drawer name -> { slot -> how many it holds } (cleared on full scans)
 local info    = {}   -- item key -> { label, max }
 local items   = {}   -- sorted item summaries
 local byName  = {}   -- item id -> total count (all variants)
@@ -282,7 +283,7 @@ local function scanAll()
   refreshStorageList()
   local fns = {}
   -- Sizes are re-read too: a drawer controller grows when you link more drawers to it
-  for _, n in ipairs(storage) do fns[#fns + 1] = function() sizes[n] = nil; scanInv(n) end end
+  for _, n in ipairs(storage) do fns[#fns + 1] = function() sizes[n] = nil; limits[n] = nil; scanInv(n) end end
   runBatched(fns)
 end
 
@@ -345,6 +346,29 @@ local function buildItems()
   stats.used, stats.total, stats.kinds, stats.inv = used, total, #items, #storage
 end
 
+-- How much one drawer slot holds (bigger drawers and upgrades hold more). Cached in `limits`.
+local function slotLimit(n, s)
+  limits[n] = limits[n] or {}
+  local l = limits[n][s]
+  if not l then
+    l = call(n, "getItemLimit", s) or 64
+    limits[n][s] = l
+  end
+  return l
+end
+
+-- A drawer inventory's slots holding `key`, biggest drawer first (then fullest)
+local function drawerSlotsFor(n, key)
+  local slots = {}
+  for s, it in pairs(cache[n] or {}) do if keyOf(it) == key then slots[#slots + 1] = s end end
+  table.sort(slots, function(a, b)
+    local la, lb = slotLimit(n, a), slotLimit(n, b)
+    if la ~= lb then return la > lb end
+    return cache[n][a].count > cache[n][b].count
+  end)
+  return slots
+end
+
 local function freeSlots(n)
   local c = 0
   for _ in pairs(cache[n] or {}) do c = c + 1 end
@@ -382,14 +406,12 @@ end
 -- Moving items
 ---------------------------------------------------------------------------
 -- Put up to `count` items from (from, slot) into storage inventory n. Into drawers that already
--- hold the item, aim at exactly those drawer slots (fullest first): a drawer controller left to
--- choose drops items into any empty drawer it likes, which makes duplicate drawers.
+-- hold the item, aim at exactly those drawer slots, biggest drawer first until it's full: a drawer
+-- controller left to choose drops items into any empty drawer it likes (duplicate drawers).
 local function moveInto(from, slot, count, n, key)
   if isDrawer(n) then
-    local slots = {}
-    for s, it in pairs(cache[n] or {}) do if keyOf(it) == key then slots[#slots + 1] = s end end
+    local slots = drawerSlotsFor(n, key)
     if #slots > 0 then
-      table.sort(slots, function(a, b) return cache[n][a].count > cache[n][b].count end)
       local moved = 0
       for _, s in ipairs(slots) do
         if moved >= count then break end
@@ -424,46 +446,46 @@ local function depositFrom(input, skip)
   return movedTotal, leftTotal
 end
 
--- One item spread over several drawers: move it all into its fullest drawer, via a barrel with a
--- free slot (empty drawers are then free for other items). Returns { [item id] = moved }.
+-- One item spread over several drawers: fill its biggest drawer first, then the next biggest,
+-- taking from the smallest. Moves go one stack at a time through an empty barrel slot.
+-- Returns { [item id] = moved }.
+local function emptyBarrelSlot()
+  for _, b in ipairs(storage) do
+    if not isDrawer(b) and freeSlots(b) > 0 then
+      for j = 1, sizes[b] do if not cache[b][j] then return b, j end end
+    end
+  end
+end
+
 local function mergeDrawers(progress)
   local merged = {}
   for _, n in ipairs(storage) do
     if isDrawer(n) then
-      local byKey = {}
-      for s, it in pairs(cache[n] or {}) do
-        local k = keyOf(it)
-        byKey[k] = byKey[k] or {}
-        table.insert(byKey[k], s)
-      end
-      for k, slots in pairs(byKey) do
+      local keys = {}
+      for _, it in pairs(cache[n] or {}) do keys[keyOf(it)] = true end
+      for key in pairs(keys) do
+        local slots = drawerSlotsFor(n, key)   -- biggest first
         if #slots > 1 then
-          table.sort(slots, function(a, b) return cache[n][a].count > cache[n][b].count end)
-          local home, name = slots[1], cache[n][slots[1]].name
+          local name = cache[n][slots[1]].name
           if progress then progress(name) end
-          for i = 2, #slots do
-            local s = slots[i]
-            local left = cache[n][s].count
-            while left > 0 do
-              -- stage one stack through a barrel slot that's empty
-              local stage, bslot
-              for _, b in ipairs(storage) do
-                if not isDrawer(b) and freeSlots(b) > 0 then
-                  for j = 1, sizes[b] do if not cache[b][j] then stage, bslot = b, j; break end end
-                  if stage then break end
-                end
-              end
-              if not stage then break end
-              local out = call(stage, "pullItems", n, s, math.min(64, left), bslot) or 0
+          local dst, src = 1, #slots
+          while dst < src do
+            local d, sl = slots[dst], slots[src]
+            local room = slotLimit(n, d) - ((cache[n][d] or {}).count or 0)
+            local have = (cache[n][sl] or {}).count or 0
+            if room <= 0 then dst = dst + 1
+            elseif have <= 0 then src = src - 1
+            else
+              local b, bslot = emptyBarrelSlot()
+              if not b then break end
+              local out = call(b, "pullItems", n, sl, math.min(64, have, room), bslot) or 0
               if out <= 0 then break end
-              local back = call(stage, "pushItems", n, bslot, out, home) or 0
+              local back = call(b, "pushItems", n, bslot, out, d) or 0
               merged[name] = (merged[name] or 0) + back
-              left = left - out
-              scanInv(stage)
-              if back < out then break end -- home drawer full: the rest stays in the barrel
+              scanInv(b); scanInv(n)
+              if back < out then break end -- couldn't go back in: it stays safely in the barrel
             end
           end
-          scanInv(n)
         end
       end
     end
@@ -535,9 +557,17 @@ local function retrieve(key, amount, target, toSlot)
   for _, n in ipairs(order) do
     if got >= amount or full then break end
     local touched = false
-    for slot, s in pairs(cache[n] or {}) do
+    local slots = {}
+    if isDrawer(n) then
+      local big = drawerSlotsFor(n, key)            -- smallest drawers are emptied first
+      for i = #big, 1, -1 do slots[#slots + 1] = big[i] end
+    else
+      for slot, s in pairs(cache[n] or {}) do if keyOf(s) == key then slots[#slots + 1] = slot end end
+    end
+    for _, slot in ipairs(slots) do
+      local s = cache[n][slot]
       if got >= amount then break end
-      if keyOf(s) == key then
+      if s and keyOf(s) == key then
         -- A drawer slot can hold thousands, so keep pulling from it until done
         local left = s.count
         while got < amount and left > 0 do
@@ -698,7 +728,7 @@ local COMMANDS = {
   { "/inputs",   "show which chest is which" },
   { "/rescan",   "re-read every chest now" },
   { "/drawers",  "what storage sees in the drawers" },
-  { "/tidy",     "one drawer per item; barrels into drawers" },
+  { "/tidy",     "fill big drawers first; barrels in" },
 }
 
 local mon
@@ -1094,7 +1124,7 @@ function runCommand(cmd)
       local merged = mergeDrawers(function(name) print("Merging duplicate drawers: " .. name) end)
       local mtotal = 0
       for _, c in pairs(merged) do mtotal = mtotal + c end
-      if mtotal > 0 then print(("Merged %d items back into one drawer each."):format(mtotal)) end
+      if mtotal > 0 then print(("Moved %d items into bigger drawers."):format(mtotal)) end
       local _, py = term.getCursorPos()
       local moved, stuck = tidyDrawers(function(i, n)
         term.setCursorPos(1, py); term.clearLine(); write(("Checking barrels %d/%d"):format(i, n))
