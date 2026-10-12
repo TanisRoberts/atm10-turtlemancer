@@ -105,9 +105,9 @@ return {
         hud = {
           name = "HUD",
           about = "Night vision + heads-up display",
-          details = "Runs on the glasses themselves. For now it reports what modules the glasses "
-            .. "have (saved to glasses_report.txt) so the night vision toggle can be built on the "
-            .. "real API. Reboot the glasses to pick up new versions.",
+          details = "Night vision AUTO (on when dark or in the Deep Dark, via an Environment "
+            .. "Detector in the glasses) / ON / OFF, switched on the glasses' screen (1/2/3), and a "
+            .. "HUD line (Overlay Module). Settings in glasses.env.",
           run = "glasses",
           files = { "glasses/hud/glasses.lua" },
         },

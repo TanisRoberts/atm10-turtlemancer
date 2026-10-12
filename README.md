@@ -24,7 +24,7 @@ ComputerCraft (CC:Tweaked + Advanced Peripherals) scripts for Tanis's ATM10 isla
 | Turtle | Rigger | `rigger` | Builds from a plan file (`mossy.plan`) |
 | Turtle | Tigger | `lumberjack` | Tree farm |
 | Turtle | Figger | `farmer` | Crop farm |
-| Glasses | HUD | `glasses` | Smart Glasses: night vision + heads-up display (for now: a module report saved to `glasses_report.txt`) |
+| Glasses | HUD | `glasses` | Smart Glasses: night vision AUTO / ON / OFF and a HUD line (`glasses.env`) |
 
 Every role is defined in `manifest.lua`: its files live under `computer/<role>/`, `turtle/<role>/` or `glasses/<role>/`
 and land on the device under their own names. Adding a role = adding its folder and one manifest entry.
@@ -35,6 +35,12 @@ and land on the device under their own names. Adding a role = adding its folder 
 - Setup only offers the Glasses type on actual glasses (it checks for the `smartglasses` API), and pre-picks the HUD role.
 - Wear them (head or Curios slot) when they boot: the `smart_glasses` peripheral only shows up while they're equipped.
 - Reboot from the glasses' terminal (hold Ctrl+R) to pull new versions.
+- **Night vision** needs the Night Vision Module (it's on by default when fitted). Modes, switched on the glasses' screen (click, or 1 / 2 / 3; H toggles the HUD, Q stops):
+  - **AUTO**: on when the light where you stand is `NV_DARK` (7) or less, or you're in the Deep Dark; off again at `NV_BRIGHT` (10) or more. In between it keeps doing what it was doing, so torch-lit edges don't flicker. Needs an **Environment Detector** in the glasses; without one AUTO just stays on.
+  - **ON** / **OFF**: always / never. While the module is switched off, night vision potions don't work either (that's the module).
+- **HUD**: with an **Overlay Module**, a line in the top-left corner shows `NV AUTO: on` (green when on). Position: `HUD_X`, `HUD_Y`.
+- To change modes while wearing them, use a **Smart Glasses Interface** (right-click opens the worn glasses' screen), or take them off and right-click them.
+- Settings: `glasses.env`, made on first run, same rules as `butler.env` (edit live; your lines are never overwritten; the mode buttons rewrite the `NV_MODE` line).
 
 ## Hardware for the base computers
 
