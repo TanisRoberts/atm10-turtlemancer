@@ -583,8 +583,17 @@ local COMMANDS = {
   { "/rescan",   "re-read every chest now" },
 }
 
-local mon = peripheral.find("monitor")
-local monView  = { dev = mon, kind = "monitor", touch = mon and mon.isColour(), filter = "", page = 1, hits = {} }
+local mon
+local monView  = { kind = "monitor", filter = "", page = 1, hits = {} }
+
+-- (Re)find the monitor. A monitor on the wired cable can vanish or get a new name
+-- (wall re-formed, chunk reloaded, modem toggled): calls to the old one then return nothing.
+local function findMonitor()
+  mon = peripheral.find("monitor", function(_, m) local ok, w = pcall(m.getSize); return ok and w ~= nil end)
+  monView.dev, monView.touch, monView.hits = mon, mon and mon.isColour() or false, {}
+  if mon then mon.setTextScale(TEXT_SCALE) end
+end
+findMonitor()
 local termView = { dev = term, kind = "term", touch = term.isColour(), filter = "", page = 1, hits = {} }
 
 local C = {
@@ -650,6 +659,10 @@ local function drawView(v)
   if not d then return end
   if v.kind == "monitor" then d.setTextScale(TEXT_SCALE) end
   local w, h = d.getSize()
+  if not w then -- the screen went away (see findMonitor)
+    if v.kind == "monitor" then findMonitor() end
+    return
+  end
   local isTerm = v.kind == "term"
   v.hits = {}
   d.setCursorBlink(false)
@@ -771,8 +784,18 @@ local function drawView(v)
 end
 
 local function draw()
-  if mon then drawView(monView) end
-  if not uiBusy then drawView(termView) end
+  -- A broken screen must never stop the sorting, so each one is drawn on its own
+  if mon then
+    local ok = pcall(drawView, monView)
+    if not ok then findMonitor() end
+  end
+  if not uiBusy then
+    local ok, err = pcall(drawView, termView)
+    if not ok then
+      term.setBackgroundColour(colours.black); term.setTextColour(colours.red)
+      term.setCursorPos(1, 1); term.clearLine(); term.write(("Screen error: " .. tostring(err)):sub(1, 51))
+    end
+  end
 end
 
 ---------------------------------------------------------------------------
@@ -872,10 +895,13 @@ local function clickIn(v, x, y)
 end
 
 local function touchLoop()
-  if not monView.touch then return os.pullEvent("never") end
   while true do
-    local _, _, x, y = os.pullEvent("monitor_touch")
-    if clickIn(monView, x, y) then draw() end
+    local e, _, x, y = os.pullEvent()
+    if e == "monitor_touch" then
+      if monView.touch and clickIn(monView, x, y) then draw() end
+    elseif e == "peripheral" or e == "peripheral_detach" or e == "monitor_resize" then
+      findMonitor(); draw()
+    end
   end
 end
 
@@ -984,7 +1010,6 @@ end
 ---------------------------------------------------------------------------
 loadCfg()
 if #cfg.inputs == 0 or not cfg.output then setup() end
-if mon then mon.setTextScale(TEXT_SCALE) end
 print("Scanning storage...")
 scanAll(); buildItems(); draw()
 parallel.waitForAny(workerLoop, touchLoop, terminalLoop, netLoop)
