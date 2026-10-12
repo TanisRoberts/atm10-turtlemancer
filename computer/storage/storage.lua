@@ -381,6 +381,25 @@ end
 ---------------------------------------------------------------------------
 -- Moving items
 ---------------------------------------------------------------------------
+-- Put up to `count` items from (from, slot) into storage inventory n. Into drawers that already
+-- hold the item, aim at exactly those drawer slots (fullest first): a drawer controller left to
+-- choose drops items into any empty drawer it likes, which makes duplicate drawers.
+local function moveInto(from, slot, count, n, key)
+  if isDrawer(n) then
+    local slots = {}
+    for s, it in pairs(cache[n] or {}) do if keyOf(it) == key then slots[#slots + 1] = s end end
+    if #slots > 0 then
+      table.sort(slots, function(a, b) return cache[n][a].count > cache[n][b].count end)
+      local moved = 0
+      for _, s in ipairs(slots) do
+        if moved >= count then break end
+        moved = moved + (call(from, "pushItems", n, slot, count - moved, s) or 0)
+      end
+      return moved
+    end
+  end
+  return call(from, "pushItems", n, slot, count) or 0
+end
 -- Empty one input chest into storage (drawers holding the item first, see targetsFor).
 local function depositFrom(input, skip)
   local inp = call(input, "list")
@@ -389,9 +408,10 @@ local function depositFrom(input, skip)
   for slot, it in pairs(inp) do
     if not (skip and skip[it.name]) then
       local left = it.count
-      for _, n in ipairs(targetsFor(keyOf(it))) do
+      local key = keyOf(it)
+      for _, n in ipairs(targetsFor(key)) do
         if left <= 0 then break end
-        local moved = call(input, "pushItems", n, slot, left) or 0
+        local moved = moveInto(input, slot, left, n, key)
         if moved > 0 then
           left = left - moved
           movedTotal = movedTotal + moved
@@ -402,6 +422,53 @@ local function depositFrom(input, skip)
     end
   end
   return movedTotal, leftTotal
+end
+
+-- One item spread over several drawers: move it all into its fullest drawer, via a barrel with a
+-- free slot (empty drawers are then free for other items). Returns { [item id] = moved }.
+local function mergeDrawers(progress)
+  local merged = {}
+  for _, n in ipairs(storage) do
+    if isDrawer(n) then
+      local byKey = {}
+      for s, it in pairs(cache[n] or {}) do
+        local k = keyOf(it)
+        byKey[k] = byKey[k] or {}
+        table.insert(byKey[k], s)
+      end
+      for k, slots in pairs(byKey) do
+        if #slots > 1 then
+          table.sort(slots, function(a, b) return cache[n][a].count > cache[n][b].count end)
+          local home, name = slots[1], cache[n][slots[1]].name
+          if progress then progress(name) end
+          for i = 2, #slots do
+            local s = slots[i]
+            local left = cache[n][s].count
+            while left > 0 do
+              -- stage one stack through a barrel slot that's empty
+              local stage, bslot
+              for _, b in ipairs(storage) do
+                if not isDrawer(b) and freeSlots(b) > 0 then
+                  for j = 1, sizes[b] do if not cache[b][j] then stage, bslot = b, j; break end end
+                  if stage then break end
+                end
+              end
+              if not stage then break end
+              local out = call(stage, "pullItems", n, s, math.min(64, left), bslot) or 0
+              if out <= 0 then break end
+              local back = call(stage, "pushItems", n, bslot, out, home) or 0
+              merged[name] = (merged[name] or 0) + back
+              left = left - out
+              scanInv(stage)
+              if back < out then break end -- home drawer full: the rest stays in the barrel
+            end
+          end
+          scanInv(n)
+        end
+      end
+    end
+  end
+  return merged
 end
 
 -- Move everything sitting in barrels into the drawers that already hold that item.
@@ -420,7 +487,7 @@ local function tidyDrawers(progress)
       for _, d in ipairs(drawers) do
         if left <= 0 then break end
         if holds(d, key) then
-          local m = call(b, "pushItems", d, slot, left) or 0
+          local m = moveInto(b, slot, left, d, key)
           if m > 0 then
             left = left - m
             moved[it.name] = (moved[it.name] or 0) + m
@@ -555,7 +622,7 @@ local function storeFrom(fz, slot)
   local moved = 0
   for _, n in ipairs(targetsFor(d.name)) do
     if moved >= d.count then break end
-    local m = call(fz, "pushItems", n, slot) or 0
+    local m = moveInto(fz, slot, d.count - moved, n, d.name)
     if m > 0 then moved = moved + m; scanInv(n) end
   end
   return moved
@@ -631,7 +698,7 @@ local COMMANDS = {
   { "/inputs",   "show which chest is which" },
   { "/rescan",   "re-read every chest now" },
   { "/drawers",  "what storage sees in the drawers" },
-  { "/tidy",     "move barrel stock into its drawers" },
+  { "/tidy",     "one drawer per item; barrels into drawers" },
 }
 
 local mon
@@ -1024,6 +1091,10 @@ function runCommand(cmd)
       waitEnter()
     elseif found == "/tidy" then
       print("Rescanning..."); scanAll()
+      local merged = mergeDrawers(function(name) print("Merging duplicate drawers: " .. name) end)
+      local mtotal = 0
+      for _, c in pairs(merged) do mtotal = mtotal + c end
+      if mtotal > 0 then print(("Merged %d items back into one drawer each."):format(mtotal)) end
       local _, py = term.getCursorPos()
       local moved, stuck = tidyDrawers(function(i, n)
         term.setCursorPos(1, py); term.clearLine(); write(("Checking barrels %d/%d"):format(i, n))
