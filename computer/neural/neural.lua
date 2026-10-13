@@ -56,7 +56,7 @@ local DEFAULTS = {
   { "PROBE_MAX", 240, "Each check that finds no change doubles the wait, up to this many minutes. A change resets it." },
   { "STALL_AFTER", 90, "Seconds a running chamber may go without using a matrix before it's flagged stuck." },
   { "LOW_POWER", 10, "Stored power % under which only the column furthest below its target runs." },
-  { "FUEL_BELOW", 30, "Feed the Furnator from the dock only while stored power is under this %. Solar first." },
+  { "FUEL_BELOW", 30, "Feed the Furnator while the cells, or ANY one chamber, are under this %. Solar first." },
   { "FURNATOR_KEEP", 8, "Fuel items kept in each Furnator while it's being fed." },
   { "WITHOUT_STORAGE", "stop", "No item counts from storage (storage silent): stop = hold every column, run = keep making." },
   { "DOCK", "", "The dock barrel's name on this cable. Blank = find it: the one chest/barrel on the cable." },
@@ -706,11 +706,18 @@ local function pass()
   for _, n in ipairs(L.cells) do local e, x = powerRead(n); have, cap = have + e, cap + x end
   power.have, power.cap = have, cap
   power.cellPct = cap > 0 and math.floor(have / cap * 100 + 0.5) or nil
-  local sh, sc = 0, 0
+  -- Power doesn't spread evenly (machines nearer the generators fill first), so the FURNATOR
+  -- watches the emptiest chamber; the overall figure uses all of them together.
+  local sh, sc, low, lowName = 0, 0, nil, nil
   for _, p in ipairs(cols) do
-    if p.mob then sh, sc = sh + (p.cEnergy or 0), sc + (p.cCap or 0) end
+    if p.mob and (p.cCap or 0) > 0 then
+      sh, sc = sh + (p.cEnergy or 0), sc + p.cCap
+      local pc = math.floor((p.cEnergy or 0) / p.cCap * 100 + 0.5)
+      if not low or pc < low then low, lowName = pc, p.c end
+    end
   end
   power.simPct = sc > 0 and math.floor(sh / sc * 100 + 0.5) or nil
+  power.lowSim, power.lowSimName = low, lowName
   power.source = #L.cells > 0 and (#L.cells .. " cell" .. (#L.cells == 1 and "" or "s")) or "no cell on the cable"
   if power.cellPct and power.simPct then power.pct = math.min(power.cellPct, power.simPct)
   else power.pct = power.cellPct or power.simPct end
@@ -750,7 +757,9 @@ local function pass()
 
   -- Furnator: backup power only. Fed while stored power is low.
   furnatorFuel = 0
-  local feeding = power.pct ~= nil and power.pct < (E.FUEL_BELOW or 30)
+  -- Fed while the cells OR any single chamber is under FUEL_BELOW
+  local fuelBelow = E.FUEL_BELOW or 30
+  local feeding = (power.pct ~= nil and power.pct < fuelBelow) or (power.lowSim ~= nil and power.lowSim < fuelBelow)
   for _, fz in ipairs(L.furnators) do
     local have = 0
     for _, it in pairs(call(fz, "list") or {}) do if IS_FUEL[it.name] then have = have + it.count end end
@@ -864,8 +873,9 @@ end
 
 local function statusLines()
   local out = { note }
-  out[#out + 1] = ("Power: cells %s (%s), chambers %s%s. Matrices: %d %s"):format(
+  out[#out + 1] = ("Power: cells %s (%s), chambers %s (lowest %s)%s. Matrices: %d %s"):format(
     power.cellPct and (power.cellPct .. "%") or "-", power.source, power.simPct and (power.simPct .. "%") or "-",
+    power.lowSim and ("#" .. colNum(power.lowSimName) .. " " .. power.lowSim .. "%") or "-",
     #L.furnators > 0 and (", Furnator fuel " .. furnatorFuel) or "",
     dockMatrices, L.direct and "in storage" or ("in the dock" .. (storageItems and (", " .. (tonumber(storageItems[MATRIX]) or 0) .. " in storage") or "")))
   for i, c in ipairs(L.chambers) do
@@ -974,7 +984,9 @@ end
 local function powerLine(m, w, y)
   m.setCursorPos(2, y); m.setTextColour(colours.lightGrey)
   local txt = "Power " .. (power.pct and (power.pct .. "%") or "?") .. " "
-  if power.cellPct and power.simPct and power.simPct + 10 < power.cellPct then
+  if power.lowSim and power.lowSim < (E.FUEL_BELOW or 30) and (not power.pct or power.lowSim < power.pct) then
+    txt = ("Sim #%d %d%% "):format(colNum(power.lowSimName), power.lowSim)   -- one chamber is starving: say which
+  elseif power.cellPct and power.simPct and power.simPct + 10 < power.cellPct then
     txt = ("Sims %d%% "):format(power.simPct)   -- the chambers are the bottleneck: say so
   end
   m.write(txt)
