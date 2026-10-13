@@ -17,8 +17,8 @@ return {
     computer = {
       name = "Computer",
       about = "A computer that sits at the base",
-      details = "The base's brains: storage, smelting, the mainframe, the Foreman, GPS, the plastic factory, the neural lab and the art wall.",
-      order = { "mainframe", "storage", "smelter", "foreman", "gps", "plastic", "neural", "art" },
+      details = "The base's brains: storage, smelting, the mainframe, the Foreman, the Farmhand, GPS, the plastic factory, the neural lab and the art wall.",
+      order = { "mainframe", "storage", "smelter", "foreman", "farmhand", "gps", "plastic", "neural", "art" },
       roles = {
         mainframe = {
           name = "Mainframe",
@@ -60,6 +60,15 @@ return {
             .. "modem and an advanced monitor.",
           run = "foreman",
           files = { "computer/foreman/foreman.lua" },
+        },
+        farmhand = {
+          name = "Farmhand",
+          about = "Control screen for the farm turtles",
+          details = "Every farm turtle (Figger, Tigger) on its monitor; tap one for rounds now, "
+            .. "pause, re-map, reboot, its settings, where it is and what it has brought in. "
+            .. "Needs a wireless or ender modem and an advanced monitor.",
+          run = "farmhand",
+          files = { "computer/farmhand/farmhand.lua" },
         },
         gps = {
           name = "GPS host",
@@ -117,11 +126,13 @@ return {
                      .. "materials from storage.",
                    files = { "turtle/rigger/rigger.lua" }, once = { "turtle/rigger/mossy.plan" } },
         tigger = { name = "Tigger", about = "Lumberjack: tree farm", run = "lumberjack",
-                   details = "Plants, chops and replants a tree farm and drops logs at its dock.",
-                   files = { "turtle/tigger/lumberjack.lua" } },
+                   details = "Plants, chops and replants a tree farm and drops logs at its dock. "
+                     .. "Axe + wireless or ender modem; GPS makes it unlosable. Run from the Farmhand.",
+                   files = { "turtle/tigger/lumberjack.lua", "shared/farmbot.lua" } },
         figger = { name = "Figger", about = "Farmer: crops", run = "farmer",
-                   details = "Harvests and replants crops, hoes new soil, drops produce at its dock.",
-                   files = { "turtle/figger/farmer.lua" } },
+                   details = "Harvests and replants crops, hoes new soil, drops produce at its dock. "
+                     .. "Hoe + wireless or ender modem; GPS makes it unlosable. Run from the Farmhand.",
+                   files = { "turtle/figger/farmer.lua", "shared/farmbot.lua" } },
         zigger = { name = "Zigger", about = "Cartographer: flies and maps the island", run = "cartographer",
                    details = "Zig-zags over the island with a Geo Scanner and paints the world map on "
                      .. "the art wall. Geo Scanner + ender modem, no pickaxe. Needs GPS and a fuel dock "

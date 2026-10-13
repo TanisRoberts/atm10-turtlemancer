@@ -13,7 +13,7 @@ local STATE_COLOUR = {
   surveying = colours.lime, clearing = colours.lime, mapping = colours.lime,
   returning = colours.yellow, docked = colours.lightBlue, done = colours.lightBlue,
   waiting = colours.orange, error = colours.red, lost = colours.red,
-  running = colours.lime, paused = colours.orange,
+  running = colours.lime, paused = colours.orange, rebooting = colours.purple,
 }
 
 local function ago(t)
@@ -75,12 +75,28 @@ local function rows()
     out[#out + 1] = { z.label or "Zigger", z.state, ("%s %d chunks, fuel %s%s"):format(pct, tonumber(z.chunks) or 0,
       tostring(z.fuel), (z.msg and z.msg ~= "") and (". " .. z.msg) or ""), _G.CARTO_SEEN }
   end
+  local fh = _G.FARMHAND
+  if fh then
+    out[#out + 1] = { fh.label or "Farmhand", (tonumber(fh.problems) or 0) > 0 and "waiting" or "ok", tostring(fh.note or ""),
+      _G.FARMHAND_SEEN }
+  end
   local farms = {}
   for k, st in pairs(_G.FARM_STATUS or {}) do farms[#farms + 1] = { k, st } end
   table.sort(farms, function(a, b) return a[1] < b[1] end)
   for _, f in ipairs(farms) do
     local k, st = f[1], f[2]
-    out[#out + 1] = { st.label or k, st.state, tostring(st.msg or ""), _G.FARM_SEEN and _G.FARM_SEEN[k] }
+    local state = (st.paused and st.state == "docked") and "paused" or st.state
+    local detail = tostring(st.msg or "")
+    if st.state == "working" and st.progress then detail = "Round " .. st.progress
+    elseif st.state == "docked" and st.lastRound and not st.paused then
+      local r = st.lastRound
+      local last = st.role == "lumberjack" and ("chopped %d"):format(r.chopped or 0) or ("harvested %d"):format(r.harvested or 0)
+      detail = ("Last round %s%s"):format(last, st.nextRound and (", next in %dm"):format(math.ceil(st.nextRound / 60)) or "")
+    end
+    if type(st.fuel) == "number" and type(st.fuelLimit) == "number" and st.fuelLimit > 0 then
+      detail = detail .. (", fuel %d%%"):format(math.floor(st.fuel / st.fuelLimit * 100))
+    end
+    out[#out + 1] = { st.label or k, state, detail, _G.FARM_SEEN and _G.FARM_SEEN[k] }
   end
   return out
 end

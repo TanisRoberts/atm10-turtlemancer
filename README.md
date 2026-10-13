@@ -19,14 +19,15 @@ ComputerCraft (CC:Tweaked + Advanced Peripherals) scripts for Tanis's ATM10 isla
 | Computer | Storage | `storage` | Sorts input chests, touch screen, fuels the turtles, fills Rigger's barrel, does the smelter's item moves |
 | Computer | Smelter | `smelter` | Auto-smelting rules (`smelt.txt`); asks storage to move the items |
 | Computer | Foreman | `foreman` | Mining control: overview of every Digger, tap one for its layers / START / DOCK / position / retire; hands out Digger numbers; layer presets (Y range + rings) edited on the Presets page or with `/presets` on its screen; Reboot / Reboot all / `/reboot` (a Digger finishes its block, reboots, updates and carries on) |
+| Computer | Farmhand | `farmhand` | Control screen for the farm turtles: overview of Figger, Tigger and friends, tap one for ROUNDS NOW / PAUSE / RE-MAP / FOUND / REBOOT, live settings, position, last haul and running totals |
 | Computer | GPS host | `gps_host` | One of 4 GPS towers so turtles know their exact X/Y/Z |
 | Computer | Plastic factory | `plastic` | Industrial Foregoing plastic line: tree taps -> Latex Processing Unit -> furnace -> dock barrel (`plastic.env`) |
 | Computer | Neural lab | `neural` | Hostile Neural Networks wall: runs each chamber + fab column until storage has enough of what it makes (`neural.txt`, `neural.env`) |
 | Computer | Art controller | `art` | Monitor wall: live turtle map coloured by height, GPS pylons, Zigger's world map, generative art you can poke (`art.env`) |
 | Turtle | Digger | `miner` | Shaft + expanding-square mining (`junk.txt`); numbered Digger-01, -02... by the Foreman; reports its exact position |
 | Turtle | Rigger | `rigger` | Builds from a plan file (`mossy.plan`) |
-| Turtle | Tigger | `lumberjack` | Tree farm |
-| Turtle | Figger | `farmer` | Crop farm |
+| Turtle | Tigger | `lumberjack` | Tree farm: maps a slab-ringed zone, plants a tree grid, chops and replants on a timer (`tigger.env`) |
+| Turtle | Figger | `farmer` | Crop farm: harvests and replants any crop, hoes new soil, picks up what falls (`figger.env`) |
 | Turtle | Zigger | `cartographer` | Flies over the island with a Geo Scanner and maps it for the art wall's World map (`zigger.env`) |
 | Glasses | HUD | `glasses` | Smart Glasses: night vision AUTO / ON / OFF, HUD stats (clock, coords + facing, inventory bar), aggro alerts (`glasses.env`) |
 
@@ -70,7 +71,8 @@ Every role is defined in `manifest.lua`: its files live under `computer/<role>/`
 - Player Detector: "welcome home" (with who dropped by), guests greeted, a visitor column on the wall, and the **storage monitor locks** (big padlock, taps ignored) while you're away. The storage computer's own screen always works. `/lock` and `/unlock` on storage do it by hand. If the mainframe goes quiet for a minute, the auto-lock lets go.
 - Settings: `butler.env` on the mainframe, made on first run. Edit it live; deleted keys come back with their defaults, your lines are never overwritten. The Inventory Manager only works while you're online.
 - **Foreman:** advanced computer, **ender modem** (reaches Diggers anywhere), advanced monitor touching it (any size; the computer's own screen works too).
-- **GPS hosts (optional, recommended):** 4 computers with ender modems, high up and not all at one height. Diggers then check their position against GPS, notice if they've been carried somewhere, and find their own way back.
+- **Farmhand:** advanced computer, wireless or **ender modem**, advanced monitor touching it (any size; the computer's own screen works too).
+- **GPS hosts (optional, recommended):** 4 computers with ender modems, high up and not all at one height. Diggers then check their position against GPS, notice if they've been carried somewhere, and find their own way back. Farm turtles pin their farm map to GPS and can't get lost.
 - **Each Digger:** pickaxe + ender modem, a dump barrel (storage input) and a fuel barrel next to its dock. Storage `/fuel` adds each fuel barrel (or `/setup` with a lava bucket in each); storage keeps one refill in every one, but never takes its last stack of coal/charcoal (the smelter needs it).
 
 ## Plastic factory
@@ -153,6 +155,29 @@ he never digs, he flies over things. Needs the GPS towers.
   run another pass later with someone over there. Restarted or reloaded mid-pass? He asks GPS where he is and carries on.
 - The wall keeps its own copy of the map (`art.map`) and catches up from Zigger's (`zigger.map`) whenever it starts.
   On the mainframe's board he has his own row (state, % done, chunks, fuel).
+
+## Farm turtles and the Farmhand
+
+Figger (crops) and Tigger (trees) run on one shared engine (`shared/farmbot.lua`).
+
+- **Farm:** ring the area with slabs: on the ground for Tigger, at crop height for Figger (he flies one block above the
+  crops). Start the turtle inside it next to its dock barrel (Figger can also start ON a dock built into the ring, facing
+  in). Make the barrel a storage dock (`/dock`, or the coal marker in `/setup`): storage takes the produce and keeps fuel in it.
+- **It maps the farm by itself** and re-maps every few rounds (`RESURVEY_EVERY`), so new rows or a bigger field get picked
+  up. Tigger keeps his tree grid on re-maps. A map that fails (gap in the slabs, no fuel) is retried every few minutes.
+- **Never lost with GPS:** the map is pinned to world coordinates. After a restart, even one mid-turn, it asks GPS where it
+  is and steps once to learn which way it faces; at home after every round it checks GPS agrees with its count. Carried off
+  the farm? It says where it is and where home is; put it back and press **Found** (or `island figger found`). Without GPS
+  it works its way out from the map, like before.
+- **Settings:** `figger.env` / `tigger.env` on the turtle, edited live. Round timer, seeds/saplings kept and how often it
+  re-maps can also be changed from the Farmhand (yellow until the turtle confirms).
+- **Farmhand screen:** a card per turtle (state, fuel, next round or progress, position). Tap one for ROUNDS NOW, PAUSE/GO,
+  RE-MAP, FOUND (when lost), REBOOT (it finishes its job, restarts, updates), settings, last haul and everything it has
+  brought in. Footer: Rounds all, Pause all, Reboot all. A turtle silent for 2 minutes can be forgotten.
+- **Still on the mainframe:** every farm turtle keeps its row on the board (round progress, last round, fuel) plus a
+  Farmhand row; alerts and chat (`island figger rounds|survey|stop|go|found`) work as before.
+- **ATM10 note:** with a hoe, CC:Tweaked right-clicks a crop before digging it, and ATM10 harvests ripe crops on right-click,
+  dropping them on the ground. Figger hoovers up under him at every plot.
 
 ## Diggers and the Foreman
 

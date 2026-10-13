@@ -288,6 +288,10 @@ local function watch()
     condition("farmLost:" .. k, st.state == "lost", name .. " is lost. " .. tostring(st.msg))
     condition("farmWait:" .. k, st.state == "waiting", name .. ": " .. tostring(st.msg))
   end
+  if _G.FARMHAND_SEEN then
+    condition("farmhandSilent", os.clock() - _G.FARMHAND_SEEN > SILENT_AFTER,
+      "Lost contact with the Farmhand (" .. tostring(_G.FARMHAND.label or "Farmhand") .. ").")
+  end
 
   local r = _G.RIGGER_STATUS
   if r then
@@ -496,18 +500,20 @@ local function chatLoop()
         say(storageLine(_G.STORAGE_STATS), user)
       elseif (_G.FARM_STATUS and _G.FARM_STATUS[cmd]) or cmd == "tigger" or cmd == "figger" then
         local sub = tostring(msg):lower():match(cmd .. "%s+(%a+)")
-        local orders = { rounds = "rounds", now = "rounds", survey = "survey", stop = "stop", pause = "stop", go = "go", resume = "go" }
+        local orders = { rounds = "rounds", now = "rounds", survey = "survey", remap = "survey", stop = "stop", pause = "stop",
+          go = "go", resume = "go", found = "found" }
         local st = _G.FARM_STATUS and _G.FARM_STATUS[cmd]
         local proper = st and st.label or (cmd:sub(1, 1):upper() .. cmd:sub(2))
         if sub and orders[sub] then
           _G.FARM_CMD = _G.FARM_CMD or {}
           _G.FARM_CMD[cmd] = { want = orders[sub], seq = os.epoch("utc") }
           local words = { rounds = "heading out on his rounds now.", survey = "re-mapping his area.",
-            stop = "pausing. He'll stay docked.", go = "back on his schedule." }
+            stop = "pausing. He'll stay docked.", go = "back on his schedule.",
+            found = "working out where he is (put him on his home spot first)." }
           say(proper .. " is " .. words[orders[sub]], user)
         elseif st then
           say(farmLine(st), user)
-          say("Orders: island " .. cmd .. " rounds | survey | stop | go", user)
+          say("Orders: island " .. cmd .. " rounds | survey | stop | go | found", user)
         else
           say(proper .. " hasn't checked in yet. Is his modem on and his script running?", user)
         end
