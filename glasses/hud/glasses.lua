@@ -15,9 +15,9 @@
 -- Aggro alert, top-middle: a mob within AGGRO_RANGE that's attacking (creepers in red, the Warden
 -- whenever it's near), with distance and which side it's on. From the Environment Detector's scan.
 --
--- Switch night vision on the glasses' screen: click a button or press 1 / 2 / 3. H toggles the HUD,
--- Q quits. Open the screen with the glasses in your hand (right-click), or while wearing them
--- with a Smart Glasses Interface. glasses.env holds every setting: made on first run, edit it
+-- The glasses' screen has three switches: Night vision AUTO/ON/OFF (keys 1/2/3), Aggro alert ON/OFF
+-- (A) with a scan-speed button (S: every 2/4/8 s), and HUD ON/OFF (H). Q quits. Open the screen with
+-- the glasses in your hand (right-click), or while wearing them with a Smart Glasses Interface. glasses.env holds every setting: made on first run, edit it
 -- live; deleted keys come back with their defaults and your lines are never overwritten.
 -- Reboot (hold Ctrl+R) to update from GitHub.
 
@@ -589,15 +589,55 @@ local function at(x, y, s, fg, bg)
 end
 local function fill(y, bg) at(1, y, (" "):rep(W), colours.white, bg) end
 
-local BUTTONS = {
-  { "auto", "1  AUTO", "when dark" },
-  { "on",   "2  ON",   "always" },
-  { "off",  "3  OFF",  "never" },
-}
-
 local function setMode(m)
   if m ~= mode() then setEnv("NV_MODE", m) end
   S.want = nil
+end
+
+local function setYes(key, on) setEnv(key, on and "yes" or "no") end
+local SPEEDS = { 2, 4, 8 }
+local function aggroEvery() return math.max(2, tonumber(E.AGGRO_EVERY) or 2) end
+local function nextSpeed()
+  local cur = aggroEvery()
+  for _, v in ipairs(SPEEDS) do if v > cur then return v end end
+  return SPEEDS[1]
+end
+
+-- Segmented switch: [AUTO][ ON ][OFF ]. opts = { {value, text, action}, ... }. Returns the next free x.
+local function switch(x, y, opts, current)
+  for _, o in ipairs(opts) do
+    local on = o[1] == current
+    local text = " " .. o[2] .. " "
+    at(x, y, text, on and colours.black or colours.white, on and colours.cyan or colours.grey)
+    hits[#hits + 1] = { y = y, x1 = x, x2 = x + #text - 1, action = o[3] }
+    x = x + #text
+  end
+  return x
+end
+
+local function button(x, y, text, action)
+  text = " " .. text .. " "
+  at(x, y, text, colours.white, colours.grey)
+  hits[#hits + 1] = { y = y, x1 = x, x2 = x + #text - 1, action = action }
+  return x + #text
+end
+
+local function fit(s) return tostring(s):sub(1, W - 3) end
+
+-- One setting: label, switch (and extra button) on the same line when it fits, else on the next,
+-- then a status line. Returns the next y.
+local LABEL_W = 13
+local function setting(y, label, opts, current, status, statusColour, extra)
+  local need = 0
+  for _, o in ipairs(opts) do need = need + #o[2] + 2 end
+  if extra then need = need + #extra[1] + 3 end
+  at(2, y, label, colours.white, colours.black)
+  local x = 2 + LABEL_W
+  if x + need - 1 > W then y = y + 1; x = 4 end
+  x = switch(x, y, opts, current)
+  if extra then button(x + 1, y, extra[1], extra[2]) end
+  at(4, y + 1, fit(status), statusColour or colours.lightGrey, colours.black)
+  return y + 3
 end
 
 local function drawScreen()
@@ -609,78 +649,77 @@ local function drawScreen()
   at(W - #label, 1, label, colours.lightGrey, colours.grey)
 
   local y = 3
-  if not nv then
-    at(2, y, "No Night Vision Module", colours.red, colours.black); y = y + 1
-    at(2, y, "Put one in the glasses.", colours.lightGrey, colours.black); y = y + 2
+
+  -- Night vision
+  local nvStatus, nvColour
+  if not nv then nvStatus, nvColour = "No Night Vision Module fitted", colours.red
+  else nvStatus, nvColour = (S.nvOn and "on - " or "off - ") .. tostring(S.why), S.nvOn and colours.lime or colours.lightGrey end
+  y = setting(y, "Night vision", {
+    { "auto", "AUTO", function() setMode("auto") end },
+    { "on",   "ON",   function() setMode("on") end },
+    { "off",  "OFF",  function() setMode("off") end },
+  }, mode(), nvStatus, nvColour)
+
+  -- Aggro alert
+  local agOn = yes("AGGRO")
+  local agStatus, agColour
+  if not detector then agStatus, agColour = "Needs an Environment Detector", colours.orange
+  elseif not agOn then agStatus, agColour = "off - HUD stays steady", colours.lightGrey
+  elseif AG.err then agStatus, agColour = "scan failed: " .. AG.err, colours.orange
+  elseif AG.last then
+    local a = AG.last
+    agStatus = ("! %s %dm%s"):format(tostring(a.name), math.floor(a.dist + 0.5), a.side and (" " .. a.side) or "")
+    agColour = (a.creeper or a.warden) and colours.red or colours.orange
   else
-    at(2, y, "Night vision: ", colours.white, colours.black)
-    at(16, y, S.nvOn and "ON" or "OFF", S.nvOn and colours.lime or colours.lightGrey, colours.black)
-    y = y + 1
-    at(2, y, S.why, colours.lightGrey, colours.black); y = y + 2
+    agStatus, agColour = ("on - %d blocks, HUD blinks each scan"):format(math.max(1, math.min(16, E.AGGRO_RANGE))), colours.lightGrey
   end
+  y = setting(y, "Aggro alert", {
+    { true,  "ON",  function() setYes("AGGRO", true) end },
+    { false, "OFF", function() setYes("AGGRO", false) end },
+  }, agOn, agStatus, agColour,
+    { ("every %ds"):format(aggroEvery()), function() setEnv("AGGRO_EVERY", tostring(nextSpeed())) end })
 
-  for _, b in ipairs(BUTTONS) do
-    local on = mode() == b[1]
-    local bg = on and colours.cyan or colours.grey
-    local fg = on and colours.black or colours.white
-    fill(y, bg)
-    at(2, y, b[2], fg, bg)
-    at(W - #b[3], y, b[3], on and colours.black or colours.lightGrey, bg)
-    hits[#hits + 1] = { y = y, action = function() setMode(b[1]) end }
-    y = y + 2
-  end
-
-  if detector then
-    local light = S.light and tostring(S.light) or "?"
-    at(2, y, ("Light %s (blk %s sky %s)"):format(light, tostring(S.block or "?"), tostring(S.sky or "?")):sub(1, W - 2),
-      colours.lightGrey, colours.black)
-    y = y + 1
-    local biome = tostring(S.biome or "?"):gsub("^[%w_%.%-]+:", "")
-    at(2, y, ("Biome %s"):format(biome):sub(1, W - 2), colours.lightGrey, colours.black)
-    y = y + 1
-    at(2, y, ("On <=%d, off >=%d"):format(E.NV_DARK, math.max(E.NV_BRIGHT, E.NV_DARK + 1)):sub(1, W - 2),
-      colours.grey, colours.black)
-    y = y + 1
+  -- HUD
+  local hudOn = yes("HUD")
+  local hudStatus, hudColour = nil, colours.lightGrey
+  if not overlay then hudStatus, hudColour = "No Overlay Module fitted", colours.red
+  elseif diag.err then hudStatus, hudColour = "error: " .. diag.err, colours.orange
+  elseif not hudOn then hudStatus = "off"
+  elseif diag.equipped == false then hudStatus = "shows when you wear the glasses"
   else
-    at(2, y, "No Environment Detector:", colours.orange, colours.black); y = y + 1
-    at(2, y, "AUTO keeps it on.", colours.orange, colours.black); y = y + 1
+    local n = tonumber(call(overlay, "getObjectsCount")) or 0
+    local corner = tostring(E.HUD_CORNER):lower()
+    hudStatus = ("%d obj, %s"):format(n, corner)
+    if diag.w == 0 or diag.w == nil then hudStatus = "waiting for the screen size" end
+    local other = (diag.wipes or 0) - (diag.scanWipes or 0)
+    if (diag.scanWipes or 0) > 0 then hudStatus = hudStatus .. (", scan %d"):format(diag.scanWipes) end
+    if other > 0 then hudStatus, hudColour = hudStatus .. (", wiped %d"):format(other), colours.orange end
+  end
+  y = setting(y, "HUD", {
+    { true,  "ON",  function() setYes("HUD", true) end },
+    { false, "OFF", function() setYes("HUD", false) end },
+  }, hudOn, hudStatus, hudColour)
+
+  -- What the sensors see (only if there's a spare line above the footer)
+  if y <= H - 1 then
+    local bits = {}
+    bits[#bits + 1] = players and (P.name or "player ?") or "no player detector"
+    if invMgr then bits[#bits + 1] = INV.free and ("inv %d/%d free"):format(INV.free, INV.total) or "inv ?" end
+    if detector then
+      local biome = tostring(S.biome or "?"):gsub("^[%w_%.%-]+:", "")
+      bits[#bits + 1] = ("light %s %s"):format(S.light and tostring(S.light) or "?", biome)
+    end
+    at(2, H - 1, fit(table.concat(bits, " | ")), colours.grey, colours.black)
   end
 
-  -- What the stats are getting
-  local inv = invMgr and (INV.free and ("Inv %d/%d free"):format(INV.free, INV.total) or "Inv: no card?") or "Inv: no manager"
-  local who = players and (P.name or ("Player: " .. tostring(P.err or "?"))) or "No player detector"
-  at(2, y, (who .. " | " .. inv):sub(1, W - 2), colours.grey, colours.black)
-
-  -- HUD diagnostics: where it's drawn, the screen size the client reported, objects on screen
-  if overlay then
-    local n = call(overlay, "getObjectsCount")
-    local function num(v)
-      if type(v) ~= "number" then return "?" end
-      if v == math.floor(v) then return ("%d"):format(v) end
-      return ("%.2f"):format(v)
-    end
-    local line1, line2
-    if diag.err then
-      line1, line2 = "HUD error:", diag.err
-    else
-      line1 = ("HUD at %s,%s (%s obj)%s"):format(num(diag.x), num(diag.y), num(n),
-        diag.equipped == false and " off" or "")
-      local other = (diag.wipes or 0) - (diag.scanWipes or 0)
-      if other > 0 then line1 = line1 .. (" wiped %d"):format(other) end
-      if (diag.scanWipes or 0) > 0 then line1 = line1 .. (" scan %d"):format(diag.scanWipes) end
-      line2 = ("Screen %sx%s /%s"):format(num(diag.w), num(diag.h), num(diag.scale))
-      if (diag.flips or 0) > 0 then line2 = line2 .. (" flips %d"):format(diag.flips) end
-    end
-    at(2, H - 2, line1:sub(1, W - 2), colours.grey, colours.black)
-    at(2, H - 1, line2:sub(1, W - 2), colours.grey, colours.black)
-  end
-
-  -- Footer: HUD toggle
-  local hudLabel = yes("HUD") and " H  HUD: on " or " H  HUD: off "
+  -- Footer: keys
   fill(H, colours.black)
-  at(2, H, hudLabel, colours.white, colours.grey)
-  if not overlay then at(2 + #hudLabel + 1, H, "no overlay", colours.grey, colours.black) end
-  hits[#hits + 1] = { y = H, action = function() setEnv("HUD", yes("HUD") and "no" or "yes") end }
+  local keys
+  for _, k in ipairs({ "1-3 NV  A aggro  S speed  H HUD  Q quit", "1-3 NV A aggro S speed H HUD Q quit", "keys: 1-3 A S H Q" }) do
+    if #k <= W - 2 then keys = k; break end
+  end
+  keys = keys or "keys: 1-3 A S H Q"
+  at(2, H, keys:sub(1, W - 2), colours.grey, colours.black)
 end
 
 ---------------------------------------------------------------------------
@@ -760,14 +799,16 @@ while true do
     watchStep()
   elseif e == "mouse_click" then
     for _, r in ipairs(hits) do
-      if c == r.y then act = r.action; break end
+      if c == r.y and (not r.x1 or (b >= r.x1 and b <= r.x2)) then act = r.action; break end
     end
   elseif e == "char" then
     local ch = a:lower()
     if ch == "1" then act = function() setMode("auto") end
     elseif ch == "2" then act = function() setMode("on") end
     elseif ch == "3" then act = function() setMode("off") end
-    elseif ch == "h" then act = function() setEnv("HUD", yes("HUD") and "no" or "yes") end
+    elseif ch == "h" then act = function() setYes("HUD", not yes("HUD")) end
+    elseif ch == "a" then act = function() setYes("AGGRO", not yes("AGGRO")) end
+    elseif ch == "s" then act = function() setEnv("AGGRO_EVERY", tostring(nextSpeed())) end
     elseif ch == "q" then
       hudHideAll()
       term.setBackgroundColour(colours.black); term.clear(); term.setCursorPos(1, 1)
