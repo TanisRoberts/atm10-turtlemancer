@@ -733,34 +733,64 @@ local RES = {
   trip = { "couldn't fly there", colors.red }, going = { "on his way", colors.yellow },
   todo = { "not done", colors.gray },
 }
+-- The 8 corners in the order Rigger visits them, with a compass name for walking there
+local function plannedCorners(bx)
+  local out = {}
+  for _, y in ipairs({ bx.y1, bx.y2 }) do
+    for _, x in ipairs({ bx.x1, bx.x2 }) do
+      for _, z in ipairs({ bx.z1, bx.z2 }) do
+        out[#out + 1] = { x = x, y = y, z = z, res = "todo",
+          name = (z == bx.z1 and "N" or "S") .. (x == bx.x1 and "W" or "E") .. (y == bx.y1 and " bottom" or " top") }
+      end
+    end
+  end
+  return out
+end
+
+-- Chunks he flies through: the build box + the 2 blocks he may clear around it + his dock
+local function chunkSpan(info)
+  local b, site = info.bounds, info.site
+  local x1, x2 = math.min(b.x1 - 2, site.dx), math.max(b.x2 + 2, site.dx)
+  local z1, z2 = math.min(b.z1 - 2, site.dz), math.max(b.z2 + 2, site.dz)
+  local c1, c2, d1, d2 = math.floor(x1 / 16), math.floor(x2 / 16), math.floor(z1 / 16), math.floor(z2 / 16)
+  return c1, c2, d1, d2, (c2 - c1 + 1) * (d2 - d1 + 1)
+end
+
 local function drawCorners()
   local s, info = st.status, st.info
-  local corners = s and s.corners
+  local tested = s and type(s.corners) == "table" and #s.corners > 0
   local y = TOP
-  if info then
+  if not info then
+    put(1, y + 1, st.status and "Asking Rigger for the plan..." or "Waiting for Rigger...", colors.lightGray)
+    put(1, y + 3, "Rigger also prints the box and chunks on his own screen", colors.lightGray)
+    put(1, y + 4, "every time he starts.", colors.lightGray)
+  else
     local b = info.bounds
     put(1, y, fit(("Box X %d..%d  Z %d..%d  Y %d..%d"):format(b.x1, b.x2, b.z1, b.z2, b.y1, b.y2), W), colors.white)
     y = y + 1
-  end
-  if type(corners) ~= "table" or #corners == 0 then
-    put(1, y + 1, "No marker test yet. [Test] flies to all 8 corners and", colors.lightGray)
-    put(1, y + 2, "puts dirt on each, then comes home. [Clear] picks them up.", colors.lightGray)
-  else
-    put(1, y, ("%-2s %-17s %-28s"):format("#", "corner X Y Z", "marker"), colors.gray)
+    local c1, c2, d1, d2, n = chunkSpan(info)
+    put(1, y, fit(("Chunks X %d..%d  Z %d..%d  (%d chunks to load)"):format(c1, c2, d1, d2, n), W), colors.cyan)
     y = y + 1
-    for i, c in ipairs(corners) do
-      local r = RES[c.res] or { tostring(c.res), colors.white }
-      local txt = r[1]
-      if c.res == "seabed" and c.my then txt = txt .. " at Y " .. c.my end
-      if c.why and c.res ~= "seabed" then txt = txt .. ": " .. c.why end
-      put(1, y, ("%-2d %-17s"):format(i, ("%d %d %d"):format(c.x, c.y, c.z)), colors.white)
-      put(22, y, fit(txt, W - 21), r[2])
+    put(1, y, fit(("  = blocks X %d..%d  Z %d..%d  (incl. his dock)")
+      :format(c1 * 16, c2 * 16 + 15, d1 * 16, d2 * 16 + 15), W), colors.cyan)
+    y = y + 1
+    put(1, y, ("%-2s %-10s %-17s %s"):format("#", "corner", "X Y Z", tested and "marker" or ""), colors.gray)
+    y = y + 1
+    local plan = plannedCorners(b)
+    for i, p in ipairs(plan) do
+      local c = tested and s.corners[i] or p
+      put(1, y, ("%-2d %-10s %-17s"):format(i, p.name, ("%d %d %d"):format(p.x, p.y, p.z)), colors.white)
+      if tested then
+        local r = RES[c.res] or { tostring(c.res), colors.white }
+        local txt = r[1]
+        if c.res == "seabed" and c.my then txt = "on ground Y " .. c.my end
+        if c.why and c.res ~= "seabed" then txt = txt .. ": " .. c.why end
+        put(32, y, fit(txt, W - 31), r[2])
+      end
       y = y + 1
     end
-    if info then
-      y = y + 1
-      put(1, y, fit("5-8 are the top of the build (Y " .. info.bounds.y2 .. "): look up!", W), colors.lightGray)
-    end
+    put(1, y, fit(tested and "The top 4 are high up: look up!" or
+      "No test yet: [Test] marks all 8 with dirt.", W), colors.lightGray)
   end
   local x = button(1, BOT, "Test", "cmd:test")
   x = button(x, BOT, "Clear", "cmd:clear")

@@ -899,5 +899,15 @@ if args[1] == "build" or args[1] == "stop" or args[1] == "test" or args[1] == "c
 end
 save()
 
+-- The build box and the chunks he'll fly through, so they can be chunk-loaded
+do
+  local b = bounds()
+  local x1, x2 = math.min(b.x1 - 2, C.dx), math.max(b.x2 + 2, C.dx)
+  local z1, z2 = math.min(b.z1 - 2, C.dz), math.max(b.z2 + 2, C.dz)
+  local c1, c2, d1, d2 = math.floor(x1 / 16), math.floor(x2 / 16), math.floor(z1 / 16), math.floor(z2 / 16)
+  print(("Box X %d..%d Z %d..%d"):format(b.x1, b.x2, b.z1, b.z2))
+  print(("    Y %d (bottom) .. %d (top)"):format(b.y1, b.y2))
+  print(("Chunks X %d..%d Z %d..%d (%d)"):format(c1, c2, d1, d2, (c2 - c1 + 1) * (d2 - d1 + 1)))
+end
 setStatus("docked", "Starting")
 parallel.waitForAny(mainLoop, netLoop, gpsLoop)
