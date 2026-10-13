@@ -364,7 +364,8 @@ local P = {}
 local problems = {}
 local note = "Starting"
 local dockList, dockMatrices, dockFuel = {}, 0, 0
-local power = { pct = nil, have = 0, cap = 0, source = "none" }
+-- pct = what decisions use: the lower of the cells and the chambers' own buffers
+local power = { pct = nil, cellPct = nil, simPct = nil, have = 0, cap = 0, source = "none" }
 local furnatorFuel = 0
 
 local function problem(key, on, msg)
@@ -654,15 +655,21 @@ local function pass()
   for c in pairs(P) do if not seen[c] then P[c] = nil end end
   readDock()   -- outputs just landed
 
-  -- Power: energy cells on the cable, else the machines' own buffers
+  -- Power: every energy cell on the cable added up, and the chambers' own buffers (the chambers are
+  -- what drains; fabs only draw while working, so they sit full and would hide a shortage).
+  -- Decisions use the lower of the two: empty chambers mean low power even with full cells.
   local have, cap = 0, 0
   for _, n in ipairs(L.cells) do local e, x = powerRead(n); have, cap = have + e, cap + x end
-  power.source = #L.cells > 0 and "cell" or "machines"
-  if #L.cells == 0 then
-    for _, p in ipairs(cols) do have, cap = have + (p.cEnergy or 0) + (p.fEnergy or 0), cap + (p.cCap or 0) + (p.fCap or 0) end
-  end
   power.have, power.cap = have, cap
-  power.pct = cap > 0 and math.floor(have / cap * 100 + 0.5) or nil
+  power.cellPct = cap > 0 and math.floor(have / cap * 100 + 0.5) or nil
+  local sh, sc = 0, 0
+  for _, p in ipairs(cols) do
+    if p.mob then sh, sc = sh + (p.cEnergy or 0), sc + (p.cCap or 0) end
+  end
+  power.simPct = sc > 0 and math.floor(sh / sc * 100 + 0.5) or nil
+  power.source = #L.cells > 0 and (#L.cells .. " cell" .. (#L.cells == 1 and "" or "s")) or "no cell on the cable"
+  if power.cellPct and power.simPct then power.pct = math.min(power.cellPct, power.simPct)
+  else power.pct = power.cellPct or power.simPct end
 
   -- Low power: only the column furthest below its target runs
   local only = nil
@@ -731,7 +738,11 @@ local function pass()
       problems[key] = who .. ": the chamber has stopped. Check it's on Inference (not Training), redstone Ignored, and the model isn't Faulty."
     elseif s == "NO POWER" then
       key = "power:" .. p.c
-      problems[key] = who .. ": the chamber has no power."
+      if power.cellPct and power.cellPct >= 20 then
+        problems[key] = who .. (": the chamber has no power, but the cells are at %d%%. Is it on the power line?"):format(power.cellPct)
+      else
+        problems[key] = who .. ": the chamber has no power."
+      end
     elseif s == "TRAINING?" then
       key = "training:" .. p.c
       problems[key] = who .. ": using matrices but making nothing. Is the chamber on Training mode? Switch it to Inference."
@@ -796,8 +807,8 @@ end
 
 local function statusLines()
   local out = { note }
-  out[#out + 1] = ("Power %s (%s)%s. Matrices: %d in the dock%s"):format(
-    power.pct and (power.pct .. "%") or "?", power.source,
+  out[#out + 1] = ("Power: cells %s (%s), chambers %s%s. Matrices: %d in the dock%s"):format(
+    power.cellPct and (power.cellPct .. "%") or "-", power.source, power.simPct and (power.simPct .. "%") or "-",
     #L.furnators > 0 and (", Furnator fuel " .. furnatorFuel) or "",
     dockMatrices, storageItems and (", " .. (tonumber(storageItems[MATRIX]) or 0) .. " in storage") or "")
   for i, c in ipairs(L.chambers) do
@@ -906,6 +917,9 @@ end
 local function powerLine(m, w, y)
   m.setCursorPos(2, y); m.setTextColour(colours.lightGrey)
   local txt = "Power " .. (power.pct and (power.pct .. "%") or "?") .. " "
+  if power.cellPct and power.simPct and power.simPct + 10 < power.cellPct then
+    txt = ("Sims %d%% "):format(power.simPct)   -- the chambers are the bottleneck: say so
+  end
   m.write(txt)
   local tail = #L.furnators > 0 and (" Furnator " .. furnatorFuel) or ""
   local bw = math.max(0, w - 2 - #txt - #tail - 1)
