@@ -166,3 +166,36 @@ he never digs, he flies over things. Needs the GPS towers.
 If GitHub can't be reached or a download is broken (empty, or a `.lua` that doesn't compile), the old file is
 kept and the device boots anyway. Files marked `once` in the manifest (`junk.txt`, `smelt.txt`, `mossy.plan`)
 are only downloaded if missing, so your edits stay. `reset` won't wipe anything if it can't download setup first.
+
+## Duplicate IDs
+
+Every computer, turtle and pair of Smart Glasses keeps its files in a folder named after its ID (type `id` to see
+it). If two machines end up with the **same ID**, they share one set of files, so whichever was set up last
+takes the other over (e.g. your glasses suddenly running the plastic factory).
+
+**How it happens:** ComputerCraft's ID counter (`world/computercraft/ids.json` on the server) restarts from 0 if
+that file is lost or corrupted, which a server crash can do. Every machine made after that reuses an old
+number. It also happens if a computer is copied (creative Ctrl+middle-click) or an old computer item is reused.
+
+**The check:** `startup.lua` remembers which machine each disk belongs to (`owner.cfg`: label + hardware). If a
+different machine boots from it, it stops with a red **DUPLICATE ID** screen instead of running the other
+machine's program:
+- **[1] Same machine, carry on**: you renamed it outside the scripts (e.g. an anvil). It remembers the new name.
+- **[2] Stop: show the fix**: leaves you at the shell with the steps below.
+
+No false alarms from `reset`, re-running setup, `label set`, Diggers naming themselves, or crafting a computer
+into a turtle. It can't tell apart two machines that are both unlabelled *and* the same hardware, so keep
+everything labelled (setup always does). The check arrives with the new `startup.lua`, so it starts working
+from a device's *second* reboot.
+
+**Fixing a clash:**
+1. Keep one machine and replace the other: whichever is cheaper to rebuild (glasses: replace the computer).
+2. Craft a **new** computer/turtle at a crafting table (never a copy or a spare), swap it in for the old one,
+   drag `startup.lua` on and pick its role. Check `id` shows a new number. Want its settings? Copy the
+   `.cfg`/`.env` files across with a disk drive and floppy before swapping.
+3. **Destroy the old item** (lava or a trash can). It still carries the shared ID.
+4. Reboot the machine you kept. If it shows the warning, pick **[1]**. If it's running the wrong program, type
+   `reset` and set it up again.
+5. If a crash caused it, other recent machines may clash too: run `id` on them. Whoever runs the server can stop
+   it and set the `"computer"` number in `world/computercraft/ids.json` higher than the biggest folder number in
+   `world/computercraft/computer/`, so new machines get safe IDs.

@@ -69,6 +69,132 @@ local function say(colour, text)
 end
 
 ---------------------------------------------------------------------------
+-- Duplicate ID check
+-- A computer's files live in a folder named after its ID. If two machines end up with the same ID
+-- (ComputerCraft's ID counter resets after a bad server crash, or a computer gets copied), they
+-- share ONE disk, and whichever was set up last takes over the other. owner.cfg remembers which
+-- machine this disk belongs to (label + hardware). If a different machine boots from it, stop and ask.
+-- Not a false alarm on: `reset` (deletes owner.cfg; the next boot records whoever is here), setup
+-- relabelling, `label set`, Diggers naming themselves (all go through os.setComputerLabel, which is
+-- wrapped below to keep owner.cfg up to date), or crafting a computer into a turtle (same label).
+---------------------------------------------------------------------------
+local OWNER = "owner.cfg"
+
+local function hardware()
+  if turtle then return "turtle" end
+  if smartglasses then return "glasses" end
+  if pocket then return "pocket computer" end
+  return "computer"
+end
+
+local function saveOwner(lbl)
+  local f = fs.open(OWNER, "w")
+  f.write(textutils.serialize({ label = lbl, kind = hardware(), id = os.getComputerID(), at = os.epoch("utc") }))
+  f.close()
+end
+
+local function wrapText(s, w)
+  local out, line = {}, ""
+  for word in s:gmatch("%S+") do
+    if line == "" then line = word
+    elseif #line + 1 + #word <= w then line = line .. " " .. word
+    else out[#out + 1] = line; line = word end
+  end
+  if line ~= "" then out[#out + 1] = line end
+  return out
+end
+
+-- Returns true to carry on booting, false to stop (left at the shell).
+local function ownerCheck()
+  local here = { label = os.getComputerLabel(), kind = hardware() }
+  local own = textutils.unserialize(readFile(OWNER) or "")
+  if type(own) ~= "table" then saveOwner(here.label); return true end   -- fresh disk / first boot with this check
+  if own.label == here.label and own.kind == here.kind then return true end
+  if own.label == here.label and own.kind == "computer" and here.kind == "turtle" then
+    saveOwner(here.label); return true                                       -- a computer crafted into a turtle keeps its ID
+  end
+
+  local function name(x) return (x.label and ('"' .. x.label .. '"') or "(no label)") .. " (" .. tostring(x.kind) .. ")" end
+  local role = "nothing yet"
+  local dc = textutils.unserialize(readFile(CFG) or "")
+  if type(dc) == "table" and dc.role then role = tostring(dc.role) .. " " .. tostring(dc.type) end
+  local id = os.getComputerID()
+  local W, H = term.getSize()
+  local colour = term.isColour()
+
+  local function draw(lines, options)
+    term.setBackgroundColour(colours.black); term.clear()
+    if colour then term.setBackgroundColour(colours.red) end
+    term.setCursorPos(1, 1); term.clearLine()
+    term.setTextColour(colours.white); term.write(" DUPLICATE ID #" .. id .. "?")
+    term.setBackgroundColour(colours.black)
+    local y = 3
+    for _, l in ipairs(lines) do
+      for _, part in ipairs(wrapText(l[1], W - 1)) do
+        if y <= H then
+          term.setCursorPos(1, y); term.setTextColour(colour and l[2] or colours.white); term.write(part)
+        end
+        y = y + 1
+      end
+    end
+    local rows = {}
+    y = math.max(y + 1, H - #options * 2 + 1)
+    for i, o in ipairs(options) do
+      local parts = wrapText("[" .. i .. "] " .. o, W - 1)
+      rows[i] = { y, y + #parts - 1 }
+      for _, part in ipairs(parts) do
+        if y <= H then
+          term.setCursorPos(1, y); term.setTextColour(colour and colours.yellow or colours.white); term.write(part)
+        end
+        y = y + 1
+      end
+    end
+    term.setTextColour(colours.white)
+    return rows
+  end
+
+  local function choose(rows, n)
+    while true do
+      local e, a, _, my = os.pullEvent()
+      if e == "char" and tonumber(a) and tonumber(a) >= 1 and tonumber(a) <= n then return tonumber(a) end
+      if e == "mouse_click" then
+        for i, r in ipairs(rows) do if my >= r[1] and my <= r[2] then return i end end
+      end
+    end
+  end
+
+  local rows = draw({
+    { "This disk belongs to " .. name(own) .. ".", colours.white },
+    { "This is " .. name(here) .. ".", colours.white },
+    { "Set up as: " .. role .. ".", colours.lightGrey },
+    { "Two machines with the same ID share their files.", colours.orange },
+  }, { "Same machine, carry on", "Stop: show the fix" })
+
+  if choose(rows, 2) == 1 then saveOwner(here.label); term.clear(); term.setCursorPos(1, 1); return true end
+
+  draw({
+    { "1. Keep one, replace the other (glasses: replace the computer).", colours.white },
+    { "2. Craft a NEW one at a crafting table, swap it in, drag startup.lua on it.", colours.white },
+    { "3. Destroy the old item: it still has ID #" .. id .. ".", colours.white },
+    { "4. Reboot the one you kept, pick [1]. Wrong program? Type: reset", colours.white },
+    { "Full guide: README, Duplicate IDs.", colours.lightGrey },
+  }, {})
+  term.setCursorPos(1, H)
+  return false
+end
+
+if not ownerCheck() then return end
+
+-- Keep owner.cfg in step with label changes made on this machine (setup, `label set`, Diggers naming themselves)
+do
+  local setLabel = os.setComputerLabel
+  os.setComputerLabel = function(lbl)
+    setLabel(lbl)
+    pcall(saveOwner, lbl)
+  end
+end
+
+---------------------------------------------------------------------------
 -- No role yet: run setup
 ---------------------------------------------------------------------------
 if not fs.exists(CFG) then
