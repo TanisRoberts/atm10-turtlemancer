@@ -46,6 +46,7 @@ local DEFAULTS = {
   { "AGGRO_IGNORE", "minecraft:wolf,minecraft:iron_golem,minecraft:snow_golem", "Mobs that never trigger the alert (comma separated ids)." },
   { "AGGRO_Y", 30, "Alert height from the top of the screen, in GUI pixels (30 clears a boss bar)." },
   { "AGGRO_HOLD", 3, "Seconds the alert stays up after the last sighting." },
+  { "AGGRO_EVERY", 2, "Seconds between mob scans (2 is AP's fastest). Each scan makes AP wipe the HUD, which is redrawn at once; raise this if you still see a blink." },
   { "CHECK_EVERY", 1, "Seconds between updates." },
 }
 
@@ -332,8 +333,9 @@ end
 local function scanAggro()
   if not detector or not yes("AGGRO") or type(detector.scanEntities) ~= "function" then AG.last = nil; return end
   local now = os.clock()
-  if now - AG.lastScan < 2 then return end   -- AP allows one scan every 2 s
+  if now - AG.lastScan < math.max(2, tonumber(E.AGGRO_EVERY) or 2) then return end   -- AP allows one scan every 2 s
   AG.lastScan = now
+  AG.scanned = true   -- the main loop watches for the HUD wipe that follows a scan
   local range = math.max(1, math.min(16, E.AGGRO_RANGE))
   local ok, list, why = pcall(detector.scanEntities, range, true)
   if not ok or type(list) ~= "table" then AG.err = tostring(ok and why or list); return end
@@ -399,7 +401,7 @@ local function hudPut(key, kind, props)
   if ok and type(obj) == "table" then
     local shown = {}
     for k, v in pairs(props) do shown[k] = v end
-    hud[key] = { obj = obj, kind = kind, shown = shown }
+    hud[key] = { obj = obj, kind = kind, shown = shown, born = os.clock() }
     diag.err = nil
   else
     diag.err = (not ok) and tostring(obj) or ("create" .. kind .. " gave " .. type(obj))
@@ -443,12 +445,16 @@ local function hudLog(msg)
   end)
 end
 
-local function hudCheckAlive(why)
-  if not overlay or type(overlay.getObject) ~= "function" then return end
+-- AP only lists a new object after its next server tick, so ignore ones younger than that.
+local YOUNG = 0.15
+
+local function hudCheckAlive(why, quiet)
+  if not overlay or type(overlay.getObject) ~= "function" then return 0 end
   local had, lost = 0, 0
+  local now = os.clock()
   for key, e in pairs(hud) do
     local okId, id = pcall(e.obj.getId)
-    if okId and id ~= nil then
+    if okId and id ~= nil and now - (e.born or 0) >= YOUNG then
       had = had + 1
       local okGet, o = pcall(overlay.getObject, id)
       if okGet and o == nil then hud[key] = nil; lost = lost + 1 end
@@ -456,9 +462,12 @@ local function hudCheckAlive(why)
   end
   if lost > 0 then
     diag.wipes = (diag.wipes or 0) + 1
-    hudLog(("lost %d/%d HUD objects (%s), %d on server, equipped=%s"):format(lost, had, why or "check",
-      tonumber(call(overlay, "getObjectsCount")) or -1, tostring(diag.equipped)))
+    if not quiet then
+      hudLog(("lost %d/%d HUD objects (%s), %d on server, equipped=%s"):format(lost, had, why or "check",
+        tonumber(call(overlay, "getObjectsCount")) or -1, tostring(diag.equipped)))
+    end
   end
+  return lost
 end
 
 local function hudCount()
@@ -656,7 +665,9 @@ local function drawScreen()
     else
       line1 = ("HUD at %s,%s (%s obj)%s"):format(num(diag.x), num(diag.y), num(n),
         diag.equipped == false and " off" or "")
-      if (diag.wipes or 0) > 0 then line1 = line1 .. (" wiped %d"):format(diag.wipes) end
+      local other = (diag.wipes or 0) - (diag.scanWipes or 0)
+      if other > 0 then line1 = line1 .. (" wiped %d"):format(other) end
+      if (diag.scanWipes or 0) > 0 then line1 = line1 .. (" scan %d"):format(diag.scanWipes) end
       line2 = ("Screen %sx%s /%s"):format(num(diag.w), num(diag.h), num(diag.scale))
       if (diag.flips or 0) > 0 then line2 = line2 .. (" flips %d"):format(diag.flips) end
     end
@@ -715,14 +726,38 @@ local function tick()
   drawScreen()
 end
 
-tick()
+-- After each mob scan AP rewrites the glasses' saved data and, a tick or so later, wipes every HUD
+-- object. Watch closely for a moment after each scan and redraw the instant it happens, so the
+-- HUD only blinks for a tick or two instead of disappearing until the next update.
+local WATCH_FOR, WATCH_STEP = 0.6, 0.05
+local watchUntil, watchTimer = 0, nil
+local function afterTick()
+  if AG.scanned then
+    AG.scanned = false
+    watchUntil = os.clock() + WATCH_FOR
+    watchTimer = os.startTimer(WATCH_STEP)
+  end
+end
+local function watchStep()
+  watchTimer = nil
+  if hudCheckAlive("after scan", true) > 0 then
+    diag.scanWipes = (diag.scanWipes or 0) + 1
+    drawHud()
+    watchUntil = 0   -- one wipe per scan
+  end
+  if os.clock() < watchUntil then watchTimer = os.startTimer(WATCH_STEP) end
+end
+
+tick(); afterTick()
 local timer = os.startTimer(math.max(0.25, E.CHECK_EVERY))
 while true do
   local e, a, b, c = os.pullEvent()
   local act
   if e == "timer" and a == timer then
-    tick()
+    tick(); afterTick()
     timer = os.startTimer(math.max(0.25, E.CHECK_EVERY))
+  elseif e == "timer" and a == watchTimer then
+    watchStep()
   elseif e == "mouse_click" then
     for _, r in ipairs(hits) do
       if c == r.y then act = r.action; break end
@@ -749,6 +784,6 @@ while true do
   end
   if act then
     act()
-    tick()
+    tick(); afterTick()
   end
 end
