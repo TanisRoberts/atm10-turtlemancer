@@ -17,6 +17,9 @@
 --   * mines expanding squares around the shaft, 3 levels per pass, ring by ring between the
 --     Foreman's "from ring" and "to ring" (ring 1 = 3x3, ring 50 = 101x101; default 1..50, max 150):
 --     it walks the middle level and digs the block above/below only if it's an ore
+--   * on each new level it first walks out from the shaft N/E/S/W through open tunnel (never digging)
+--     until it meets a block, then starts at the ring after the shortest of the four, so a level
+--     that's already mined out doesn't get walked ring by ring again
 --   * drops 3 levels and repeats until the range is done
 --   * comes home through the shaft when full or low on fuel, unloads, refuels, goes back
 --   * dumps junk (cobble, deepslate ...) underground once storage has 20 stacks of it
@@ -440,7 +443,7 @@ local function applyCtrl()
     local r2 = math.max(r1, math.min(RING_CAP, math.floor(tonumber(ctrl.r2) or DEFAULT_R2)))
     local changed = ctrl.minY ~= S.minY or ctrl.maxY ~= S.maxY or r1 ~= (S.r1 or 1) or r2 ~= (S.r2 or DEFAULT_R2)
     if changed or S.done then
-      S.layerIdx, S.k, S.step, S.done = 1, r1, 1, false
+      S.layerIdx, S.k, S.step, S.done, S.probedLayer = 1, r1, 1, false, nil
       if changed and S.want == "run" then S.regionChanged = true end
     end
     S.minY, S.maxY, S.r1, S.r2, S.want = ctrl.minY, ctrl.maxY, r1, r2, "run"
@@ -509,6 +512,35 @@ local function fuelToStart()
   return 2 * (S.dockY - y) + 4 * (S.k or 1) + 500
 end
 
+-- A fresh level: how far out is it already mined? From the shaft, walk each way (N, E, S, W)
+-- through open space only, stop at the first block (or at the outer ring), walk back.
+-- After the first direction, the others only go as far as the shortest so far.
+-- Returns the shortest open run: rings 1..n are already open in every direction.
+local function probeMined(r2)
+  if S.x ~= 0 or S.z ~= 0 then
+    local ok, why = goToXZ(0, 0)
+    if not ok then error("Can't reach the shaft: " .. tostring(why), 0) end
+  end
+  local best = r2
+  for h = 0, 3 do
+    if best == 0 then break end
+    face(h)
+    local n = 0
+    while n < best do
+      checkpoint()
+      if turtle.detect() then break end
+      if not move("f") then break end
+      n = n + 1
+    end
+    best = math.min(best, n)
+    if S.x ~= 0 or S.z ~= 0 then
+      local ok, why = goToXZ(0, 0)
+      if not ok then error("Can't get back to the shaft: " .. tostring(why), 0) end
+    end
+  end
+  return best
+end
+
 local function mineRegion()
   local layers = layerList()
   S.layerCount = #layers
@@ -536,6 +568,24 @@ local function mineRegion()
     -- Expanding squares
     local blocked = false
     local r1, r2 = S.r1 or 1, S.r2 or DEFAULT_R2
+    -- New level (not resuming partway through it): skip the rings that are already mined out
+    if S.probedLayer ~= li then
+      if (S.k or r1) <= r1 and (S.step or 1) == 1 then
+        setStatus("mining", ("Y %d: checking how far it's mined"):format(layers[li]))
+        local open = probeMined(r2)
+        if open >= r2 then
+          S.probeNote = ("Y %d: mined out to ring %d, next level"):format(layers[li], r2)
+        elseif open + 1 > r1 then
+          S.probeNote = ("Y %d: mined to ring %d, starting at %d"):format(layers[li], open, open + 1)
+        else
+          S.probeNote = nil
+        end
+        S.k, S.step = math.max(r1, open + 1), 1
+        if S.probeNote then setStatus("mining", S.probeNote) end
+      end
+      S.probedLayer = li
+      save()
+    end
     for k = math.max(S.k or r1, r1), r2 do
       S.k = k
       local cells = ringCells(k)
