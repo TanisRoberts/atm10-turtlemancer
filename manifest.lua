@@ -17,8 +17,8 @@ return {
     computer = {
       name = "Computer",
       about = "A computer that sits at the base",
-      details = "The base's brains: storage, smelting, the mainframe, the Foreman, the Farmhand, GPS, the plastic factory, the neural lab and the art wall.",
-      order = { "mainframe", "storage", "smelter", "foreman", "farmhand", "gps", "plastic", "neural", "art" },
+      details = "The base's brains: storage, smelting, the mainframe, the Foreman, the Farmhand, the Architect, GPS, the plastic factory, the neural lab and the art wall.",
+      order = { "mainframe", "storage", "smelter", "foreman", "farmhand", "architect", "gps", "plastic", "neural", "art" },
       roles = {
         mainframe = {
           name = "Mainframe",
@@ -69,6 +69,16 @@ return {
             .. "Needs a wireless or ender modem and an advanced monitor.",
           run = "farmhand",
           files = { "computer/farmhand/farmhand.lua" },
+        },
+        architect = {
+          name = "Architect",
+          about = "Rigger's control screen: map, orders, bill",
+          details = "Everything about Rigger the builder on the computer's own screen: what he's "
+            .. "doing, a map of the layer he's on, the island from the side, materials still "
+            .. "needed, the corner markers, and build / stop / test / clear / reboot orders. "
+            .. "Needs a wireless or ender modem; no monitor.",
+          run = "architect",
+          files = { "computer/architect/architect.lua", "computer/art/art_gfx.lua", "shared/riggerplan.lua" },
         },
         gps = {
           name = "GPS host",
@@ -124,7 +134,8 @@ return {
         rigger = { name = "Rigger", about = "Builder: follows a plan file", run = "rigger",
                    details = "Builds the island from a plan file, layer by layer, and fetches "
                      .. "materials from storage.",
-                   files = { "turtle/rigger/rigger.lua" }, once = { "turtle/rigger/mossy.plan" } },
+                   files = { "turtle/rigger/rigger.lua", "shared/riggerplan.lua" },
+                   once = { "turtle/rigger/mossy.plan" } },
         tigger = { name = "Tigger", about = "Lumberjack: tree farm", run = "lumberjack",
                    details = "Plants, chops and replants a tree farm and drops logs at its dock. "
                      .. "Axe + wireless or ender modem; GPS makes it unlosable. Run from the Farmhand.",

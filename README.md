@@ -20,12 +20,13 @@ ComputerCraft (CC:Tweaked + Advanced Peripherals) scripts for Tanis's ATM10 isla
 | Computer | Smelter | `smelter` | Auto-smelting rules (`smelt.txt`); asks storage to move the items |
 | Computer | Foreman | `foreman` | Mining control: overview of every Digger, tap one for its layers / START / DOCK / position / retire; hands out Digger numbers; layer presets (Y range + rings) edited on the Presets page or with `/presets` on its screen; Reboot / Reboot all / `/reboot` (a Digger finishes its block, reboots, updates and carries on) |
 | Computer | Farmhand | `farmhand` | Control screen for the farm turtles: overview of Figger, Tigger and friends, tap one for ROUNDS NOW / PAUSE / RE-MAP / FOUND / REBOOT, live settings, position, last haul and running totals |
+| Computer | Architect | `architect` | Rigger's control screen (no monitor, the computer's own screen): what he's doing, a map of the layer he's on (done / to do / him / his next block), the island from the side, materials left vs storage, where the test markers went, a log, and build / stop / test / clear / reboot orders (typed or clicked) |
 | Computer | GPS host | `gps_host` | One of 4 GPS towers so turtles know their exact X/Y/Z |
 | Computer | Plastic factory | `plastic` | Industrial Foregoing plastic line: tree taps -> Latex Processing Unit -> furnace -> dock barrel (`plastic.env`) |
 | Computer | Neural lab | `neural` | Hostile Neural Networks wall: runs each chamber + fab column until storage has enough of what it makes (`neural.txt`, `neural.env`) |
 | Computer | Art controller | `art` | Monitor wall: live turtle map coloured by height, GPS pylons, Zigger's world map, generative art you can poke (`art.env`) |
 | Turtle | Digger | `miner` | Shaft + expanding-square mining (`junk.txt`); numbered Digger-01, -02... by the Foreman; reports its exact position |
-| Turtle | Rigger | `rigger` | Builds from a plan file (`mossy.plan`) |
+| Turtle | Rigger | `rigger` | Builds from a plan file (`mossy.plan`, put on him by hand: it's big); run from the Architect or `island rigger ...` in chat |
 | Turtle | Tigger | `lumberjack` | Tree farm: maps a slab-ringed zone, plants a tree grid, chops and replants on a timer (`tigger.env`) |
 | Turtle | Figger | `farmer` | Crop farm: harvests and replants any crop, hoes new soil, picks up what falls (`figger.env`) |
 | Turtle | Zigger | `cartographer` | Flies over the island with a Geo Scanner and maps it for the art wall's World map (`zigger.env`) |

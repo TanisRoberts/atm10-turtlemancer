@@ -4,8 +4,10 @@
 -- ender modem. A plan file (e.g. mossy.plan) on the turtle. A SUPPLY barrel next to the dock
 -- that storage fills (marker: 1 brick in /setup).
 --
--- Commands come from chat via the mainframe:  island rigger test | clear | build | stop | status
+-- Commands come from the Architect computer, or chat via the mainframe:
+--   island rigger test | clear | build | stop | status
 -- Or type them here:  rigger test  /  rigger build  /  rigger stop  /  rigger clear
+-- The plan maths (loading, building order, rotation) is in riggerplan.lua, shared with the Architect.
 --
 -- How it builds:
 --   1. Edge columns: walls under the island's outer edge, from your real seabed up to the plan.
@@ -42,135 +44,27 @@ local function save() writeT(STATE_FILE, S) end
 ---------------------------------------------------------------------------
 -- Plan
 ---------------------------------------------------------------------------
+local RP = dofile("riggerplan.lua")
 local P -- { info, ext = {{x,z,ch}}, layers = { [n] = {{z,x0,rle}} } }
 
-local function loadPlan(path)
-  local f = fs.open(path, "r")
-  if not f then error("Plan file not found: " .. tostring(path), 0) end
-  local plan = { ext = {}, layers = {} }
-  local section, cur
-  while true do
-    local line = f.readLine()
-    if not line then break end
-    if line:sub(1, 6) == "#info " then
-      plan.info = textutils.unserialize(line:sub(7))
-    elseif line == "#ext" then
-      section = "ext"
-    elseif line:sub(1, 3) == "#L " then
-      section = "L"; cur = {}
-      plan.layers[tonumber(line:sub(4))] = cur
-    elseif line ~= "" then
-      if section == "ext" then
-        local x, z, ch = line:match("^(%-?%d+),(%-?%d+),(%a)$")
-        plan.ext[#plan.ext + 1] = { tonumber(x), tonumber(z), ch }
-      elseif section == "L" then
-        local z, x0, rle = line:match("^(%-?%d+)|(%-?%d+)|(.+)$")
-        cur[#cur + 1] = { tonumber(z), tonumber(x0), rle }
-      end
-    end
-  end
-  f.close()
-  if not plan.info then error("Not a plan file: " .. path, 0) end
-  return plan
-end
+local function loadPlan(path) return RP.load(path) end
+local function toWorld(px, py, pz) return RP.toWorld(C, px, py, pz) end
 
--- Rotate plan x/z (clockwise steps of 90 degrees, seen from above) and move to the build site
-local function toWorld(px, py, pz)
-  local r = (C.rot or 0) % 360
-  local x, z = px, pz
-  if r == 90 then x, z = -pz, px elseif r == 180 then x, z = -px, -pz elseif r == 270 then x, z = pz, -px end
-  return C.cx + x, C.sea + py, C.cz + z
-end
-
--- Walk order: always go to the nearest unbuilt cell (follows the island's outline instead of
--- zig-zagging across the hollow middle). Deterministic, so a restart picks the same order.
-local function nearestOrder(cells)
-  if #cells < 3 then return cells end
-  local grid = {}
-  local function k(x, z) return x * 65536 + z end
-  for i, c in ipairs(cells) do grid[k(c[1], c[2])] = i end
-  local used, out = {}, {}
-  local cur = 1
-  for _ = 1, #cells do
-    used[cur] = true
-    out[#out + 1] = cells[cur]
-    grid[k(cells[cur][1], cells[cur][2])] = nil
-    local cx, cz = cells[cur][1], cells[cur][2]
-    local best
-    for r = 1, 4 do                       -- look in growing rings first (fast path)
-      local bd = math.huge
-      for dx = -r, r do
-        for dz = -r, r do
-          if math.max(math.abs(dx), math.abs(dz)) == r then
-            local j = grid[k(cx + dx, cz + dz)]
-            if j then
-              local d = math.abs(dx) + math.abs(dz)
-              if d < bd or (d == bd and j < best) then bd, best = d, j end
-            end
-          end
-        end
-      end
-      if best then break end
-    end
-    if not best then                      -- nothing close: scan everything left
-      local bd = math.huge
-      for j, c in ipairs(cells) do
-        if not used[j] then
-          local d = math.abs(c[1] - cx) + math.abs(c[2] - cz)
-          if d < bd then bd, best = d, j end
-        end
-      end
-    end
-    if not best then break end
-    cur = best
-  end
-  return out
-end
-
--- Ordered cell list for layer n
+-- Ordered cell list for layer n: { px, pz, ch, wx, wy, wz }
 local cellCache = {}
 local function layerCells(n)
   if cellCache.n == n then return cellCache.cells end
-  local rows, cells = P.layers[n] or {}, {}
   local py = P.info.ybase + n - 1
-  for ri, row in ipairs(rows) do
-    local z, x, rowCells = row[1], row[2], {}
-    for countStr, ch in row[3]:gmatch("(%d+)(.)") do
-      local count = tonumber(countStr)
-      if ch ~= "." then
-        for i = 0, count - 1 do rowCells[#rowCells + 1] = { x + i, z, ch } end
-      end
-      x = x + count
-    end
-    if ri % 2 == 0 then
-      for i = #rowCells, 1, -1 do cells[#cells + 1] = rowCells[i] end
-    else
-      for _, c in ipairs(rowCells) do cells[#cells + 1] = c end
-    end
-  end
-  cells = nearestOrder(cells)
+  local cells = RP.orderRows(P.layers[n])
   for _, c in ipairs(cells) do c[4], c[5], c[6] = toWorld(c[1], py, c[2]) end
   cellCache = { n = n, cells = cells }
   return cells
 end
 
+local boundsCache
 local function bounds()
-  local i = P.info
-  local pts = {}
-  for _, x in ipairs({ i.minX, i.maxX }) do
-    for _, z in ipairs({ i.minZ, i.maxZ }) do
-      local wx, _, wz = toWorld(x, 0, z)
-      pts[#pts + 1] = { wx, wz }
-    end
-  end
-  local b = { x1 = math.huge, x2 = -math.huge, z1 = math.huge, z2 = -math.huge }
-  for _, p in ipairs(pts) do
-    b.x1 = math.min(b.x1, p[1]); b.x2 = math.max(b.x2, p[1])
-    b.z1 = math.min(b.z1, p[2]); b.z2 = math.max(b.z2, p[2])
-  end
-  b.y1 = C.sea + i.ybase
-  b.y2 = C.sea + i.topY
-  return b
+  if not boundsCache then boundsCache = RP.bounds(P.info, C) end
+  return boundsCache
 end
 
 local function inSite(x, z)
@@ -428,6 +322,7 @@ end
 local modem = peripheral.find("modem", function(_, m) return m.isWireless() end)
 local inbox = {}   -- supply replies
 local ctrl = nil   -- latest command
+local rebootToken = nil   -- the Architect asked for a reboot (done at the dock, so he updates)
 
 local function send(msg)
   if modem then rednet.broadcast(msg, PROTOCOL) end
@@ -455,7 +350,10 @@ local function statusMsg()
     ext = S.ext, extTotal = P and #P.ext, placed = S.placed or 0, total = total,
     fuel = turtle.getFuelLevel(), fuelLimit = turtle.getFuelLimit(), y = S.y,
     missing = S.missing, plan = P and P.info.name, bill = S.billLeft, seq = S.seq,
-    markers = S.markers and #S.markers or 0, pos = gpsNow(),
+    markers = S.markers and #S.markers or 0, cell = S.cell,
+    at = S.x and { x = S.x, y = S.y, z = S.z, h = S.h } or nil,
+    pos = gpsNow() or (S.x and { x = S.x, y = S.y, z = S.z }) or nil, gps = gpsNow() ~= nil,
+    corners = S.corners, rebootDone = S.rebootDone, want = S.want, v = 2,
   }
 end
 
@@ -541,29 +439,105 @@ local function cornerPoints()
   return pts
 end
 
+local function applyCtrl()
+  -- Orders come from the mainframe and the Architect: only a newer one counts (seqs are epochs)
+  if not ctrl or type(ctrl.seq) ~= "number" or (type(S.seq) == "number" and ctrl.seq <= S.seq) then return end
+  S.seq = ctrl.seq
+  S.want = ctrl.want
+  save()
+end
+
+local function haveMarkerAt(x, y, z)
+  for _, m in ipairs(S.markers or {}) do
+    if m[1] == x and m[2] == y and m[3] == z then return true end
+  end
+end
+
+-- One corner. Returns a report { x, y, z (the corner), res, my (where the marker went), why }:
+--   placed  = right on the corner          seabed = the corner is underground/on land, so the
+--   already = a marker was there already            marker sits on top of the ground above it
+--   failed  = couldn't put it down (why)    trip   = couldn't fly there (why)
+local function markCorner(p)
+  local rep = { x = p[1], y = p[2], z = p[3] }
+  -- Fly in above the corner, then drop to it (stopping on the seabed if it's higher)
+  local ok, why = travel(p[1], math.max(p[2] + 1, travelAlt()), p[3])
+  if not ok then rep.res, rep.why = "trip", tostring(why); return rep end
+  descendTo(p[2] + 1)
+  local r = placeHere(MARKER)
+  if r == "placed" then
+    rep.res, rep.my = (S.y - 1 == p[2]) and "placed" or "seabed", S.y - 1
+  else
+    local found, d = turtle.inspectDown()
+    if found and d.name == MARKER then
+      rep.res, rep.my = "already", S.y - 1
+    elseif found then
+      -- Solid ground at or above the corner: put the marker on top of it instead
+      local up, why2 = move("u")
+      if up and placeHere(MARKER) == "placed" then
+        rep.res, rep.my = "seabed", S.y - 1
+        rep.why = "ground is " .. tostring(d.name):gsub("^.-:", "")
+      else
+        rep.res, rep.why = "failed", up and "couldn't place" or tostring(why2)
+      end
+    else
+      rep.res, rep.why = "failed", r == "missing" and "out of markers" or "couldn't place"
+    end
+  end
+  if rep.my and not haveMarkerAt(p[1], rep.my, p[3]) then
+    S.markers[#S.markers + 1] = { p[1], rep.my, p[3] }
+  end
+  return rep
+end
+
 local function placeMarkers()
   S.markers = S.markers or {}
+  S.corners = {}
   local have = counts()[MARKER] or 0
   if have < 8 then
     goHome()
     restock({ { MARKER, 8 - have } }, math.max(0, 3000 - fuel()))
     if (counts()[MARKER] or 0) < 8 then setStatus("waiting", "Need 8 " .. MARKER .. " for markers"); return false end
   end
-  for i, p in ipairs(cornerPoints()) do
+  local pts = cornerPoints()
+  for i, p in ipairs(pts) do
+    applyCtrl()
+    if S.want ~= "idle" then                -- a new order arrived: stop marking
+      S.corners[i] = { x = p[1], y = p[2], z = p[3], res = "todo" }
+      for j = i + 1, #pts do S.corners[j] = { x = pts[j][1], y = pts[j][2], z = pts[j][3], res = "todo" } end
+      save(); goHome()
+      setStatus("docked", "Marker test stopped at corner " .. i)
+      return false
+    end
     setStatus("marking", ("Corner %d/8 at %d %d %d"):format(i, p[1], p[2], p[3]))
-    -- Fly in above the corner, then drop to it (stopping on the seabed if it's higher)
-    local ok, why = travel(p[1], math.max(p[2] + 1, travelAlt()), p[3])
-    if ok then descendTo(p[2] + 1) end
-    if not ok then setStatus("error", "Marker trip: " .. tostring(why)); goHome(); return false end
-    if placeHere(MARKER) == "placed" then S.markers[#S.markers + 1] = { S.x, S.y - 1, S.z }; save() end
+    S.corners[i] = { x = p[1], y = p[2], z = p[3], res = "going" }
+    local rep = markCorner(p)
+    S.corners[i] = rep
+    save()
+    if rep.res == "trip" then
+      for j = i + 1, #pts do S.corners[j] = { x = pts[j][1], y = pts[j][2], z = pts[j][3], res = "todo" } end
+      save()
+      setStatus("error", "Marker trip, corner " .. i .. ": " .. tostring(rep.why))
+      pcall(goHome)
+      return false
+    end
   end
   goHome()
-  setStatus("docked", "Markers placed. Check the corners, then build or clear.")
+  local n, sb, bad = 0, 0, 0
+  for _, c in ipairs(S.corners) do
+    if c.res == "placed" or c.res == "already" then n = n + 1
+    elseif c.res == "seabed" then n = n + 1; sb = sb + 1
+    else bad = bad + 1 end
+  end
+  setStatus("docked", ("Markers: %d of 8 down%s%s. The top 4 are up at Y %d.")
+    :format(n, sb > 0 and (", " .. sb .. " on the ground") or "", bad > 0 and (", " .. bad .. " failed") or "",
+      bounds().y2))
   return true
 end
 
-local function clearMarkers()
+local function clearMarkers(expect)
   for i = #(S.markers or {}), 1, -1 do
+    applyCtrl()
+    if S.want ~= (expect or "idle") then save(); goHome(); setStatus("docked", "Clearing stopped"); return end
     local p = S.markers[i]
     setStatus("clearing", ("Marker %d at %d %d %d"):format(i, p[1], p[2], p[3]))
     local ok = travel(p[1], p[2] + 1, p[3])
@@ -573,6 +547,7 @@ local function clearMarkers()
     end
     table.remove(S.markers, i); save()
   end
+  S.corners = nil
   goHome()
   setStatus("docked", "Markers cleared")
 end
@@ -581,13 +556,6 @@ end
 -- Building
 ---------------------------------------------------------------------------
 abortWith = function(reason) error({ abort = reason }, 0) end
-
-local function applyCtrl()
-  if not ctrl or ctrl.seq == nil or ctrl.seq == S.seq then return end
-  S.seq = ctrl.seq
-  S.want = ctrl.want
-  save()
-end
 
 local function checkpoint()
   applyCtrl()
@@ -654,7 +622,7 @@ local function buildLayer(n)
 end
 
 local function runBuild()
-  if S.markers and #S.markers > 0 then clearMarkers() end
+  if S.markers and #S.markers > 0 then clearMarkers("build") end
   if not S.phase then S.phase, S.ext, S.layer, S.cell = "ext", 1, 1, 1 end
   if S.phase == "ext" then
     setStatus("building", "Edge walls down to the seabed")
@@ -701,12 +669,34 @@ local function nextNeededItem()
   end
 end
 
+local function newOrder()
+  return ctrl and type(ctrl.seq) == "number" and (type(S.seq) ~= "number" or ctrl.seq > S.seq)
+end
+local function rebootWanted() return rebootToken ~= nil and rebootToken ~= S.rebootDone end
+
+-- Sleep, but wake up for a new order or a reboot request
+local function waitFor(sec)
+  local t = os.clock() + sec
+  while os.clock() < t and not newOrder() and not rebootWanted() do os.sleep(0.5) end
+end
+
+local function doReboot()
+  S.rebootDone = rebootToken
+  setStatus("rebooting", "Rebooting to update")
+  save()
+  send(statusMsg())
+  os.sleep(1)
+  send(statusMsg())
+  os.reboot()
+end
+
 local function mainLoop()
   while true do
     applyCtrl()
+    if rebootWanted() and (atDock() or S.lost) then doReboot() end
     if S.lost then
       setStatus("lost", "Carry me back to the dock, then type: rigger found")
-      os.sleep(5)
+      waitFor(5)
     elseif S.want == "test" then
       S.want = "idle"; save()
       if not atDock() then goHome() end
@@ -726,10 +716,10 @@ local function mainLoop()
           local m = {}
           for _, e in ipairs(S.missing or {}) do m[#m + 1] = e[2] .. " " .. e[1]:gsub("^.-:", "") end
           setStatus("waiting", "Need " .. (#m > 0 and table.concat(m, ", ") or need:gsub("^.-:", "")))
-          os.sleep(30)
+          waitFor(30)
         elseif fuel() < fuelHome() * 2 + 500 then
           setStatus("waiting", "Need fuel (have " .. fuel() .. ")")
-          os.sleep(30)
+          waitFor(30)
         else
           S.missing = nil
           local ok, err = pcall(runBuild)
@@ -743,7 +733,7 @@ local function mainLoop()
           else
             setStatus("error", tostring(err))
             pcall(goHome)
-            os.sleep(30)
+            waitFor(30)
           end
         end
       else
@@ -753,10 +743,37 @@ local function mainLoop()
     else
       if not atDock() then setStatus("returning", "Heading home"); goHome() end
       if S.phase == "done" then setStatus("done", "Build finished. " .. (S.placed or 0) .. " blocks placed.")
-      else setStatus("docked", "Waiting. Say: island rigger build | test | clear") end
-      local t = os.clock() + 10
-      while os.clock() < t and not (ctrl and ctrl.seq ~= S.seq) do os.sleep(1) end
+      elseif S.status ~= "docked" or not ((S.msg or ""):find("^Marker") or (S.msg or ""):find("stopped")) then
+        setStatus("docked", "Waiting. Say: island rigger build | test | clear")
+      end
+      waitFor(10)
     end
+  end
+end
+
+-- The Architect asks for the plan's shape and the site so it can draw him
+local infoCache
+local function answer(msg)
+  if msg.what == "info" then
+    if not infoCache then
+      local ext = {}
+      for i, e in ipairs(P.ext) do
+        local wx, _, wz = toWorld(e[1], 0, e[2])
+        ext[i] = { wx, wz, e[3] }
+      end
+      local i = P.info
+      infoCache = {
+        type = "info", id = os.getComputerID(), plan = i.name, layers = i.layers, blocks = i.blocks,
+        ybase = i.ybase, topY = i.topY, minX = i.minX, maxX = i.maxX, minZ = i.minZ, maxZ = i.maxZ,
+        palette = i.palette, bill = i.bill,
+        site = { cx = C.cx, cz = C.cz, sea = C.sea, seabed = C.seabed, rot = C.rot or 0, cruise = C.cruise,
+                 dx = C.dx, dy = C.dy, dz = C.dz, dh = C.dh, supplyDir = C.supplyDir, planFile = C.plan },
+        bounds = bounds(), profile = RP.profile(P, C), ext = ext,
+      }
+    end
+    return infoCache
+  elseif msg.what == "layer" and tonumber(msg.n) and P.layers[tonumber(msg.n)] then
+    return { type = "layer", id = os.getComputerID(), n = tonumber(msg.n), rows = P.layers[tonumber(msg.n)] }
   end
 end
 
@@ -765,10 +782,17 @@ local function netLoop()
   rednet.open(peripheral.getName(modem))
   local lastSend = -100
   while true do
-    local _, msg = rednet.receive(PROTOCOL, 1)
+    local from, msg = rednet.receive(PROTOCOL, 1)
     if type(msg) == "table" then
-      if msg.type == "cmd" then ctrl = msg
-      elseif msg.type == "supplied" then inbox[#inbox + 1] = msg end
+      if msg.type == "cmd" then
+        if type(msg.seq) == "number" and (not ctrl or type(ctrl.seq) ~= "number" or msg.seq > ctrl.seq) then ctrl = msg end
+      elseif msg.type == "supplied" then inbox[#inbox + 1] = msg
+      elseif msg.type == "reboot" and msg.to == os.getComputerID() and msg.token then
+        rebootToken = msg.token
+      elseif msg.type == "ask" and (msg.to == nil or msg.to == os.getComputerID()) and P then
+        local ok, reply = pcall(answer, msg)
+        if ok and reply then rednet.send(from, reply, PROTOCOL) end
+      end
     end
     if os.clock() - lastSend >= 3 then send(statusMsg()); lastSend = os.clock() end
   end
