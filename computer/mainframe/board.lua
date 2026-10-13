@@ -10,7 +10,7 @@ if not mon then return os.pullEvent("never") end
 
 local STATE_COLOUR = {
   mining = colours.lime, working = colours.lime, building = colours.lime, marking = colours.lime,
-  surveying = colours.lime, clearing = colours.lime,
+  surveying = colours.lime, clearing = colours.lime, mapping = colours.lime,
   returning = colours.yellow, docked = colours.lightBlue, done = colours.lightBlue,
   waiting = colours.orange, error = colours.red, lost = colours.red,
   running = colours.lime, paused = colours.orange,
@@ -68,6 +68,12 @@ local function rows()
     local where = r.phase == "layer" and ("layer %s/%s"):format(tostring(r.layer), tostring(r.layers))
       or r.phase == "ext" and ("edge wall %s/%s"):format(tostring(r.ext), tostring(r.extTotal)) or tostring(r.phase or "idle")
     out[#out + 1] = { r.label or "Rigger", r.state, where .. ((r.msg and r.msg ~= "") and (". " .. r.msg) or ""), _G.RIGGER_SEEN }
+  end
+  local z = _G.CARTO
+  if z then
+    local pct = (z.mapping and tonumber(z.wps) and z.wps > 0) and (" %d%%,"):format(math.floor(((z.wp or 1) - 1) / z.wps * 100)) or ""
+    out[#out + 1] = { z.label or "Zigger", z.state, ("%s %d chunks, fuel %s%s"):format(pct, tonumber(z.chunks) or 0,
+      tostring(z.fuel), (z.msg and z.msg ~= "") and (". " .. z.msg) or ""), _G.CARTO_SEEN }
   end
   local farms = {}
   for k, st in pairs(_G.FARM_STATUS or {}) do farms[#farms + 1] = { k, st } end

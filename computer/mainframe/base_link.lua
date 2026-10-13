@@ -5,6 +5,7 @@
 --   _G.SMELTER / SMELTER_SEEN / SMELT_STATUS            (chat, status board)
 --   _G.FACTORY / FACTORY_SEEN                           (plastic factory: chat, alerts, status board)
 --   _G.NEURAL / NEURAL_SEEN                             (neural lab: chat, alerts, status board)
+--   _G.CARTO / CARTO_SEEN                               (Zigger the cartographer: status board)
 -- and passes smelting orders from chat (_G.SMELT_CMD) on to the smelter until it confirms.
 
 local BASE = "tanis-base"
@@ -27,6 +28,8 @@ while true do
       _G.FACTORY, _G.FACTORY_SEEN = msg, os.clock()
     elseif msg.type == "neural" then
       _G.NEURAL, _G.NEURAL_SEEN = msg, os.clock()
+    elseif msg.type == "carto" then
+      _G.CARTO, _G.CARTO_SEEN = msg, os.clock()
     end
   end
   -- Keep repeating a smelting order from chat until the smelter says it has it

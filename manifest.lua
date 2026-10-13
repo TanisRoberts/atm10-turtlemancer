@@ -17,8 +17,8 @@ return {
     computer = {
       name = "Computer",
       about = "A computer that sits at the base",
-      details = "The base's brains: storage, smelting, the mainframe, the Foreman, GPS, the plastic factory and the neural lab.",
-      order = { "mainframe", "storage", "smelter", "foreman", "gps", "plastic", "neural" },
+      details = "The base's brains: storage, smelting, the mainframe, the Foreman, GPS, the plastic factory, the neural lab and the art wall.",
+      order = { "mainframe", "storage", "smelter", "foreman", "gps", "plastic", "neural", "art" },
       roles = {
         mainframe = {
           name = "Mainframe",
@@ -89,13 +89,23 @@ return {
           run = "neural",
           files = { "computer/neural/neural.lua" },
         },
+        art = {
+          name = "Art controller",
+          about = "Monitor wall: turtle map, world map, art",
+          details = "Shows off the island on an advanced monitor wall: every turtle live by height, "
+            .. "the GPS pylons, Zigger's world map, and generative art you can poke. Three bars in "
+            .. "the bottom-right corner switch screens. Needs an ender modem and an advanced monitor.",
+          run = "art",
+          files = { "computer/art/art.lua", "computer/art/art_gfx.lua", "computer/art/art_scenes.lua",
+                    "shared/mapchunk.lua" },
+        },
       },
     },
     turtle = {
       name = "Turtle",
       about = "A turtle that goes out and works",
-      details = "Mining, building, lumberjacking and farming turtles.",
-      order = { "digger", "rigger", "tigger", "figger" },
+      details = "Mining, building, lumberjacking, farming and map-making turtles.",
+      order = { "digger", "rigger", "tigger", "figger", "zigger" },
       roles = {
         digger = { name = "Digger", about = "Miner: shaft + expanding squares", run = "miner",
                    details = "Digs a shaft at its dock and mines squares at the layers the Foreman "
@@ -112,6 +122,11 @@ return {
         figger = { name = "Figger", about = "Farmer: crops", run = "farmer",
                    details = "Harvests and replants crops, hoes new soil, drops produce at its dock.",
                    files = { "turtle/figger/farmer.lua" } },
+        zigger = { name = "Zigger", about = "Cartographer: flies and maps the island", run = "cartographer",
+                   details = "Zig-zags over the island with a Geo Scanner and paints the world map on "
+                     .. "the art wall. Geo Scanner + ender modem, no pickaxe. Needs GPS and a fuel dock "
+                     .. "with open sky above it.",
+                   files = { "turtle/zigger/cartographer.lua", "shared/mapchunk.lua" } },
       },
     },
     glasses = {

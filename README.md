@@ -22,14 +22,16 @@ ComputerCraft (CC:Tweaked + Advanced Peripherals) scripts for Tanis's ATM10 isla
 | Computer | GPS host | `gps_host` | One of 4 GPS towers so turtles know their exact X/Y/Z |
 | Computer | Plastic factory | `plastic` | Industrial Foregoing plastic line: tree taps -> Latex Processing Unit -> furnace -> dock barrel (`plastic.env`) |
 | Computer | Neural lab | `neural` | Hostile Neural Networks wall: runs each chamber + fab column until storage has enough of what it makes (`neural.txt`, `neural.env`) |
+| Computer | Art controller | `art` | Monitor wall: live turtle map coloured by height, GPS pylons, Zigger's world map, generative art you can poke (`art.env`) |
 | Turtle | Digger | `miner` | Shaft + expanding-square mining (`junk.txt`); numbered Digger-01, -02... by the Foreman; reports its exact position |
 | Turtle | Rigger | `rigger` | Builds from a plan file (`mossy.plan`) |
 | Turtle | Tigger | `lumberjack` | Tree farm |
 | Turtle | Figger | `farmer` | Crop farm |
+| Turtle | Zigger | `cartographer` | Flies over the island with a Geo Scanner and maps it for the art wall's World map (`zigger.env`) |
 | Glasses | HUD | `glasses` | Smart Glasses: night vision AUTO / ON / OFF, HUD stats (clock, coords + facing, inventory bar), aggro alerts (`glasses.env`) |
 
 Every role is defined in `manifest.lua`: its files live under `computer/<role>/`, `turtle/<role>/` or `glasses/<role>/`
-and land on the device under their own names. Adding a role = adding its folder and one manifest entry.
+(files more than one role needs live in `shared/`) and land on the device under their own names. Adding a role = adding its folder and one manifest entry.
 
 ## Smart Glasses
 
@@ -115,6 +117,42 @@ A wall of **columns**, one per mob: a **Simulation Chamber** on top, **its Loot 
 - **Terminal:** `status`, `list`, `pairs`, `check <n>`, `on <n>`, `off <n>`, `auto <n>`, `pause`, `resume`.
 - **Alerts** (mainframe): out of matrices, no power, chamber stuck or on Training, fab with no drop picked, dock full, no counts from storage. Chat: `island neural`, `island neural pause | go`.
 - **Tip:** level a model with the Deep Learner (kills) rather than Training mode (one matrix per run). With the mod's default numbers that's about 100 kills from blank to Self Aware.
+
+## The art wall (art controller + Zigger)
+
+**Art controller:** an advanced computer, an ender modem, and the biggest **advanced** monitor you can build touching it
+(an 8x6 wall = 328 x 243 pixels: every character cell is split into 2 x 3 little pixels). Tap the **three bars in the
+bottom-right corner** to switch screens:
+
+- **Turtle map:** every turtle that knows its GPS position, as a dot coloured by height (14 bands from Y -64 to 320,
+  key on the right), with a trail of where it's been. Diggers, Figger, Tigger, Rigger and Zigger all report one now.
+  The **GPS pylons are red crosses**: the wall asks the GPS towers where they are, so new pylons appear by themselves.
+  Tap a turtle for its details, tap anywhere else to move the map there, **-** / **+** to zoom, **FIT** to follow everyone again.
+  Turtles in the Nether or End aren't shown.
+- **World map:** Zigger's height map: land coloured by height (sand to green to rock to snow, scaled to your island),
+  trees, shallow and deep water, turtles in magenta, pylons red, and Zigger's scan square in white while he works.
+  **MAP** sends Zigger off on a new pass, **DOCK** calls him home.
+- **Art: Plasma, Rings, Aurora:** generative art. Tap to send a ripple out from your finger. A fresh pattern every
+  time it's picked, and again after 10 minutes without a tap.
+- Goes back to the Turtle map after 5 minutes without a tap (`DEFAULT_VIEW`, `IDLE_RETURN`), or set `CYCLE=60` to
+  rotate through every screen when nobody's touching it. Other settings in `art.env`: height bands, trail length, FPS.
+- Its terminal: `1`-`5` switch screens, `Q` stops it (the monitor's colours go back to normal).
+
+**Zigger (cartographer turtle):** a turtle with a **Geo Scanner** on one side and an **ender modem** on the other. No pickaxe:
+he never digs, he flies over things. Needs the GPS towers.
+
+- **Dock:** a barrel touching him that storage keeps fuelled. On storage: `/dock`, pick the barrel, keep e.g. `coal 128`
+  in it (fewer trips home than the default ~32). **Open sky above his dock spot**: he leaves and lands straight up and down.
+- First start: put him on his dock spot and start him. He finds the barrel, steps once to learn which way he faces, and waits.
+- Press **MAP** on the World map (or **M** on his screen). He covers the area in strips 16 blocks apart, `CLEARANCE` (3) blocks
+  above the ground, scanning every 8 blocks, and the wall paints each scan as it arrives. A full 328 x 243 pass is about an
+  hour and ~6,500 fuel (80-ish coal). He goes home for fuel when he needs to, and docks when done. **D** on his screen = dock.
+- Area: centred on his dock, 328 x 243 (fills an 8x6 wall at 1 block per pixel). Change `CENTRE_X`, `CENTRE_Z`, `WIDTH`,
+  `DEPTH` in `zigger.env`; he starts the pass again if you change the area mid-way.
+- **Chunks:** he only works where chunks are loaded (near a player, or force-loaded). Spots outside are skipped, not fatal:
+  run another pass later with someone over there. Restarted or reloaded mid-pass? He asks GPS where he is and carries on.
+- The wall keeps its own copy of the map (`art.map`) and catches up from Zigger's (`zigger.map`) whenever it starts.
+  On the mainframe's board he has his own row (state, % done, chunks, fuel).
 
 ## Diggers and the Foreman
 

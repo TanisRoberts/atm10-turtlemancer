@@ -157,11 +157,25 @@ end
 ---------------------------------------------------------------------------
 local modem = peripheral.find("modem", function(_, m) return m.isWireless() end)
 local ctrl = nil
+-- Where am I? Asked of the GPS towers every few seconds in the background, for the art wall's
+-- turtle map. Nothing else uses it, and without towers it just stays empty.
+local gpsPos, gpsAt = nil, nil
+local function gpsLoop()
+  while true do
+    local ok, x, y, z = pcall(gps.locate, 1)
+    if ok and x then
+      gpsPos, gpsAt = { x = math.floor(x + 0.5), y = math.floor(y + 0.5), z = math.floor(z + 0.5) }, os.clock()
+    end
+    os.sleep(5)
+  end
+end
+local function gpsNow() return (gpsAt and os.clock() - gpsAt < 30) and gpsPos or nil end
+
 local function statusMsg()
   return { type = "status", role = ROLE, id = os.getComputerID(), label = NAME, state = S.status, msg = S.msg,
     fuel = turtle.getFuelLevel(), fuelLimit = turtle.getFuelLimit(), spots = Z and #Z.spots or 0,
     cells = Z and Z.count or 0, lastHaul = S.lastHaul, nextRound = S.nextRound and math.max(0, math.floor(S.nextRound - os.clock())),
-    paused = S.paused, seq = S.seq, saplings = countWhere(isSapling) }
+    paused = S.paused, seq = S.seq, saplings = countWhere(isSapling), pos = gpsNow() }
 end
 
 ---------------------------------------------------------------------------
@@ -734,4 +748,4 @@ if args[1] == "go" then S.paused = false end
 S.nextRound = (args[1] == "rounds") and 0 or nil
 save()
 setStatus("docked", "Starting")
-parallel.waitForAny(mainLoop, netLoop)
+parallel.waitForAny(mainLoop, netLoop, gpsLoop)

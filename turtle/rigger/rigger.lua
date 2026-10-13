@@ -433,6 +433,20 @@ local function send(msg)
   if modem then rednet.broadcast(msg, PROTOCOL) end
 end
 
+-- Where am I? Asked of the GPS towers every few seconds in the background, for the art wall's
+-- turtle map. Nothing else uses it, and without towers it just stays empty.
+local gpsPos, gpsAt = nil, nil
+local function gpsLoop()
+  while true do
+    local ok, x, y, z = pcall(gps.locate, 1)
+    if ok and x then
+      gpsPos, gpsAt = { x = math.floor(x + 0.5), y = math.floor(y + 0.5), z = math.floor(z + 0.5) }, os.clock()
+    end
+    os.sleep(5)
+  end
+end
+local function gpsNow() return (gpsAt and os.clock() - gpsAt < 30) and gpsPos or nil end
+
 local function statusMsg()
   local total = P and P.info.blocks or 0
   return {
@@ -441,7 +455,7 @@ local function statusMsg()
     ext = S.ext, extTotal = P and #P.ext, placed = S.placed or 0, total = total,
     fuel = turtle.getFuelLevel(), fuelLimit = turtle.getFuelLimit(), y = S.y,
     missing = S.missing, plan = P and P.info.name, bill = S.billLeft, seq = S.seq,
-    markers = S.markers and #S.markers or 0,
+    markers = S.markers and #S.markers or 0, pos = gpsNow(),
   }
 end
 
@@ -862,4 +876,4 @@ end
 save()
 
 setStatus("docked", "Starting")
-parallel.waitForAny(mainLoop, netLoop)
+parallel.waitForAny(mainLoop, netLoop, gpsLoop)
