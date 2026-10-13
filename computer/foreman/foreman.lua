@@ -83,6 +83,7 @@ local function numTaken(num, exceptId)
   return false
 end
 local function nameOf(num) return ("Digger-%02d"):format(num) end
+local REBOOT_WAIT = 600000 -- ms: stop asking a Digger to reboot if it hasn't confirmed by then
 
 local live = {}        -- id -> { s = last status, seen = os.clock() }
 local radioOK = nil    -- false = no ender/wireless modem on this computer: Diggers can't hear it
@@ -126,6 +127,16 @@ local function order(id, want)
   sendNow[id] = true
 end
 
+-- Ask a Digger to reboot (it does so between blocks, then carries on). One fresh token per press.
+local function requestReboot(id)
+  local d = cfg.diggers[id]
+  if not d then return end
+  d.reboot, d.rebootAt = os.epoch("utc"), os.epoch("utc")
+  d.rebootSeen = nil
+  saveCfg()
+  sendNow[id] = true
+end
+
 ---------------------------------------------------------------------------
 -- Formatting
 ---------------------------------------------------------------------------
@@ -133,7 +144,7 @@ local K = colours
 local STATES = {
   mining = { "MINING", K.lime }, returning = { "RETURNING", K.yellow }, docked = { "DOCKED", K.lightBlue },
   waiting = { "WAITING", K.orange }, error = { "ERROR", K.red }, lost = { "LOST", K.red },
-  retired = { "RETIRED", K.grey },
+  retired = { "RETIRED", K.grey }, rebooting = { "REBOOTING", K.purple },
 }
 local DIMS = { overworld = "Overworld", the_nether = "Nether", the_end = "End" }
 
@@ -379,6 +390,12 @@ local function drawOverview(w, h)
   end
   if not ui.showRetired then
     x = smallButton(x, fy, "Presets", K.lightBlue, function() ui.page, ui.lscroll = "presets", 1 end)
+    if active > 0 and w >= 48 then
+      x = smallButton(x, fy, "Reboot all", K.purple, function()
+        for _, id in ipairs(digIds(false)) do if cfg.diggers[id] then requestReboot(id) end end
+        say("Reboot sent to every Digger: they finish the block they're on first.", K.purple)
+      end, K.white)
+    end
   end
   if pages > 1 then
     local label = ("%d/%d"):format(ui.scroll, pages)
@@ -557,13 +574,20 @@ local function drawControls(id, x, y, w, maxY)
   end)
   y = y + bh + 1
   if y <= maxY then
+    -- Reboot | Retire share the last row
+    local rw = math.floor((w - 1) / 2)
+    local pending = dd.reboot ~= nil
+    button(x, y, rw, 1, pending and "Rebooting..." or "Reboot", pending and K.grey or K.purple, function()
+      requestReboot(id); say(dd.label .. ": reboot sent. It finishes its block first.", K.purple)
+    end, K.white)
+    local rx, rw2 = x + rw + 1, w - rw - 1
     if ui.confirmRetire == id then
-      button(x, y, w, 1, "Tap again to retire", K.orange, function()
+      button(rx, y, rw2, 1, "Tap to retire", K.orange, function()
         retire(id); ui.confirmRetire = nil; ui.page = "overview"
         say(dd.label .. " retired. Number " .. dd.num .. " won't be used again.", K.orange)
       end)
     else
-      button(x, y, w, 1, "Retire " .. (dd.label or ""), K.grey, function() ui.confirmRetire = id end, K.white)
+      button(rx, y, rw2, 1, "Retire", K.grey, function() ui.confirmRetire = id end, K.white)
     end
   end
 end
@@ -767,7 +791,7 @@ end
 ---------------------------------------------------------------------------
 -- Commands typed on the computer (bottom row): /presets, /new, /edit, /delete, /home, /help
 ---------------------------------------------------------------------------
-local HELP = "/presets  /new <name>  /edit <name>  /delete <name>  /home"
+local HELP = "/presets /new /edit /delete <name>  /reboot <digger|all>  /home"
 
 local function runCommand(line)
   local cmd, arg = line:match("^/?(%S*)%s*(.-)%s*$")
@@ -777,6 +801,21 @@ local function runCommand(line)
   elseif cmd == "presets" or cmd == "preset" or cmd == "settings" or cmd == "p" then ui.page, ui.edit = "presets", nil
   elseif cmd == "home" or cmd == "back" or cmd == "overview" then ui.page, ui.edit = "overview", nil
   elseif cmd == "new" or cmd == "add" then openEditor(nil, arg)
+  elseif cmd == "reboot" or cmd == "restart" then
+    local a = arg:lower()
+    if a == "" then say("/reboot <digger number or name> or /reboot all", K.red); return end
+    local hits = {}
+    for id, dd in pairs(cfg.diggers) do
+      if not dd.retired then
+        local lbl = (dd.label or nameOf(dd.num)):lower()
+        if a == "all" or lbl == a or tonumber(a) == dd.num or lbl:find(a, 1, true) then hits[#hits + 1] = id end
+      end
+    end
+    if #hits == 0 then say("No Digger matches " .. arg, K.red); return end
+    if a ~= "all" and #hits > 1 then say(arg .. " matches " .. #hits .. " Diggers: be more exact", K.red); return end
+    for _, id in ipairs(hits) do requestReboot(id) end
+    say(#hits == 1 and ((cfg.diggers[hits[1]].label or "Digger") .. ": reboot sent.") or
+      ("Reboot sent to " .. #hits .. " Diggers."), K.purple)
   elseif cmd == "edit" or cmd == "delete" or cmd == "remove" or cmd == "del" then
     local idx = findPreset(arg)
     if not idx then say(arg == "" and ("/" .. cmd .. " <preset name>") or ("No preset called " .. arg), K.red); return end
@@ -852,11 +891,16 @@ end
 ---------------------------------------------------------------------------
 local function sendOrder(id)
   local dd = cfg.diggers[id]
+  if dd.reboot and os.epoch("utc") - (dd.rebootAt or 0) > REBOOT_WAIT then
+    dd.reboot, dd.rebootAt = nil, nil
+    saveCfg()
+    say((dd.label or "A Digger") .. " never confirmed its reboot: old program? Reboot it by hand once.", K.orange)
+  end
   local list = {}
   for name in pairs(capped) do list[#list + 1] = name end
   rednet.send(id, {
     type = "cmd", to = id, want = dd.retired and "dock" or dd.want, minY = dd.minY, maxY = dd.maxY,
-    r1 = dd.r1 or 1, r2 = dd.r2 or DEF_R2, seq = dd.seq, retired = dd.retired == true, capped = list,
+    r1 = dd.r1 or 1, r2 = dd.r2 or DEF_R2, seq = dd.seq, reboot = dd.reboot, retired = dd.retired == true, capped = list,
   }, PROTOCOL)
 end
 
@@ -885,6 +929,16 @@ local function netLoop()
       elseif msg.type == "status" and msg.id == from then
         live[from] = { s = msg, seen = os.clock() }
         local dd = cfg.diggers[from]
+        if dd and dd.reboot and msg.rebootDone == dd.reboot then
+          if msg.state == "rebooting" then
+            dd.rebootSeen = true
+          else
+            -- Back up after the reboot: stop asking
+            dd.reboot, dd.rebootAt, dd.rebootSeen = nil, nil, nil
+            saveCfg()
+            say((dd.label or "Digger") .. " is back up and carrying on.", K.lime)
+          end
+        end
         if not dd and tonumber(msg.num) and not numTaken(tonumber(msg.num), from) then
           -- A Digger I don't know that already has a number (e.g. foreman.cfg was lost): adopt it
           dd = newEntry(tonumber(msg.num))

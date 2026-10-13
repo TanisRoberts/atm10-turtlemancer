@@ -25,6 +25,8 @@
 --   * dumps junk (cobble, deepslate ...) underground once storage has 20 stacks of it
 --   * saves its position after every move, so it resumes after chunk unloads / restarts
 -- Hold Ctrl+T to stop the program (the turtle stays where it is).
+-- REBOOT from the Foreman: it finishes the block it's on (never mid-move or mid-turn), reboots,
+-- pulls the latest files and carries on exactly where it was.
 
 local PROTOCOL     = "tanis-miner"
 local STATE_FILE   = "miner.state"
@@ -455,9 +457,22 @@ end
 
 local function abort(reason, msg) error({ abort = reason, msg = msg }, 0) end
 
+-- Reboot asked for by the Foreman (ctrl.reboot = a fresh token per press). Only called at safe
+-- points: between blocks or while idle, so nothing is half-done and the state on disk is exact.
+-- The token is saved first, so the same request never reboots it twice.
+local function maybeReboot()
+  if not (ctrl and ctrl.reboot and ctrl.reboot ~= S.rebootDone) then return end
+  S.rebootDone = ctrl.reboot
+  setStatus("rebooting", "Rebooting, back in a moment")
+  save()
+  os.sleep(STATUS_EVERY + 0.5) -- let the network loop tell the Foreman
+  os.reboot()
+end
+
 -- Called before every block of mining
 local function checkpoint()
   applyCtrl()
+  maybeReboot()
   if S.want ~= "run" then abort("stop", "Stop requested") end
   if S.regionChanged then S.regionChanged = nil; abort("region") end
   dumpJunk(false)
@@ -478,6 +493,7 @@ local function waitCtrl(seconds)
   local t = os.clock() + seconds
   while os.clock() < t do
     if ctrl and ctrl.seq ~= S.seq then return end
+    maybeReboot()
     os.sleep(1)
   end
 end
@@ -969,6 +985,7 @@ local function mainLoop()
   checkPosition()
   while true do
     applyCtrl()
+    maybeReboot()
     if S.lost and gpsSeen then
       checkPosition()
       if S.lost then
@@ -1021,7 +1038,7 @@ local function statusMsg()
     fuel = f, fuelLimit = l, slots = used,
     y = S.dockY and (S.dockY + (S.y or 0)), x = S.x, z = S.z,
     layer = S.layerIdx, layers = S.layerCount, ring = S.k, minRing = S.r1 or 1, maxRing = S.r2 or DEFAULT_R2,
-    minY = S.minY, maxY = S.maxY, want = S.want, done = S.done, ores = S.ores, haul = haul,
+    minY = S.minY, maxY = S.maxY, want = S.want, rebootDone = S.rebootDone, done = S.done, ores = S.ores, haul = haul,
   }
 end
 
