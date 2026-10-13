@@ -198,6 +198,7 @@ end
 
 local lastHaul = {}   -- per Digger
 local factoryKeys = {} -- plastic factory problems we've raised
+local neuralKeys = {}  -- neural lab problems we've raised
 local function watch()
   local s = _G.STORAGE_STATS
   if s and s.total and s.total > 0 then
@@ -231,6 +232,16 @@ local function watch()
       if not probs[k] then condition("plastic:" .. k, false); factoryKeys[k] = nil end
     end
     for k, text in pairs(probs) do factoryKeys[k] = true; condition("plastic:" .. k, true, tostring(text)) end
+  end
+  -- The neural lab does the same (no matrices, no power, stuck chamber, fab with no drop picked)
+  if _G.NEURAL_SEEN then
+    local silent = os.clock() - _G.NEURAL_SEEN > SILENT_AFTER
+    condition("neuralSilent", silent, "Lost contact with the neural lab.")
+    local probs = (not silent and _G.NEURAL and type(_G.NEURAL.problems) == "table") and _G.NEURAL.problems or {}
+    for k in pairs(neuralKeys) do
+      if not probs[k] then condition("neural:" .. k, false); neuralKeys[k] = nil end
+    end
+    for k, text in pairs(probs) do neuralKeys[k] = true; condition("neural:" .. k, true, tostring(text)) end
   end
 
   for _, e in ipairs(diggers()) do
@@ -441,7 +452,7 @@ end
 ---------------------------------------------------------------------------
 -- Chat commands
 ---------------------------------------------------------------------------
-local HELP = "Commands: island status | scan | miner | storage | rigger | tigger | figger | smelt | plastic | alerts | test."
+local HELP = "Commands: island status | scan | miner | storage | rigger | tigger | figger | smelt | plastic | neural | alerts | test."
   .. " Your inventory: $get [n] <item> | $dump | $pocket"
 
 local function chatLoop()
@@ -526,6 +537,20 @@ local function chatLoop()
           local lines = fac.lines or { tostring(fac.note) }
           for i = 1, math.min(#lines, 6) do say(lines[i], user) end
           say("Orders: island plastic pause | go", user)
+        end
+      elseif cmd == "neural" or cmd == "lab" then
+        local nl = _G.NEURAL
+        local sub = tostring(msg):lower():match(cmd .. "%s+(%a+)")
+        local orders = { pause = "pause", stop = "pause", go = "go", resume = "go", run = "go", start = "go" }
+        if not nl then
+          say("The neural lab hasn't checked in. It needs a wireless or ender modem to reach me.", user)
+        elseif sub and orders[sub] then
+          rednet.broadcast({ type = "neural_cmd", to = nl.id, want = orders[sub] }, "tanis-base")
+          say(orders[sub] == "pause" and "Pausing the neural lab." or "Neural lab running again.", user)
+        else
+          local lines = nl.lines or { tostring(nl.note) }
+          for i = 1, math.min(#lines, 8) do say(lines[i], user) end
+          say("Orders: island neural pause | go", user)
         end
       elseif cmd == "rigger" then
         local sub = tostring(msg):lower():match("rigger%s+(%a+)")

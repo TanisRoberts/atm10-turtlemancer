@@ -151,7 +151,13 @@ local function itemTotals()
   return t
 end
 
+-- While a chest is being picked, sorting holds off: otherwise a dock (or input) would have the test
+-- item sorted out of it before the second count, and the wrong chest would be picked.
+local picking, workerBusy = false, false   -- workerBusy: a sorting pass is running (also for barrel probes)
 local function pickChest(label)
+  picking = true
+  while workerBusy do os.sleep(0.2) end
+  local function done(n) picking = false; return n end
   while true do
     print()
     print(("Setting up the %s."):format(label))
@@ -167,7 +173,7 @@ local function pickChest(label)
     end
     if #found == 1 then
       print(("Got it: %s"):format(found[1]))
-      return found[1]
+      return done(found[1])
     elseif #found == 0 then
       printError("Didn't see any chest change. Is its modem connected (right-clicked, red ring)?")
     else
@@ -563,7 +569,14 @@ local function deposit()
     if left > 0 then stuck = true end
   end
   for _, d in ipairs(cfg.docks or {}) do
-    local m, left = depositFrom(d, DOCK_FUELS)
+    local skip = DOCK_FUELS
+    local keep = cfg.dockKeep and cfg.dockKeep[d]
+    if keep and next(keep) then       -- this dock also keeps some of its own items (e.g. the neural lab's matrices)
+      skip = {}
+      for k, v in pairs(DOCK_FUELS) do skip[k] = v end
+      for k in pairs(keep) do skip[k] = true end
+    end
+    local m, left = depositFrom(d, skip)
     moved = moved + m
     if left > 0 then stuck = true end
   end
@@ -630,6 +643,16 @@ local function topUpDocks()
         if n > 0 and (byName[name] or 0) > 0 then
           local moved = retrieve(name, math.min(n, byName[name]), d)
           if moved > 0 then deficit = deficit - moved * 80; changed = true; byName[name] = byName[name] - moved end
+        end
+      end
+      -- Keep list (/dock): top each item up to its amount
+      for name, want in pairs((cfg.dockKeep or {})[d] or {}) do
+        local here = 0
+        for _, it in pairs(list) do if it.name == name then here = here + it.count end end
+        local n = math.min(want - here, byName[name] or 0)
+        if n > 0 then
+          local moved = retrieve(name, n, d)
+          if moved > 0 then changed = true; byName[name] = byName[name] - moved end
         end
       end
     end
@@ -797,7 +820,7 @@ local COMMANDS = {
   { "/setup",    "pick chests with marker items" },
   { "/addinput", "add one more input chest" },
   { "/fuel",     "add a Digger fuel barrel" },
-  { "/dock",     "add a dock (turtle or plastic factory)" },
+  { "/dock",     "add a dock (turtle, plastic factory, neural lab) or set what it keeps" },
   { "/inputs",   "show which chest is which" },
   { "/rescan",   "re-read every chest now" },
   { "/drawers",  "what storage sees in the drawers" },
@@ -1119,12 +1142,12 @@ local function waitTick()
   end
 end
 
-local workerBusy = false -- a sorting pass is running (a barrel probe waits for it to finish)
+-- workerBusy (declared with pickChest): a sorting pass is running (a barrel probe waits for it to finish)
 
 local function workerLoop()
   local lastFull = os.clock()
   while true do
-    if not paused then
+    if not paused and not picking then
       workerBusy = true
       local moved = deposit()
       if os.clock() - lastFull >= FULL_SCAN then
@@ -1410,15 +1433,69 @@ function runCommand(cmd)
         say(termView, ("Fuel barrel added (%d now). I'll keep one refill in each."):format(#cfg.fuels))
       end
     elseif found == "/dock" then
-      local n = pickChest("DOCK barrel: I keep ~32 coal in it and take everything else (pick a dock again to remove it)")
+      local n = pickChest("DOCK barrel: I keep ~32 coal in it and take everything else (pick a dock again to change or remove it)")
       cfg.docks = cfg.docks or {}
+      cfg.dockKeep = cfg.dockKeep or {}
       local idx
       for i, d in ipairs(cfg.docks) do if d == n then idx = i end end
+      -- "<item> <count>" lines: what this dock keeps besides coal (the neural lab: prediction_matrix 64)
+      local function editKeep()
+        local keep = cfg.dockKeep[n] or {}
+        print("Besides coal, this dock keeps:")
+        local any = false
+        for name, c in pairs(keep) do print(("  %d %s"):format(c, name)); any = true end
+        if not any then print("  nothing") end
+        print("Type <item> <count> to keep some (0 = stop),")
+        print("e.g. prediction_matrix 64. Blank line = done.")
+        while true do
+          write("> ")
+          local line = read()
+          if not line or line:match("^%s*$") then break end
+          local item, cnt = line:match("^%s*(%S+)%s+(%d+)%s*$")
+          if not item then printError("Like this: prediction_matrix 64")
+          else
+            item = item:lower()
+            local id = item:find(":") and item or nil
+            if not id then
+              local hits, seen = {}, {}
+              for name in pairs(byName) do
+                if name:match(":(.+)$") == item and not seen[name] then hits[#hits + 1] = name; seen[name] = true end
+              end
+              if #hits == 0 then   -- none in storage: look in every chest on the cable (the dock itself, say)
+                for _, inv in ipairs(inventories()) do
+                  for _, it in pairs(call(inv, "list") or {}) do
+                    if it.name:match(":(.+)$") == item and not seen[it.name] then hits[#hits + 1] = it.name; seen[it.name] = true end
+                  end
+                end
+              end
+              if #hits == 1 then id = hits[1]
+              elseif #hits > 1 then printError("Which one? " .. table.concat(hits, ", "))
+              else printError("None of that on the cable. Use its full id, like hostilenetworks:prediction_matrix") end
+            end
+            if id then
+              cnt = tonumber(cnt)
+              keep[id] = cnt > 0 and cnt or nil
+              print(cnt > 0 and ("Keeping %d %s in it."):format(cnt, id) or ("Not keeping %s any more."):format(id))
+            end
+          end
+        end
+        cfg.dockKeep[n] = next(keep) and keep or nil
+      end
       if idx then
-        table.remove(cfg.docks, idx); saveCfg(); scanAll(); buildItems()
-        say(termView, "Dock removed. It's normal storage again.", C.warn)
+        print("That's already a dock. 1 = change what it keeps, 2 = remove it")
+        write("> ")
+        local ch = read()
+        if ch and ch:match("^%s*2") then
+          table.remove(cfg.docks, idx); cfg.dockKeep[n] = nil; saveCfg(); scanAll(); buildItems()
+          say(termView, "Dock removed. It's normal storage again.", C.warn)
+        else
+          editKeep(); saveCfg(); scanAll(); buildItems()
+          say(termView, "Dock keep list saved.")
+        end
       elseif isSpecial(n) then printError("That one's already in use."); waitEnter() else
-        cfg.docks[#cfg.docks + 1] = n; saveCfg(); scanAll(); buildItems()
+        cfg.docks[#cfg.docks + 1] = n
+        print("Dock added. Keep anything else in it? (blank = just coal)")
+        editKeep(); saveCfg(); scanAll(); buildItems()
         say(termView, ("Dock added (%d now). The test item gets sorted away."):format(#cfg.docks))
       end
     elseif found == "/lock" then
@@ -1450,6 +1527,11 @@ function runCommand(cmd)
       print("Fuel:   " .. (#cfg.fuels > 0 and table.concat(cfg.fuels, ", ") or "not set"))
       print("Rigger: " .. tostring(cfg.rigger or "not set"))
       print("Docks:  " .. (#(cfg.docks or {}) > 0 and table.concat(cfg.docks, ", ") or "none"))
+      for d, keep in pairs(cfg.dockKeep or {}) do
+        local t = {}
+        for name, c in pairs(keep) do t[#t + 1] = c .. " " .. name:gsub("^[^:]+:", "") end
+        print(("  %s keeps %s"):format(d, table.concat(t, ", ")))
+      end
       print("Pocket: dump " .. tostring(cfg.pocketIn or "not set") .. ", restock " .. tostring(cfg.pocketOut or "not set"))
       local dn = 0
       for _, n in ipairs(storage) do if isDrawer(n) then dn = dn + 1 end end
@@ -1458,6 +1540,7 @@ function runCommand(cmd)
     end
   end)
   uiBusy = false
+  picking = false   -- in case a command stopped halfway through picking a chest
   if not ok then say(termView, "Error: " .. tostring(err), C.warn) end
   draw()
 end

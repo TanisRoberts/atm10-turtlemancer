@@ -48,6 +48,11 @@ local function rows()
     out[#out + 1] = { fac.label or "Plastic", fac.state, ("%s. %d plastic made"):format(tostring(fac.note or ""),
       tonumber(fac.plastic) or 0), _G.FACTORY_SEEN }
   end
+  local nl = _G.NEURAL
+  if nl then
+    out[#out + 1] = { nl.label or "Neural lab", nl.state, ("%s. Power %s"):format(tostring(nl.note or ""),
+      nl.power and (nl.power .. "%") or "?"), _G.NEURAL_SEEN }
+  end
   local digs = {}
   for _, e in pairs(_G.DIGGERS or {}) do
     if e.s.state ~= "retired" then digs[#digs + 1] = e end

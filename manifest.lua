@@ -17,8 +17,8 @@ return {
     computer = {
       name = "Computer",
       about = "A computer that sits at the base",
-      details = "The base's brains: storage, smelting, the mainframe, the Foreman, GPS and the plastic factory.",
-      order = { "mainframe", "storage", "smelter", "foreman", "gps", "plastic" },
+      details = "The base's brains: storage, smelting, the mainframe, the Foreman, GPS, the plastic factory and the neural lab.",
+      order = { "mainframe", "storage", "smelter", "foreman", "gps", "plastic", "neural" },
       roles = {
         mainframe = {
           name = "Mainframe",
@@ -78,6 +78,16 @@ return {
             .. "plastic in a dock barrel that storage empties and keeps fuelled (/dock on storage).",
           run = "plastic",
           files = { "computer/plastic/plastic.lua" },
+        },
+        neural = {
+          name = "Neural lab",
+          about = "Sim chambers + fabs, kept to item targets",
+          details = "Runs a wall of Hostile Neural Networks columns (chamber on top, its fab below, "
+            .. "optional lamp) on its OWN cable: drips matrices into a column until storage has "
+            .. "enough of what its fab makes (neural.txt), learns new columns and fab changes by "
+            .. "itself. Dock barrel shared with storage. Needs a wireless or ender modem.",
+          run = "neural",
+          files = { "computer/neural/neural.lua" },
         },
       },
     },
