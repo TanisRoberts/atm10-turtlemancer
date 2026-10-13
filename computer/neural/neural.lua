@@ -247,7 +247,8 @@ local function byNum(a, b)
 end
 
 local storageDocks = {}   -- storage's dock barrels (from its broadcast): finds ours if the cables are joined
-local storageId, storageInput = nil, nil   -- storage computer's id and main input chest (from its broadcast)
+local storageId, storageInput = nil, nil
+local lastCountAsk = nil   -- storage computer's id and main input chest (from its broadcast)
 -- L.out = where drops go (dock, or storage's input chest). L.direct = on storage's cable: no dock needed,
 -- drops go straight into storage's input chest and storage delivers matrices and Furnator fuel itself.
 local L = { chambers = {}, fabs = {}, lamps = {}, furnators = {}, cells = {}, dock = nil, dockNote = nil }
@@ -289,6 +290,8 @@ local function scan()
     if #docks == 1 then
       l.dock = docks[1]
       l.dockNote = ("Lab cable joined to storage? Using storage's dock %s"):format(docks[1])
+    elseif not storageSeen then
+      l.dockNote = "Waiting to hear from storage"
     else
       l.dockNote = ("%d chests on the cable (joined to storage?): set DOCK= in neural.env"):format(#chests)
     end
@@ -364,7 +367,7 @@ end
 -- Storage's item counts (heard on tanis-base)
 ---------------------------------------------------------------------------
 local storageItems, storageSeen = nil, nil
-local function countsFresh() return storageSeen and os.clock() - storageSeen < 30 end
+local function countsFresh() return storageSeen and os.clock() - storageSeen < 60 end
 
 ---------------------------------------------------------------------------
 -- State
@@ -789,7 +792,8 @@ local function pass()
     furnatorFuel = furnatorFuel + have
   end
 
-  -- Problems (alerts on the mainframe)
+  -- Problems (alerts on the mainframe): rebuilt every pass, so nothing stale lingers
+  for k in pairs(problems) do if k ~= "error" then problems[k] = nil end end
   local live = {}
   local anyWantsMatrix = false
   for _, p in ipairs(cols) do
@@ -843,7 +847,8 @@ local function pass()
       or "Neural lab: no dock barrel on the lab cable, so drops have nowhere to go.")
   end
   problem("counts", #L.chambers > 0 and not countsFresh() and tostring(E.WITHOUT_STORAGE):lower() ~= "run",
-    "Neural lab: no item counts from storage, so every column is on hold. It needs a wireless/ender modem.")
+    storageSeen and ("Neural lab: haven't heard from storage for %ds, so every column is on hold. Is the storage computer running?"):format(math.floor(os.clock() - storageSeen))
+    or "Neural lab: no item counts from storage yet, so every column is on hold. It needs a wireless/ender modem.")
   problem("fuel", feeding and #L.furnators > 0 and furnatorFuel == 0 and dockFuel <= 0,
     L.direct and ("Neural lab: power is at %s%% and storage has no spare charcoal or coal for the Furnator (it keeps the last 64 of each for the smelter)."):format(tostring(power.pct))
     or ("Neural lab: power is at %s%% and there's no charcoal or coal in the dock for the Furnator."):format(tostring(power.pct)))
@@ -1196,9 +1201,16 @@ local function netLoop()
       lastSend = os.clock()
     end
     -- Supplies asked for this pass: one message to storage
-    if #ops > 0 and storageId then
-      rednet.send(storageId, { type = "neural_ops", id = os.epoch("utc"), ops = ops }, BASE)
-      ops = {}
+    -- Supplies, plus a direct ask for the counts we need every 10 s: storage's status broadcast
+    -- can go quiet for a while on a busy network, and without counts every column holds.
+    if #ops > 0 or os.clock() - (lastCountAsk or -100) >= 10 then
+      local want = { MATRIX }
+      for _, f in ipairs(FUELS) do want[#want + 1] = f end
+      for _, id in pairs(cfg.items) do want[#want + 1] = id end
+      local req = { type = "neural_ops", id = os.epoch("utc"), ops = ops, want = want }
+      if storageId then rednet.send(storageId, req, BASE)
+      elseif #ops == 0 then rednet.broadcast(req, BASE) end   -- storage not heard yet: just ask for counts
+      ops, lastCountAsk = {}, os.clock()
     end
     local from, msg = rednet.receive(BASE, 1)
     if type(msg) == "table" then
@@ -1211,6 +1223,12 @@ local function netLoop()
         end
       elseif msg.type == "neural_done" then
         firstUnanswered, lastAnswer = nil, os.clock()
+        if type(msg.counts) == "table" then
+          storageItems = storageItems or {}
+          for id, n in pairs(msg.counts) do storageItems[id] = tonumber(n) or 0 end
+          storageSeen = os.clock()
+          storageId = storageId or from
+        end
       elseif msg.type == "neural_cmd" and (msg.to == nil or msg.to == os.getComputerID()) then
         if msg.want == "pause" then setPaused(true) elseif msg.want == "go" then setPaused(false) end
       end

@@ -1195,7 +1195,12 @@ local function workerLoop()
           local neural = j.kind == "neural"
           local results = neural and runNeuralOps(j.ops) or runSmeltOps(j.ops)
           if rednet.isOpen() then
-            rednet.send(j.from, { type = neural and "neural_done" or "smelt_done", id = j.id, results = results }, BASE)
+            local counts
+            if neural and type(j.want) == "table" then
+              counts = {}
+              for _, id in ipairs(j.want) do if type(id) == "string" then counts[id] = byName[id] or 0 end end
+            end
+            rednet.send(j.from, { type = neural and "neural_done" or "smelt_done", id = j.id, results = results, counts = counts }, BASE)
           end
         end
         buildItems()
@@ -1309,8 +1314,17 @@ local function netLoop()
         jobs[#jobs + 1] = { from = from, id = msg.id, ops = msg.ops }
         os.queueEvent("storage_work")
       elseif proto == BASE and msg.type == "neural_ops" and type(msg.ops) == "table" then
-        jobs[#jobs + 1] = { from = from, id = msg.id, ops = msg.ops, kind = "neural" }
-        os.queueEvent("storage_work")
+        if #msg.ops == 0 then
+          -- Just asking for counts: answer straight away, no need to wait for the worker
+          local counts = {}
+          for _, id in ipairs(type(msg.want) == "table" and msg.want or {}) do
+            if type(id) == "string" then counts[id] = byName[id] or 0 end
+          end
+          rednet.send(from, { type = "neural_done", id = msg.id, results = {}, counts = counts }, BASE)
+        else
+          jobs[#jobs + 1] = { from = from, id = msg.id, ops = msg.ops, want = msg.want, kind = "neural" }
+          os.queueEvent("storage_work")
+        end
       end
       -- Relay between the cable and the air, so a wired-only smelter still reaches the mainframe
       if proto == BASE and (msg.type == "smelter" or msg.type == "smelt_cmd") and not msg.relayed then
