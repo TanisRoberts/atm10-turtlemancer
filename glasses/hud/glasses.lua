@@ -630,6 +630,7 @@ local function drawScreen()
       line1 = ("HUD at %s,%s (%s obj)%s"):format(num(diag.x), num(diag.y), num(n),
         diag.equipped == false and " off" or "")
       line2 = ("Screen %sx%s /%s"):format(num(diag.w), num(diag.h), num(diag.scale))
+      if (diag.flips or 0) > 0 then line2 = line2 .. (" flips %d"):format(diag.flips) end
     end
     at(2, H - 2, line1:sub(1, W - 2), colours.grey, colours.black)
     at(2, H - 1, line2:sub(1, W - 2), colours.grey, colours.black)
@@ -666,9 +667,11 @@ local function tick()
   ticks = ticks + 1
   local eq = equipped()
   diag.equipped = eq
-  if eq and wasEquipped == false then
-    call(overlay, "clear"); hudForget()   -- just put back on: start the HUD fresh
-  elseif ticks % 3 == 0 then
+  if wasEquipped ~= nil and eq ~= wasEquipped then diag.flips = (diag.flips or 0) + 1 end
+  -- Just put back on (or isEquipped flickered): only re-create objects AP actually wiped. Clearing
+  -- everything here made the HUD flash whenever isEquipped flickered (AP compares item stack
+  -- objects, which can briefly differ, e.g. in a Curios slot) without the glasses coming off.
+  if (eq and wasEquipped == false) or ticks % 3 == 0 then
     hudCheckAlive()
   end
   wasEquipped = eq
