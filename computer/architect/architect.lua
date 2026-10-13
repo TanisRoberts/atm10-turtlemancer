@@ -126,8 +126,12 @@ local function alive() return st.seen and now() - st.seen < STALE end
 ---------------------------------------------------------------------------
 -- Network
 ---------------------------------------------------------------------------
-local hasModem = false
-peripheral.find("modem", function(name) rednet.open(name); hasModem = true; return false end)
+local hasModem, hasWireless = false, false
+peripheral.find("modem", function(name, m)
+  rednet.open(name); hasModem = true
+  if m.isWireless and m.isWireless() then hasWireless = true end
+  return false
+end)
 
 local function toRigger(msg)
   if st.id then rednet.send(st.id, msg, PROTOCOL) else rednet.broadcast(msg, PROTOCOL) end
@@ -209,6 +213,9 @@ end
 local function onMessage(from, msg, proto)
   if type(msg) ~= "table" then return end
   if proto == PROTOCOL then
+    st.heardAny = now()
+    if msg.type == "cmd" and msg.from ~= "architect" then st.heardLink, st.linkId = now(), from end
+    if msg.type == "info" and not st.id then st.id = from end
     if msg.type == "status" then onStatus(from, msg)
     elseif msg.type == "info" then
       st.info = msg; st.layers = {}; st.layerAsked = {}
@@ -332,10 +339,35 @@ local function drawStatus()
   local s, info = st.status, st.info
   local y = TOP
   if not s then
-    put(2, y + 1, "Rigger hasn't been heard yet.", colors.white)
-    put(2, y + 3, "He needs a wireless or ender modem and to be running", colors.lightGray)
-    put(2, y + 4, "(reboot him once so he picks up the new software).", colors.lightGray)
-    put(2, y + 6, "Orders typed now are still sent; he'll take the newest.", colors.lightGray)
+    put(1, y, "Rigger hasn't been heard yet.", colors.white)
+    y = y + 2
+    put(1, y, "My radio  ", colors.gray)
+    put(11, y, hasWireless and "wireless/ender modem, listening" or (hasModem and "only a WIRED modem: add a wireless/ender one" or "NO modem"),
+      hasWireless and colors.lime or colors.red)
+    y = y + 1
+    put(1, y, "Mainframe ", colors.gray)
+    put(11, y, st.heardLink and ("its Rigger link heard " .. ago(st.heardLink) .. " (#" .. st.linkId .. ")") or "not heard either",
+      st.heardLink and colors.lime or colors.orange)
+    y = y + 1
+    put(1, y, "Plan ask  ", colors.gray)
+    put(11, y, st.info and ("answered by #" .. tostring(st.id)) or "no answer yet", st.info and colors.lime or colors.orange)
+    y = y + 2
+    local lines
+    if not hasWireless then
+      lines = { "I can't hear the turtles without a wireless or ender modem." }
+    elseif st.heardLink and not st.info then
+      lines = { "The mainframe gets through but Rigger doesn't, so:",
+        "- look at Rigger's own screen: is there an error?",
+        "- or he's out of my range: plain wireless reaches ~64 blocks.",
+        "  An ENDER modem on me hears him anywhere." }
+    elseif not st.heardLink then
+      lines = { "Nothing at all on Rigger's channel yet. If the mainframe",
+        "is running, I'm probably out of range of everything:",
+        "an ENDER modem on me fixes that." }
+    else
+      lines = { "Waiting for his first status (every 3 s)..." }
+    end
+    for _, l in ipairs(lines) do put(1, y, fit(l, W), colors.lightGray); y = y + 1 end
     return
   end
   put(1, y, "Plan   ", colors.gray)
