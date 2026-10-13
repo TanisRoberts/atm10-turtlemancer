@@ -423,14 +423,41 @@ local function hudForget()
   hud = {}
 end
 
-local function hudCheckAlive()
+-- hud.log: one line per notable event (boots, HUD wiped by something else, glasses on/off,
+-- module events), last LOG_KEEP lines. Times are seconds since this boot (os.clock).
+local LOG_FILE, LOG_KEEP = "hud.log", 60
+local BOOT = ("%04x"):format(math.random(0, 0xFFFF))   -- tells two copies of this program apart in the log
+local function hudLog(msg)
+  pcall(function()
+    local lines = {}
+    if fs.exists(LOG_FILE) then
+      local f = fs.open(LOG_FILE, "r")
+      for line in f.readAll():gmatch("[^\n]+") do lines[#lines + 1] = line end
+      f.close()
+    end
+    lines[#lines + 1] = ("%s %7.1f %s"):format(BOOT, os.clock(), msg)
+    while #lines > LOG_KEEP do table.remove(lines, 1) end
+    local f = fs.open(LOG_FILE, "w")
+    f.write(table.concat(lines, "\n") .. "\n")
+    f.close()
+  end)
+end
+
+local function hudCheckAlive(why)
   if not overlay or type(overlay.getObject) ~= "function" then return end
+  local had, lost = 0, 0
   for key, e in pairs(hud) do
     local okId, id = pcall(e.obj.getId)
     if okId and id ~= nil then
+      had = had + 1
       local okGet, o = pcall(overlay.getObject, id)
-      if okGet and o == nil then hud[key] = nil end
+      if okGet and o == nil then hud[key] = nil; lost = lost + 1 end
     end
+  end
+  if lost > 0 then
+    diag.wipes = (diag.wipes or 0) + 1
+    hudLog(("lost %d/%d HUD objects (%s), %d on server, equipped=%s"):format(lost, had, why or "check",
+      tonumber(call(overlay, "getObjectsCount")) or -1, tostring(diag.equipped)))
   end
 end
 
@@ -629,6 +656,7 @@ local function drawScreen()
     else
       line1 = ("HUD at %s,%s (%s obj)%s"):format(num(diag.x), num(diag.y), num(n),
         diag.equipped == false and " off" or "")
+      if (diag.wipes or 0) > 0 then line1 = line1 .. (" wiped %d"):format(diag.wipes) end
       line2 = ("Screen %sx%s /%s"):format(num(diag.w), num(diag.h), num(diag.scale))
       if (diag.flips or 0) > 0 then line2 = line2 .. (" flips %d"):format(diag.flips) end
     end
@@ -649,6 +677,9 @@ end
 ---------------------------------------------------------------------------
 readEnv()
 findHardware()
+math.randomseed(os.epoch and os.epoch("utc") or os.time())
+BOOT = ("%04x"):format(math.random(0, 0xFFFF))
+hudLog(("boot: computer #%d %s"):format(os.getComputerID(), tostring(os.getComputerLabel())))
 call(overlay, "clear")   -- drop the HUD left over from before the reboot
 
 -- AP wipes every overlay object when the glasses come off (incl. opening the terminal with them
@@ -667,13 +698,13 @@ local function tick()
   ticks = ticks + 1
   local eq = equipped()
   diag.equipped = eq
-  if wasEquipped ~= nil and eq ~= wasEquipped then diag.flips = (diag.flips or 0) + 1 end
-  -- Just put back on (or isEquipped flickered): only re-create objects AP actually wiped. Clearing
-  -- everything here made the HUD flash whenever isEquipped flickered (AP compares item stack
-  -- objects, which can briefly differ, e.g. in a Curios slot) without the glasses coming off.
-  if (eq and wasEquipped == false) or ticks % 3 == 0 then
-    hudCheckAlive()
+  if wasEquipped ~= nil and eq ~= wasEquipped then
+    diag.flips = (diag.flips or 0) + 1
+    hudLog(eq and "glasses on" or "glasses off")
   end
+  -- Re-create whatever AP removed (never clear everything ourselves: that made the HUD flash).
+  -- Checked every update so anything wiped from outside comes back within one update.
+  hudCheckAlive(eq and wasEquipped == false and "put back on" or nil)
   wasEquipped = eq
   refreshEnv()
   apply(decide())
@@ -709,6 +740,7 @@ while true do
       return
     end
   elseif e == "glasses_module" or e == "glasses_module_detach" or e == "peripheral" or e == "peripheral_detach" then
+    hudLog(e .. " " .. tostring(a))
     findHardware()
     act = function() hudCheckAlive() end
   elseif e == "term_resize" then
