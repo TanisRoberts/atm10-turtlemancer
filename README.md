@@ -98,11 +98,13 @@ Everything for plastic in one building, run by one computer (role **Plastic fact
 
 A wall of **columns**, one per mob: a **Simulation Chamber** on top, **its Loot Fabricator** underneath, and optionally a lamp. One computer (role **Neural lab**) runs them all.
 
-- **Its own wired cable.** Don't join it to the storage cable (storage would treat the chambers as storage barrels).
+- **Cable: either way works.**
+  - **On the storage cable** (simplest): no dock needed. Drops go straight into storage's main input chest, and the lab asks storage for matrices and Furnator fuel, which storage puts directly into the chambers and Furnators. Storage never treats the lab's machines as storage.
+  - **Its own cable:** then it needs the dock barrel below.
 - **Each column:** chamber, fab, and the modems that join them to the lab cable. Full-block wired modems behind the wall work well. Right-click each modem (red ring).
 - **Lamp (optional):** a **Redstone Relay** (CC:Tweaked) or AP **Redstone Integrator** touching a modem, with any lamp touching the relay. The relay switches on every side, so a flush wall works: lamp in the middle row, relay behind it between the two modems. **Steady** = running, **off** = stopped (target reached or switched off), **blinking** = needs you.
 - **Power** goes to the chambers and fabs separately (power cables or Flux Points): wired modems don't carry FE. Each chamber stores 2M FE and each fab 1M, so a new column drains your cell once while it fills.
-- **Dock barrel** on the lab cable with a second modem on the storage cable. On storage: `/dock`, pick it, and keep `prediction_matrix 64` in it. Drops and generalized predictions leave through it; matrices and Furnator fuel come in.
+- **Dock barrel** (own cable only) on the lab cable with a second modem on the storage cable. On storage: `/dock`, pick it, and keep `prediction_matrix 64` in it. Drops and generalized predictions leave through it; matrices and Furnator fuel come in.
 - Optional on the lab cable: **energy cell(s)** (the lab reads stored power from them) and **Powah Furnator(s)**.
 - A **wireless/ender modem** on the computer: it gets item counts from storage and reports to the mainframe.
 

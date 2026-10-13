@@ -245,6 +245,9 @@ local function byNum(a, b)
 end
 
 local storageDocks = {}   -- storage's dock barrels (from its broadcast): finds ours if the cables are joined
+local storageId, storageInput = nil, nil   -- storage computer's id and main input chest (from its broadcast)
+-- L.out = where drops go (dock, or storage's input chest). L.direct = on storage's cable: no dock needed,
+-- drops go straight into storage's input chest and storage delivers matrices and Furnator fuel itself.
 local L = { chambers = {}, fabs = {}, lamps = {}, furnators = {}, cells = {}, dock = nil, dockNote = nil }
 
 local function scan()
@@ -270,6 +273,10 @@ local function scan()
   if want ~= "" then
     if peripheral.isPresent(want) then l.dock = want
     else l.dockNote = "DOCK=" .. want .. " isn't on the cable" end
+  elseif storageInput and peripheral.isPresent(storageInput) then
+    -- Same network as storage: no dock. Drops into its input chest, supplies asked for over rednet.
+    l.direct = true
+    l.dockNote = "On storage's network: drops go straight into storage"
   elseif #chests == 1 then
     l.dock = chests[1]
   elseif #chests > 1 then
@@ -284,6 +291,7 @@ local function scan()
       l.dockNote = ("%d chests on the cable (joined to storage?): set DOCK= in neural.env"):format(#chests)
     end
   end
+  l.out = l.direct and storageInput or l.dock
   L = l
 end
 
@@ -397,6 +405,13 @@ end
 ---------------------------------------------------------------------------
 local function readDock()
   dockList, dockMatrices, dockFuel = {}, 0, 0
+  if L.direct then
+    -- Drops still in storage's input chest count as stock; matrices and fuel are whatever storage has
+    dockList = call(L.out, "list") or {}
+    dockMatrices = storageItems and tonumber(storageItems[MATRIX]) or 0
+    for _, f in ipairs(FUELS) do dockFuel = dockFuel + (storageItems and tonumber(storageItems[f]) or 0) end
+    return
+  end
   if not L.dock then return end
   dockList = call(L.dock, "list") or {}
   for _, it in pairs(dockList) do
@@ -408,16 +423,31 @@ end
 local dockFull = false
 -- Push a slot of a machine into the dock. Returns how many moved.
 local function toDock(from, slot, count)
-  if not L.dock or count <= 0 then return 0 end
-  local moved = call(from, "pushItems", L.dock, slot, count) or 0
+  if not L.out or count <= 0 then return 0 end
+  local moved = call(from, "pushItems", L.out, slot, count) or 0
   if moved < count then dockFull = true end
   return moved
+end
+
+-- On storage's network: storage does the moves (it's the only computer that takes from storage).
+-- Requests are collected during a pass and sent together; one outstanding ask per target.
+local ops, asked = {}, {}
+local ASK_AGAIN = 8      -- seconds before asking again for the same target
+local function ask(to, item, count, slot)
+  if count <= 0 or (asked[to] and os.clock() - asked[to] < ASK_AGAIN) then return end
+  ops[#ops + 1] = { op = "fill", to = to, item = item, count = math.min(64, count), slot = slot }
+  asked[to] = os.clock()
 end
 
 -- Matrices from the dock into a chamber's input slot
 local function feedMatrices(c, n)
   local moved = 0
-  if not L.dock or n <= 0 then return 0 end
+  if n <= 0 then return 0 end
+  if L.direct then
+    if dockMatrices > 0 then ask(c, MATRIX, n, C_INPUT) end
+    return 0   -- they arrive next pass
+  end
+  if not L.dock then return 0 end
   for slot, it in pairs(dockList) do
     if moved >= n then break end
     if it.name == MATRIX and it.count > 0 then
@@ -515,7 +545,7 @@ local function column(c, lk, now)
     local left = 0
     for _, n in pairs(held) do left = left + n end
     -- Drops the fab couldn't hand over: no dock, or the dock is full (a full fab stops making more)
-    p.outStuck = (left >= 32 and not paused) and (not L.dock and "NO DOCK" or "DOCK FULL") or nil
+    p.outStuck = (left >= 32 and not paused) and (not L.out and "NO DOCK" or "DOCK FULL") or nil
     p.outLeft = left
     if p.finPrev and p.fin < p.finPrev then p.lastFab = now end
     if outNow then
@@ -724,7 +754,13 @@ local function pass()
   for _, fz in ipairs(L.furnators) do
     local have = 0
     for _, it in pairs(call(fz, "list") or {}) do if IS_FUEL[it.name] then have = have + it.count end end
-    if feeding and not cfg.paused and L.dock and have < (E.FURNATOR_KEEP or 8) then
+    if feeding and not cfg.paused and L.direct and have < (E.FURNATOR_KEEP or 8) then
+      for _, name in ipairs(FUELS) do
+        if storageItems and (tonumber(storageItems[name]) or 0) > 0 then
+          ask(fz, name, (E.FURNATOR_KEEP or 8) - have); break
+        end
+      end
+    elseif feeding and not cfg.paused and L.dock and have < (E.FURNATOR_KEEP or 8) then
       for _, name in ipairs(FUELS) do
         for slot, it in pairs(dockList) do
           if have >= (E.FURNATOR_KEEP or 8) then break end
@@ -768,7 +804,8 @@ local function pass()
       problems[key] = who .. ": the fabricator isn't making anything. Pick a drop in its screen."
     elseif s == "DOCK FULL" then
       key = "dockfull"
-      problems[key] = "Neural lab: dock full, drops piling up in the fabs. Is the barrel a dock on storage (/dock)?"
+      problems[key] = L.direct and "Neural lab: storage's input chest won't take the drops (full?), they're piling up in the fabs."
+        or "Neural lab: dock full, drops piling up in the fabs. Is the barrel a dock on storage (/dock)?"
     elseif s == "NO DOCK" then
       key = "dock"
       problems[key] = "Neural lab: no dock, drops piling up in the fabs. " .. (L.dockNote or "Put a barrel with a modem on the lab cable.")
@@ -784,9 +821,10 @@ local function pass()
   end
   local starving = false
   for _, p in ipairs(cols) do if p.state == "NO MATRICES" then starving = true end end
-  problem("matrices", starving, "Neural lab: out of prediction matrices. Craft some: storage keeps the dock topped up (/dock on storage, pick the dock, keep prediction_matrix 64).")
+  problem("matrices", starving, L.direct and "Neural lab: out of prediction matrices. Craft some and put them in storage."
+    or "Neural lab: out of prediction matrices. Craft some: storage keeps the dock topped up (/dock on storage, pick the dock, keep prediction_matrix 64).")
   if not live.dock then
-    problem("dock", not L.dock and #L.chambers > 0, L.dockNote and ("Neural lab: " .. L.dockNote)
+    problem("dock", not L.out and #L.chambers > 0, L.dockNote and ("Neural lab: " .. L.dockNote)
       or "Neural lab: no dock barrel on the lab cable, so drops have nowhere to go.")
   end
   problem("counts", #L.chambers > 0 and not countsFresh() and tostring(E.WITHOUT_STORAGE):lower() ~= "run",
@@ -826,10 +864,10 @@ end
 
 local function statusLines()
   local out = { note }
-  out[#out + 1] = ("Power: cells %s (%s), chambers %s%s. Matrices: %d in the dock%s"):format(
+  out[#out + 1] = ("Power: cells %s (%s), chambers %s%s. Matrices: %d %s"):format(
     power.cellPct and (power.cellPct .. "%") or "-", power.source, power.simPct and (power.simPct .. "%") or "-",
     #L.furnators > 0 and (", Furnator fuel " .. furnatorFuel) or "",
-    dockMatrices, storageItems and (", " .. (tonumber(storageItems[MATRIX]) or 0) .. " in storage") or "")
+    dockMatrices, L.direct and "in storage" or ("in the dock" .. (storageItems and (", " .. (tonumber(storageItems[MATRIX]) or 0) .. " in storage") or "")))
   for i, c in ipairs(L.chambers) do
     local p = P[c]
     if p then
@@ -951,8 +989,8 @@ local function drawOverview(m, w, h)
   header(m, w, w >= 30 and "NEURAL LAB" or "NEURAL", false)
   powerLine(m, w, 2)
   m.setCursorPos(2, 3); m.setTextColour(colours.lightGrey)
-  m.write(("Matrices %d here%s"):format(dockMatrices,
-    storageItems and (", " .. (tonumber(storageItems[MATRIX]) or 0) .. " stored") or ""):sub(1, w - 2))
+  m.write((L.direct and ("Matrices %d in storage"):format(dockMatrices) or ("Matrices %d here%s"):format(dockMatrices,
+    storageItems and (", " .. (tonumber(storageItems[MATRIX]) or 0) .. " stored") or "")):sub(1, w - 2))
   m.setCursorPos(2, 4); m.setTextColour(next(problems) and colours.yellow or colours.white)
   m.write(note:sub(1, w - 2))
   -- The most useful problem, in words (the cards only have room for a state)
@@ -1136,10 +1174,16 @@ local function netLoop()
         power = power.pct, paused = cfg.paused }, BASE)
       lastSend = os.clock()
     end
-    local _, msg = rednet.receive(BASE, 1)
+    -- Supplies asked for this pass: one message to storage
+    if #ops > 0 and storageId then
+      rednet.send(storageId, { type = "neural_ops", id = os.epoch("utc"), ops = ops }, BASE)
+      ops = {}
+    end
+    local from, msg = rednet.receive(BASE, 1)
     if type(msg) == "table" then
       if msg.type == "storage" and type(msg.items) == "table" then
         storageItems, storageSeen = msg.items, os.clock()
+        storageId, storageInput = from, type(msg.mainInput) == "string" and msg.mainInput or nil
         if type(msg.docks) == "table" then
           storageDocks = {}
           for _, d in ipairs(msg.docks) do storageDocks[d] = true end
@@ -1179,7 +1223,7 @@ local function terminalLoop()
       print("Lamps:     " .. (#L.lamps > 0 and table.concat(L.lamps, ", ") or "none"))
       print("Furnators: " .. (#L.furnators > 0 and table.concat(L.furnators, ", ") or "none"))
       print("Power:     " .. (#L.cells > 0 and table.concat(L.cells, ", ") or "none (using the machines' own)"))
-      print("Dock:      " .. tostring(L.dock or "none"))
+      print("Drops to:  " .. (L.direct and ("storage's input chest " .. tostring(L.out)) or tostring(L.dock or "no dock")))
       if L.dockNote then printError(L.dockNote) end
     elseif cmd == "pairs" then
       for i, ch in ipairs(L.chambers) do

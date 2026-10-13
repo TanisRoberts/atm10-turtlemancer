@@ -734,6 +734,29 @@ local function runSmeltOps(ops)
   return results
 end
 
+-- The neural lab, when it's on this cable: matrices into its chambers, fuel into its Furnators.
+-- ops: { op = "fill", to, item, count, slot }. Only those two targets and those items are allowed.
+local NEURAL_FUEL = { ["minecraft:charcoal"] = true, ["minecraft:coal"] = true, ["minecraft:coal_block"] = true }
+local function runNeuralOps(ops)
+  local results = {}
+  for i, o in ipairs(ops or {}) do
+    local moved = 0
+    if type(o) == "table" and o.op == "fill" and type(o.to) == "string" and type(o.item) == "string"
+        and peripheral.isPresent(o.to) then
+      local n = math.max(0, math.min(tonumber(o.count) or 0, 64))
+      if o.to:find("^hostilenetworks:sim_chamber") and o.item == "hostilenetworks:prediction_matrix" then
+        moved = retrieve(o.item, n, o.to, 2)
+      elseif o.to:find("furnator") and NEURAL_FUEL[o.item] then
+        n = math.min(n, (byName[o.item] or 0) - (SMELTER_RESERVE[o.item] or 0))   -- the smelter's last stack stays
+        if n > 0 then moved = retrieve(o.item, n, o.to) end
+      end
+      if moved > 0 then byName[o.item] = (byName[o.item] or 0) - moved end
+    end
+    results[i] = moved
+  end
+  return results
+end
+
 -- Fill Rigger's supply barrel with what he asked for (items + fuel units).
 local lastRiggerSeq = nil
 local riggerReq = nil            -- latest "need" message from Rigger (set by the network loop)
@@ -1169,8 +1192,11 @@ local function workerLoop()
       if #jobs > 0 then
         while #jobs > 0 do
           local j = table.remove(jobs, 1)
-          local results = runSmeltOps(j.ops)
-          if rednet.isOpen() then rednet.send(j.from, { type = "smelt_done", id = j.id, results = results }, BASE) end
+          local neural = j.kind == "neural"
+          local results = neural and runNeuralOps(j.ops) or runSmeltOps(j.ops)
+          if rednet.isOpen() then
+            rednet.send(j.from, { type = neural and "neural_done" or "smelt_done", id = j.id, results = results }, BASE)
+          end
         end
         buildItems()
         broadcastStatus()   -- the smelter plans its next move from fresh totals
@@ -1281,6 +1307,9 @@ local function netLoop()
         if isLocked() ~= was then os.queueEvent("storage_work") end   -- redraw now, not next tick
       elseif proto == BASE and msg.type == "smelt_ops" and type(msg.ops) == "table" then
         jobs[#jobs + 1] = { from = from, id = msg.id, ops = msg.ops }
+        os.queueEvent("storage_work")
+      elseif proto == BASE and msg.type == "neural_ops" and type(msg.ops) == "table" then
+        jobs[#jobs + 1] = { from = from, id = msg.id, ops = msg.ops, kind = "neural" }
         os.queueEvent("storage_work")
       end
       -- Relay between the cable and the air, so a wired-only smelter still reaches the mainframe
