@@ -6,29 +6,47 @@
 --         and daytime don't get washed out. Without a detector, AUTO just keeps it on.
 --   ON    always on.        OFF   always off (night vision potions don't work either while off:
 --                                that's the module, not this script).
--- A small HUD line (Overlay Module) shows the mode and whether night vision is on right now, in the
--- top-right corner under the potion effect icons (HUD_CORNER / HUD_EDGE_X / HUD_EDGE_Y).
 --
--- Switch modes on the glasses' screen: click a button or press 1 / 2 / 3. H toggles the HUD,
+-- HUD (Overlay Module), top-right under the potion effect icons, one line each (all optional):
+--   NV AUTO: on              night vision mode + state
+--   14:20  night in 3:05     Minecraft time, and real time until night / day (Environment Detector)
+--   281 50 -14  NE           where you are + which way you face (Player Detector); OW coords in the Nether
+--   Inv 28% [=====     ]     free inventory space (Inventory Manager in the glasses; hidden until fitted)
+-- Aggro alert, top-middle: a mob within AGGRO_RANGE that's attacking (creepers in red, the Warden
+-- whenever it's near), with distance and which side it's on. From the Environment Detector's scan.
+--
+-- Switch night vision on the glasses' screen: click a button or press 1 / 2 / 3. H toggles the HUD,
 -- Q quits. Open the screen with the glasses in your hand (right-click), or while wearing them
--- with a Smart Glasses Interface. The mode is saved to glasses.env, so a reboot keeps it.
--- glasses.env holds the tunables: made on first run, edit it live; deleted keys come back with
--- their defaults and your lines are never overwritten. Reboot (hold Ctrl+R) to update from GitHub.
+-- with a Smart Glasses Interface. glasses.env holds every setting: made on first run, edit it
+-- live; deleted keys come back with their defaults and your lines are never overwritten.
+-- Reboot (hold Ctrl+R) to update from GitHub.
 
 local ENV_FILE = "glasses.env"
 local NV_ID    = "advancedperipherals:night_vision"
 local OV_ID    = "advancedperipherals:overlay"
+local INV_SLOTS = 36   -- main inventory incl. hotbar: what the Inventory Manager's getEmptySlots counts
 
 local DEFAULTS = {
   { "NV_MODE", "auto", "Night vision: auto, on or off. The buttons on the glasses' screen change this line." },
   { "NV_DARK", 7, "AUTO: night vision comes on when the light where you stand is this or lower (0-15)." },
   { "NV_BRIGHT", 10, "AUTO: ...and goes off again at this light or higher (keep it above NV_DARK so it doesn't flicker)." },
   { "NV_DEEP_DARK", "yes", "AUTO: always on in the Deep Dark biome (yes/no)." },
-  { "HUD", "yes", "Show the night vision line on your screen (yes/no). H on the glasses' screen toggles it." },
+  { "HUD", "yes", "Show the HUD at all (yes/no). H on the glasses' screen toggles it." },
   { "HUD_CORNER", "top-right", "Where the HUD sits: top-right, top-left, bottom-right or bottom-left." },
   { "HUD_EDGE_X", 4, "Gap from the left/right edge of the screen, in GUI pixels." },
   { "HUD_EDGE_Y", 52, "Gap from the top/bottom edge, in GUI pixels. 52 clears both rows of potion effect icons in the top-right." },
-  { "CHECK_EVERY", 1, "Seconds between light checks." },
+  { "HUD_NV", "yes", "HUD line: night vision mode and state (yes/no)." },
+  { "HUD_CLOCK", "yes", "HUD line: Minecraft time and how long until night/day (yes/no). Needs the Environment Detector." },
+  { "HUD_COORDS", "yes", "HUD line: your coordinates and facing (yes/no). Needs the Player Detector." },
+  { "HUD_INV", "yes", "HUD line: free inventory space bar (yes/no). Shows once an Inventory Manager is in the glasses." },
+  { "INV_BAR_W", 40, "Width of the inventory bar, in GUI pixels." },
+  { "OWNER", "", "Your Minecraft name, for coordinates. Blank = worked out by the glasses and saved here." },
+  { "AGGRO", "yes", "Top-middle alert when a mob near you is attacking (yes/no). Needs the Environment Detector." },
+  { "AGGRO_RANGE", 8, "Blocks to scan for aggro. AP scans up to 8 for free; more needs fuel the glasses don't have." },
+  { "AGGRO_IGNORE", "minecraft:wolf,minecraft:iron_golem,minecraft:snow_golem", "Mobs that never trigger the alert (comma separated ids)." },
+  { "AGGRO_Y", 30, "Alert height from the top of the screen, in GUI pixels (30 clears a boss bar)." },
+  { "AGGRO_HOLD", 3, "Seconds the alert stays up after the last sighting." },
+  { "CHECK_EVERY", 1, "Seconds between updates." },
 }
 
 ---------------------------------------------------------------------------
@@ -113,7 +131,7 @@ local function mode()
 end
 
 ---------------------------------------------------------------------------
--- Hardware: modules (via the smartglasses API, falling back to the peripheral) and the detector
+-- Hardware: modules (via the smartglasses API, falling back to the peripheral) and peripherals
 ---------------------------------------------------------------------------
 local glasses = peripheral.find("smart_glasses")
 
@@ -128,11 +146,13 @@ local function getModule(id)
   return nil
 end
 
-local nv, overlay, detector
+local nv, overlay, detector, players, invMgr
 local function findHardware()
   nv = getModule(NV_ID)
   overlay = getModule(OV_ID)
   detector = peripheral.find("environment_detector") or peripheral.find("environmentDetector")
+  players = peripheral.find("player_detector") or peripheral.find("playerDetector")
+  invMgr = peripheral.find("inventory_manager") or peripheral.find("inventoryManager")
 end
 
 -- Fix the glasses' blank name (AP throws on getName when it was never set)
@@ -200,27 +220,228 @@ local function apply(want)
 end
 
 ---------------------------------------------------------------------------
--- HUD line (Overlay Module, GUI space)
+-- Stats: you (position, facing), clock, inventory
 ---------------------------------------------------------------------------
-local hudText
-local function hudContent()
-  if not nv then return "NV: no module" end
-  local state = S.nvOn and "on" or "off"
-  return ("NV %s: %s"):format(mode():upper(), state)
+local P = {}   -- latest player info: x, y, z, yaw, dimension
+local INV = {} -- free, total
+
+-- Your name: OWNER, else the Inventory Manager's owner, else the only player standing where the
+-- glasses are (saved to glasses.env so it sticks).
+local function ownerName()
+  if E.OWNER ~= "" then return E.OWNER end
+  if invMgr and type(invMgr.getOwner) == "function" then
+    local ok, _, name = pcall(invMgr.getOwner)
+    if ok and type(name) == "string" and name ~= "" then return name end
+  end
+  if players and type(players.getPlayersInRange) == "function" then
+    local ok, list = pcall(players.getPlayersInRange, 1)
+    if ok and type(list) == "table" and #list == 1 and type(list[1]) == "string" then
+      setEnv("OWNER", list[1])
+      return list[1]
+    end
+  end
+  return nil
 end
 
-local function hudColour()
-  if not nv then return 0xFF5555 end
-  if S.nvOn then return 0x55FF55 end
-  return 0xAAAAAA
+local function readPlayer()
+  P = {}
+  if not players or type(players.getPlayer) ~= "function" then return end
+  local name = ownerName()
+  if not name then P.err = "who?"; return end
+  local ok, p = pcall(players.getPlayer, name)
+  if ok and type(p) == "table" and p.x then
+    P = { x = p.x, y = p.y, z = p.z, yaw = p.yaw, dimension = p.dimension, name = name }
+  else
+    P.err = "not found"
+  end
 end
 
-local function hideHud()
-  if hudText then call(hudText, "setEnabled", false) end
+local function readInventory()
+  INV = {}
+  if not invMgr then return end
+  local ok, free = pcall(invMgr.getEmptySlots)
+  if ok and type(free) == "number" then INV.free, INV.total = free, INV_SLOTS else INV.err = true end
+end
+
+-- Minecraft yaw: 0 = south, 90 = west, 180 = north, 270 = east (clockwise seen from above)
+local DIRS = { "S", "SW", "W", "NW", "N", "NE", "E", "SE" }
+local function facing(yaw)
+  if type(yaw) ~= "number" then return "?" end
+  return DIRS[math.floor(((yaw % 360) + 22.5) / 45) % 8 + 1]
+end
+
+local function inNether()
+  return tostring(P.dimension or ""):find("nether", 1, true) ~= nil
+end
+
+local function coordsText()
+  if not P.x then return nil end
+  local fl = math.floor
+  local s = ("%d %d %d  %s"):format(fl(P.x), fl(P.y), fl(P.z), facing(P.yaw))
+  if inNether() then s = s .. ("  OW %d %d"):format(fl(P.x * 8), fl(P.z * 8)) end
+  return s
+end
+
+local function mmss(ticks)
+  local secs = math.max(0, math.floor(ticks / 20 + 0.5))
+  return ("%d:%02d"):format(math.floor(secs / 60), secs % 60)
+end
+
+-- Day 0 = 06:00. Monsters come out around 13000, and it's light again around 23000.
+local function clockText()
+  local t = call(detector, "getTime")
+  if type(t) ~= "number" then return nil end
+  t = t % 24000
+  local hours = math.floor((t / 1000 + 6) % 24)
+  local mins = math.floor((t % 1000) * 60 / 1000)
+  local s = ("%02d:%02d"):format(hours, mins)
+  local dim = tostring(P.dimension or call(detector, "getDimension") or "")
+  if dim ~= "" and not dim:find("overworld", 1, true) then return s end   -- no day/night there
+  if t < 13000 then
+    s = s .. "  night in " .. mmss(13000 - t)
+  elseif t < 23000 then
+    s = s .. "  day in " .. mmss(23000 - t)
+  else
+    s = s .. "  dawn"
+  end
+  return s
+end
+
+---------------------------------------------------------------------------
+-- Aggro: mobs near you that are attacking (Environment Detector entity scan)
+---------------------------------------------------------------------------
+local AG = { last = nil, until_ = 0, lastScan = -100, err = nil }
+
+local function ignored(name)
+  for id in tostring(E.AGGRO_IGNORE):gmatch("[^,%s]+") do
+    if id == name then return true end
+  end
+  return false
+end
+
+-- Which side of you something is: dx/dz relative to you, your yaw from the Player Detector
+local function side(dx, dz)
+  if type(P.yaw) ~= "number" then return nil end
+  local bearing = math.deg(math.atan2 and math.atan2(-dx, dz) or math.atan(-dx, dz))
+  local diff = (bearing - P.yaw + 540) % 360 - 180
+  if math.abs(diff) <= 45 then return "ahead" end
+  if math.abs(diff) >= 135 then return "BEHIND" end
+  return diff > 0 and "right" or "left"
+end
+
+local function scanAggro()
+  if not detector or not yes("AGGRO") or type(detector.scanEntities) ~= "function" then AG.last = nil; return end
+  local now = os.clock()
+  if now - AG.lastScan < 2 then return end   -- AP allows one scan every 2 s
+  AG.lastScan = now
+  local range = math.max(1, math.min(16, E.AGGRO_RANGE))
+  local ok, list, why = pcall(detector.scanEntities, range, true)
+  if not ok or type(list) ~= "table" then AG.err = tostring(ok and why or list); return end
+  AG.err = nil
+  local best, bestRank, bestDist, count = nil, 0, math.huge, 0
+  for _, e in ipairs(list) do
+    local name = tostring(e.name or "")
+    local creeper = name:find("creeper", 1, true) ~= nil
+    local warden = name == "minecraft:warden"
+    if (e.aggressive == true or warden) and not ignored(name) then
+      local dx, dy, dz = tonumber(e.x) or 0, tonumber(e.y) or 0, tonumber(e.z) or 0
+      local dist = math.sqrt(dx * dx + dy * dy + dz * dz)
+      local rank = creeper and 3 or (warden and 2 or 1)
+      count = count + 1
+      if rank > bestRank or (rank == bestRank and dist < bestDist) then
+        best = { name = e.displayName or name, dist = dist, side = side(dx, dz), creeper = creeper, warden = warden }
+        bestRank, bestDist = rank, dist
+      end
+    end
+  end
+  if best then
+    best.others = count - 1
+    AG.last = best
+    AG.until_ = now + math.max(0, E.AGGRO_HOLD)
+  elseif now >= AG.until_ then
+    AG.last = nil
+  end
+end
+
+---------------------------------------------------------------------------
+-- HUD objects (Overlay Module, GUI space). Each object is created once and only updated when a
+-- field changes. AP wipes them all when the glasses come off, and setters on a wiped object do
+-- nothing, so we also check now and then that they still exist.
+---------------------------------------------------------------------------
+local hud = {}     -- key -> { obj = overlay object, kind = "Text"/"Rectangle", shown = { field = value } }
+local diag = {}    -- what the overlay told us last, shown on the glasses' screen
+
+local function setterFor(field)
+  return "set" .. field:sub(1, 1):upper() .. field:sub(2)
+end
+
+local function hudPut(key, kind, props)
+  if not overlay then return end
+  props.enabled = true
+  local e = hud[key]
+  if e and e.kind == kind then
+    local ok = pcall(function()
+      for field, v in pairs(props) do
+        if e.shown[field] ~= v then
+          e.obj[setterFor(field)](v)
+          e.shown[field] = v
+        end
+      end
+    end)
+    if ok then return end
+    hud[key] = nil
+  end
+  local create = overlay["create" .. kind]
+  if type(create) ~= "function" then return end
+  local init = { gui = true }
+  for k, v in pairs(props) do init[k] = v end
+  local ok, obj = pcall(create, init)
+  if ok and type(obj) == "table" then
+    local shown = {}
+    for k, v in pairs(props) do shown[k] = v end
+    hud[key] = { obj = obj, kind = kind, shown = shown }
+    diag.err = nil
+  else
+    diag.err = (not ok) and tostring(obj) or ("create" .. kind .. " gave " .. type(obj))
+  end
+end
+
+local function hudHide(key)
+  local e = hud[key]
+  if e and e.shown.enabled ~= false then
+    if pcall(e.obj.setEnabled, false) then e.shown.enabled = false end
+  end
+end
+
+local function hudHideAll(except)
+  for key in pairs(hud) do
+    if not (except and except[key]) then hudHide(key) end
+  end
+end
+
+local function hudForget()
+  hud = {}
+end
+
+local function hudCheckAlive()
+  if not overlay or type(overlay.getObject) ~= "function" then return end
+  for key, e in pairs(hud) do
+    local okId, id = pcall(e.obj.getId)
+    if okId and id ~= nil then
+      local okGet, o = pcall(overlay.getObject, id)
+      if okGet and o == nil then hud[key] = nil end
+    end
+  end
+end
+
+local function hudCount()
+  local n = 0
+  for _ in pairs(hud) do n = n + 1 end
+  return n
 end
 
 -- Minecraft's default font: most characters are 6 GUI pixels wide (5 + 1 spacing). Used to
--- right-align the HUD, since text objects only know left and centre.
+-- right-align, since text objects only know left and centre.
 local NARROW = { ["i"] = 2, ["!"] = 2, ["."] = 2, [","] = 2, [":"] = 2, [";"] = 2, ["'"] = 2, ["|"] = 2,
   ["l"] = 3, ["`"] = 3, ["I"] = 4, ["t"] = 4, ["["] = 4, ["]"] = 4, [" "] = 4,
   ["f"] = 5, ["k"] = 5, ["<"] = 5, [">"] = 5, ["("] = 5, [")"] = 5, ["{"] = 5, ["}"] = 5, ["*"] = 5 }
@@ -231,7 +452,6 @@ local function textWidth(str)
 end
 
 -- Screen size in GUI pixels (the overlay reports the window in real pixels + the GUI scale)
-local diag = {}   -- what the overlay told us last, shown on the glasses' screen
 local function guiSize()
   local ok, w, h, scale = pcall(overlay.getGuiSize)
   diag.w, diag.h, diag.scale = ok and w or nil, ok and h or nil, ok and scale or nil
@@ -240,47 +460,82 @@ local function guiSize()
   return w / scale, h / scale
 end
 
-local function hudPos(content)
-  local corner = tostring(E.HUD_CORNER):lower()
-  local right = corner:find("right", 1, true) ~= nil
-  local bottom = corner:find("bottom", 1, true) ~= nil
-  local gw, gh = guiSize()
-  local x, y = E.HUD_EDGE_X, E.HUD_EDGE_Y
-  if gw then
-    if right then x = gw - E.HUD_EDGE_X - textWidth(content) end
-    if bottom then y = gh - E.HUD_EDGE_Y - 9 end   -- text is 9 GUI pixels tall
-  end
-  return math.floor(x + 0.5), math.floor(y + 0.5)
+local LINE_H = 11
+
+local function nvText()
+  if not nv then return "NV: no module", 0xFF5555 end
+  return ("NV %s: %s"):format(mode():upper(), S.nvOn and "on" or "off"), S.nvOn and 0x55FF55 or 0xAAAAAA
 end
 
-local shown = {}   -- what the HUD object currently has, so it's only updated when something changes
+local function invColour(frac)
+  if frac >= 0.5 then return 0x55FF55 end
+  if frac >= 0.2 then return 0xFFAA00 end
+  return 0xFF5555
+end
 
 local function drawHud()
-  if not overlay then hudText = nil; return end
-  if not yes("HUD") then hideHud(); shown.enabled = false; return end
-  local content, colour = hudContent(), hudColour()
-  local x, y = hudPos(content)
-  diag.x, diag.y = x, y
-  if hudText then
-    -- Object may have vanished (module pulled and put back): recreate if a setter fails
-    local ok = pcall(function()
-      if shown.enabled ~= true then hudText.setEnabled(true); shown.enabled = true end
-      if shown.content ~= content then hudText.setContent(content); shown.content = content end
-      if shown.colour ~= colour then hudText.setColor(colour); shown.colour = colour end
-      if shown.x ~= x or shown.y ~= y then hudText.setPos(x, y, 0); shown.x, shown.y = x, y end
-    end)
-    if ok then return end
-    hudText = nil
+  if not overlay then hudForget(); return end
+  if not yes("HUD") then hudHideAll(); return end
+  local gw, gh = guiSize()
+  local corner = tostring(E.HUD_CORNER):lower()
+  local right = gw and corner:find("right", 1, true) ~= nil
+  local bottom = gh and corner:find("bottom", 1, true) ~= nil
+  local used = {}
+
+  -- Build the rows: { key, text, colour } or the inventory bar row
+  local rows = {}
+  if yes("HUD_NV") then
+    local t, c = nvText()
+    rows[#rows + 1] = { key = "nv", text = t, colour = c }
   end
-  diag.x, diag.y = x, y
-  local ok, obj = pcall(overlay.createText, {
-    gui = true, x = x, y = y, content = content, color = colour, shadow = true,
-  })
-  diag.err = (not ok) and tostring(obj) or ((type(obj) ~= "table") and ("createText gave " .. type(obj)) or nil)
-  if ok and type(obj) == "table" then
-    hudText = obj
-    shown = { enabled = true, content = content, colour = colour, x = x, y = y }
+  if yes("HUD_CLOCK") then
+    local t = clockText()
+    if t then rows[#rows + 1] = { key = "clock", text = t, colour = 0xFFFFFF } end
   end
+  if yes("HUD_COORDS") then
+    local t = coordsText()
+    if t then rows[#rows + 1] = { key = "coords", text = t, colour = 0xFFFFFF } end
+  end
+  if yes("HUD_INV") and INV.free then
+    local frac = INV.total > 0 and INV.free / INV.total or 0
+    rows[#rows + 1] = { key = "inv", bar = true, frac = frac,
+      text = ("Inv %d%%"):format(math.floor(frac * 100 + 0.5)), colour = invColour(frac) }
+  end
+
+  -- Lay them out from the corner
+  local edgeX, edgeY = E.HUD_EDGE_X, E.HUD_EDGE_Y
+  local barW = math.max(10, E.INV_BAR_W)
+  for i, r in ipairs(rows) do
+    local y = bottom and (gh - edgeY - 9 - (#rows - i) * LINE_H) or (edgeY + (i - 1) * LINE_H)
+    local width = textWidth(r.text) + (r.bar and (4 + barW) or 0)
+    local x = right and (gw - edgeX - width) or edgeX
+    x, y = math.floor(x + 0.5), math.floor(y + 0.5)
+    if i == 1 then diag.x, diag.y = x, y end
+    hudPut(r.key, "Text", { x = x, y = y, content = r.text, color = r.colour, shadow = true })
+    used[r.key] = true
+    if r.bar then
+      local bx = x + textWidth(r.text) + 4
+      hudPut("invBg", "Rectangle", { x = bx, y = y + 1, sizeX = barW, sizeY = 6, color = 0x000000, opacity = 0.55 })
+      hudPut("invFill", "Rectangle", { x = bx, y = y + 1, sizeX = math.floor(barW * r.frac + 0.5), sizeY = 6,
+        color = r.colour, opacity = 0.9 })
+      used.invBg, used.invFill = true, true
+    end
+  end
+
+  -- Aggro alert, top-middle
+  if AG.last and gw then
+    local a = AG.last
+    local label = (a.creeper or a.warden) and tostring(a.name):upper() or tostring(a.name)
+    local text = ("! %s %dm%s"):format(label, math.floor(a.dist + 0.5), a.side and (" " .. a.side) or "")
+    if a.others and a.others > 0 then text = text .. (" +%d"):format(a.others) end
+    local blink = math.floor(os.clock() * 2) % 2 == 0
+    local colour = (a.creeper or a.warden) and (blink and 0xFF3333 or 0xFFAA00) or 0xFFAA00
+    hudPut("aggro", "Text", { x = math.floor(gw / 2 + 0.5), y = E.AGGRO_Y, content = text, color = colour,
+      shadow = true, center = true, fontSize = 1.5 })
+    used.aggro = true
+  end
+
+  hudHideAll(used)
 end
 
 ---------------------------------------------------------------------------
@@ -349,10 +604,16 @@ local function drawScreen()
     y = y + 1
     at(2, y, ("On <=%d, off >=%d"):format(E.NV_DARK, math.max(E.NV_BRIGHT, E.NV_DARK + 1)):sub(1, W - 2),
       colours.grey, colours.black)
+    y = y + 1
   else
     at(2, y, "No Environment Detector:", colours.orange, colours.black); y = y + 1
-    at(2, y, "AUTO keeps it on.", colours.orange, colours.black)
+    at(2, y, "AUTO keeps it on.", colours.orange, colours.black); y = y + 1
   end
+
+  -- What the stats are getting
+  local inv = invMgr and (INV.free and ("Inv %d/%d free"):format(INV.free, INV.total) or "Inv: no card?") or "Inv: no manager"
+  local who = players and (P.name or ("Player: " .. tostring(P.err or "?"))) or "No player detector"
+  at(2, y, (who .. " | " .. inv):sub(1, W - 2), colours.grey, colours.black)
 
   -- HUD diagnostics: where it's drawn, the screen size the client reported, objects on screen
   if overlay then
@@ -390,8 +651,7 @@ findHardware()
 call(overlay, "clear")   -- drop the HUD left over from before the reboot
 
 -- AP wipes every overlay object when the glasses come off (incl. opening the terminal with them
--- in your hand). So: rebuild the HUD the moment they go back on, and check now and then that our
--- object still exists.
+-- in your hand). So: rebuild the HUD the moment they go back on.
 local wasEquipped = nil
 local function equipped()
   if smartglasses and smartglasses.isEquipped then
@@ -401,26 +661,22 @@ local function equipped()
   return true
 end
 
-local function hudAlive()
-  if not hudText or not overlay then return false end
-  local id = call(hudText, "getId")
-  if id == nil or type(overlay.getObject) ~= "function" then return true end   -- can't tell: assume fine
-  return call(overlay, "getObject", id) ~= nil
-end
-
 local ticks = 0
 local function tick()
   ticks = ticks + 1
   local eq = equipped()
   diag.equipped = eq
   if eq and wasEquipped == false then
-    call(overlay, "clear"); hudText = nil; shown = {}   -- just put back on: start the HUD fresh
-  elseif hudText and ticks % 3 == 0 and not hudAlive() then
-    hudText = nil; shown = {}
+    call(overlay, "clear"); hudForget()   -- just put back on: start the HUD fresh
+  elseif ticks % 3 == 0 then
+    hudCheckAlive()
   end
   wasEquipped = eq
   refreshEnv()
   apply(decide())
+  readPlayer()
+  readInventory()
+  scanAggro()
   drawHud()
   drawScreen()
 end
@@ -444,15 +700,14 @@ while true do
     elseif ch == "3" then act = function() setMode("off") end
     elseif ch == "h" then act = function() setEnv("HUD", yes("HUD") and "no" or "yes") end
     elseif ch == "q" then
-      hideHud()
+      hudHideAll()
       term.setBackgroundColour(colours.black); term.clear(); term.setCursorPos(1, 1)
       print("Glasses HUD stopped. Night vision stays as it was. Reboot to start again.")
       return
     end
   elseif e == "glasses_module" or e == "glasses_module_detach" or e == "peripheral" or e == "peripheral_detach" then
     findHardware()
-    shown = {}             -- resend everything: a failing setter means the HUD object went away
-    act = function() end   -- ...and drawHud recreates it
+    act = function() hudCheckAlive() end
   elseif e == "term_resize" then
     W, H = term.getSize()
     act = function() end

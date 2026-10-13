@@ -113,10 +113,10 @@ return {
       roles = {
         hud = {
           name = "HUD",
-          about = "Night vision + heads-up display",
-          details = "Night vision AUTO (on when dark or in the Deep Dark, via an Environment "
-            .. "Detector in the glasses) / ON / OFF, switched on the glasses' screen (1/2/3), and a "
-            .. "HUD line (Overlay Module). Settings in glasses.env.",
+          about = "Night vision, HUD stats, aggro alerts",
+          details = "Night vision AUTO / ON / OFF (glasses' screen, 1/2/3). HUD: clock, coords + "
+            .. "facing, free inventory bar (with an Inventory Manager), and a top-middle alert when a "
+            .. "mob is attacking you. Settings in glasses.env.",
           run = "glasses",
           files = { "glasses/hud/glasses.lua" },
         },

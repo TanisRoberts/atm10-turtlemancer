@@ -25,7 +25,7 @@ ComputerCraft (CC:Tweaked + Advanced Peripherals) scripts for Tanis's ATM10 isla
 | Turtle | Rigger | `rigger` | Builds from a plan file (`mossy.plan`) |
 | Turtle | Tigger | `lumberjack` | Tree farm |
 | Turtle | Figger | `farmer` | Crop farm |
-| Glasses | HUD | `glasses` | Smart Glasses: night vision AUTO / ON / OFF and a HUD line (`glasses.env`) |
+| Glasses | HUD | `glasses` | Smart Glasses: night vision AUTO / ON / OFF, HUD stats (clock, coords + facing, inventory bar), aggro alerts (`glasses.env`) |
 
 Every role is defined in `manifest.lua`: its files live under `computer/<role>/`, `turtle/<role>/` or `glasses/<role>/`
 and land on the device under their own names. Adding a role = adding its folder and one manifest entry.
@@ -39,7 +39,14 @@ and land on the device under their own names. Adding a role = adding its folder 
 - **Night vision** needs the Night Vision Module (it's on by default when fitted). Modes, switched on the glasses' screen (click, or 1 / 2 / 3; H toggles the HUD, Q stops):
   - **AUTO**: on when the light where you stand is `NV_DARK` (7) or less, or you're in the Deep Dark; off again at `NV_BRIGHT` (10) or more. In between it keeps doing what it was doing, so torch-lit edges don't flicker. Needs an **Environment Detector** in the glasses; without one AUTO just stays on.
   - **ON** / **OFF**: always / never. While the module is switched off, night vision potions don't work either (that's the module).
-- **HUD**: with an **Overlay Module**, a line in the top-right corner, under the potion effect icons, shows `NV AUTO: on` (green when on). Position: `HUD_CORNER` (top-right / top-left / bottom-right / bottom-left), `HUD_EDGE_X`, `HUD_EDGE_Y` (GUI pixels from the edges; it right-aligns itself to your screen size and GUI scale).
+- **HUD** (needs an **Overlay Module**), stacked in the top-right under the potion effect icons, each line switchable in `glasses.env`:
+  - `NV AUTO: on`: night vision mode and state (`HUD_NV`).
+  - `14:20  night in 3:05`: Minecraft time and real time until night (or day). Time only outside the Overworld. Needs the **Environment Detector** (`HUD_CLOCK`).
+  - `281 50 -14  NE`: your coordinates and facing; in the Nether the matching Overworld X/Z is added. Needs the **Player Detector**; your name is worked out once and saved as `OWNER` (`HUD_COORDS`).
+  - `Inv 28%` + bar: free main-inventory slots (36, hotbar included; armour and offhand don't count), green / amber under 50% / red under 20%. Appears when an **Inventory Manager** is in the glasses (`HUD_INV`, `INV_BAR_W`).
+  - Position: `HUD_CORNER` (top-right / top-left / bottom-right / bottom-left), `HUD_EDGE_X`, `HUD_EDGE_Y`; it right-aligns itself to your screen size and GUI scale.
+- **Aggro alert**, top-middle: `! CREEPER 4m BEHIND +1`. Any mob within `AGGRO_RANGE` that's attacking (AP's `aggressive` flag; creepers count as soon as they lock on). Creepers take priority and flash red; the **Warden** alerts whenever it's in range. Says which side it's on and how many others there are; stays up `AGGRO_HOLD` seconds after the last sighting. `AGGRO_IGNORE` lists mobs that never count (wolves and golems by default: they attack other things). AP scans up to 8 blocks for free, once every 2 s.
+- AP wipes all HUD objects when the glasses come off (including opening the terminal with them in your hand); the HUD rebuilds itself as soon as they're back on.
 - To change modes while wearing them, use a **Smart Glasses Interface** (right-click opens the worn glasses' screen), or take them off and right-click them.
 - Settings: `glasses.env`, made on first run, same rules as `butler.env` (edit live; your lines are never overwritten; the mode buttons rewrite the `NV_MODE` line).
 
