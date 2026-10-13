@@ -12,7 +12,9 @@
 --   * empty farmland: plant it (the crop that grew there before, else the farm's main crop)
 --   * bare dirt in the farm: hoe it and plant it
 --   * pumpkins and melons: harvest them (stems stay)
---   * then unload at the dock (keeps a stack of each seed) and refuel
+--   * picks up whatever lands on the ground (ATM10's right-click harvest drops crops there)
+--   * then unload at the dock (keeps a stack of each seed) and refuel; unloads mid-round if full
+--   * re-maps the farm every few rounds, so an extended field is picked up by itself
 -- Commands (chat: island figger <cmd>, or here: farmer <cmd>):
 --   rounds  go now     survey  re-map the farm     stop  stay docked     go  back on schedule
 
@@ -24,6 +26,11 @@ local ROUND_EVERY = 600     -- seconds between rounds
 local MAX_REACH   = 32
 local KEEP_SEEDS  = 64
 local FUEL_TARGET = 3000
+-- Zone format version. v1 zones could have real plots wrongly marked "skip" (see rounds), so an
+-- older zone is re-surveyed once on start.
+local ZONE_VERSION = 2
+-- Re-map the farm every this many rounds, so a field that's been extended gets picked up by itself
+local RESURVEY_EVERY = 6
 
 local args = { ... }
 
@@ -204,7 +211,7 @@ end
 
 local stemAt = {}
 local dockCell = nil
-local function survey()
+local function survey(sameFrame)
   setStatus("surveying", "Mapping the farm")
   -- A survey always starts fresh from where he stands: that spot becomes 0,0, facing "north"
   S.x, S.y, S.z, S.h = 0, 0, 0, 0
@@ -329,7 +336,12 @@ local function survey()
     if az ~= bz then return az < bz end
     if az % 2 == 0 then return ax < bx else return ax > bx end
   end)
-  Z = { cells = cells, crop = crop, plots = plots, dockDir = dockDir, main = main, home = home }
+  -- Keep what he learned about plots' crops across re-maps (a bare plot remembers its last crop),
+  -- as long as the new map uses the same frame (re-mapped from his old 0,0)
+  if Z and Z.crop and (Z.home or key(0, 0)) == key(0, 0) and sameFrame then
+    for k, s in pairs(Z.crop) do if cells[k] == "plot" and not crop[k] then crop[k] = s end end
+  end
+  Z = { cells = cells, crop = crop, plots = plots, dockDir = dockDir, main = main, home = home, v = ZONE_VERSION }
   writeT(ZONE_FILE, Z)
   setStatus("docked", ("Farm mapped: %d plots%s"):format(#plots, main and (", mostly " .. main:gsub("^.-:", "")) or ""))
 end
@@ -387,6 +399,23 @@ local function goHome()
   return true
 end
 
+-- Re-map from home. Home is normally his old 0,0, so facing "north" keeps the same frame. If his
+-- dock is in the border and the first survey started elsewhere, face into the farm from the dock
+-- instead (the map is then rebuilt from the dock, in a new frame).
+local function resurvey()
+  if Z then pcall(goHome) end            -- no map yet (a failed survey): map from where he is
+  local same = (Z == nil) or (Z.home or key(0, 0)) == key(0, 0)
+  if same then face(0)
+  else
+    local hx, hz = unkey(Z.home)
+    for h = 0, 3 do
+      local c = Z.cells[key(hx + DX[h], hz + DZ[h])]
+      if c == "plot" or c == "skip" or c == "gourd" then face(h); break end
+    end
+  end
+  survey(same)
+end
+
 ---------------------------------------------------------------------------
 -- A round
 ---------------------------------------------------------------------------
@@ -410,6 +439,22 @@ local function plantHere(k)
   return "failed"
 end
 
+-- Harvest drops can land on the ground instead of in his inventory: with a hoe, CC:Tweaked
+-- right-clicks the crop before digging it, and ATM10 treats a right-click on a ripe crop as a
+-- harvest (crop replanted at age 0, items dropped on the farmland). So always hoover up below.
+local function pickUp()
+  local got = false
+  for _ = 1, 6 do if turtle.suckDown() then got = true else break end end
+  return got
+end
+local function freeSlots()
+  local n = 0
+  for s = 1, 16 do if turtle.getItemCount(s) == 0 then n = n + 1 end end
+  return n
+end
+
+local dock   -- defined below; rounds unloads mid-round when he's full
+
 local function rounds()
   setStatus("working", "Doing my rounds")
   tempBlocked = {}
@@ -417,20 +462,32 @@ local function rounds()
   local harvested, planted, tilled, noSeed, changed = 0, 0, 0, false, false
   for _, k in ipairs(Z.plots) do
     if ctrl and ctrl.seq ~= S.seq and (ctrl.want == "stop" or ctrl.want == "survey") then break end
+    if freeSlots() < 2 then             -- full: unload, then carry on where he was
+      goHome(); dock(); setStatus("working", "Doing my rounds")
+    end
     local kind = Z.cells[k]
     if kind == "gourd" and goTo(k) then
       local ok, d = turtle.inspectDown()
       if ok and isGourd(d.name) then turtle.digDown(); harvested = harvested + 1 end
+      pickUp()
     elseif kind == "plot" and goTo(k) then
+      pickUp()                          -- anything lying here from before
       local ok, d = turtle.inspectDown()
       if ok and isRipe(d) then
         turtle.digDown()
         harvested = harvested + 1
         Z.crop[k] = seedFor(d.name)
-        local r = plantHere(k)
-        if r == "planted" then planted = planted + 1 elseif r == "noseed" then noSeed = true end
+        pickUp()
+        local okA, dA = turtle.inspectDown()
+        if okA and isCrop(dA) then
+          planted = planted + 1         -- right-click harvest already replanted it
+        else
+          local r = plantHere(k)
+          if r == "planted" then planted = planted + 1 elseif r == "noseed" then noSeed = true end
+        end
       elseif ok and isGourd(d.name) then
         turtle.digDown(); harvested = harvested + 1
+        pickUp()
       elseif not ok then
         local r = plantHere(k)
         if r == "planted" then planted = planted + 1
@@ -444,9 +501,14 @@ local function rounds()
               r = plantHere(k)
               if r == "planted" then planted = planted + 1 end
             end
-            if r ~= "planted" then Z.cells[k] = "skip"; changed = true end
+            if r ~= "planted" then
+              local okB, dB = turtle.inspectDown()
+              if not (okB and isCrop(dB)) then Z.cells[k] = "skip"; changed = true end
+            end
           else
-            Z.cells[k] = "skip"; changed = true
+            -- Only write a plot off if there's really nothing farmable down there (never a crop)
+            local okB, dB = turtle.inspectDown()
+            if not (okB and isCrop(dB)) then Z.cells[k] = "skip"; changed = true end
           end
         end
       end
@@ -466,7 +528,7 @@ local function faceDock() if Z.dockDir ~= "up" and Z.dockDir ~= "down" then face
 local function dropDock(n) if Z.dockDir == "up" then return turtle.dropUp(n) elseif Z.dockDir == "down" then return turtle.dropDown(n) end return turtle.drop(n) end
 local function suckDock() if Z.dockDir == "up" then return turtle.suckUp() elseif Z.dockDir == "down" then return turtle.suckDown() end return turtle.suck() end
 
-local function dock()
+dock = function()
   setStatus("docked", "Unloading")
   faceDock()
   local kept, haul = {}, {}
@@ -522,13 +584,17 @@ local function mainLoop()
   if not Z then
     local ok, err = pcall(survey)
     if not ok then setStatus("error", tostring(err)); pcall(goHome) end
+  elseif (Z.v or 1) < ZONE_VERSION then
+    -- Old map: plots harvested by the pack's right-click were written off as "skip". Re-map once.
+    setStatus("surveying", "Re-mapping the farm (old map)")
+    local ok, err = pcall(resurvey)
+    if not ok then setStatus("error", tostring(err)); pcall(goHome) end
   end
   S.nextRound = S.nextRound or 0
   while true do
     local want = applyCtrl()
     if want == "survey" then
-      pcall(goHome); face(0)
-      local ok, err = pcall(survey)
+      local ok, err = pcall(resurvey)
       if not ok then setStatus("error", tostring(err)); pcall(goHome) end
     elseif want == "rounds" then S.nextRound = 0; S.paused = false
     elseif want == "stop" then S.paused = true
@@ -548,6 +614,12 @@ local function mainLoop()
         local okHome, err = pcall(goHome)
         if not okHome then setStatus("error", tostring(err)) else dock() end
         S.nextRound = os.clock() + ROUND_EVERY
+        S.sinceSurvey = (S.sinceSurvey or 0) + 1
+        if okHome and S.sinceSurvey >= RESURVEY_EVERY then
+          S.sinceSurvey = 0
+          local okS, errS = pcall(resurvey)    -- picks up new rows; ends back home, docked
+          if not okS then setStatus("error", tostring(errS)); pcall(goHome); ok = false end
+        end
         if ok then
           if c then setStatus("waiting", ("Out of seeds. Harvested %d, planted %d"):format(a, b))
           else setStatus("docked", ("Round done: harvested %d, planted %d"):format(a, b)) end
