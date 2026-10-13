@@ -84,8 +84,14 @@ end
 local function isFurnace(n)
   return n:find("furnace") ~= nil and not n:find("blast") and not n:find("smoker")
 end
+-- Machines from these mods are never storage, even when their cable touches ours (the neural lab's
+-- chambers and fabs, Powah's Furnator, the plastic factory's IF machines): nothing gets put in or
+-- counted from them.
+local MACHINE_MODS = { "hostilenetworks:", "powah:", "industrialforegoing:" }
 local function isMachine(n)
-  return n:find("furnace") ~= nil or n:find("smoker") ~= nil
+  if n:find("furnace") ~= nil or n:find("smoker") ~= nil then return true end
+  for _, m in ipairs(MACHINE_MODS) do if n:sub(1, #m) == m then return true end end
+  return false
 end
 
 -- Drawers show up on the network as e.g. "functionalstorage:oak_1_0" or "storagedrawers:..."
@@ -1123,6 +1129,7 @@ local function statusMsg()
     fuelAvailable = avail, overcap = overCapList, items = byName, paused = paused,
     locked = (isLocked()), pocketDump = cfg.pocketIn ~= nil, pocketRestock = cfg.pocketOut ~= nil,
     mainInput = cfg.inputs[1], restockChest = cfg.pocketOut or cfg.output,   -- the butler uses these over the cable
+    docks = cfg.docks,                       -- the neural lab finds its dock among these if the cables are joined
   }
 end
 

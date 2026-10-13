@@ -244,6 +244,7 @@ local function byNum(a, b)
   return a < b
 end
 
+local storageDocks = {}   -- storage's dock barrels (from its broadcast): finds ours if the cables are joined
 local L = { chambers = {}, fabs = {}, lamps = {}, furnators = {}, cells = {}, dock = nil, dockNote = nil }
 
 local function scan()
@@ -272,8 +273,16 @@ local function scan()
   elseif #chests == 1 then
     l.dock = chests[1]
   elseif #chests > 1 then
-    l.dock = chests[1]
-    l.dockNote = ("%d chests on the cable: using %s (set DOCK= in neural.env)"):format(#chests, chests[1])
+    -- More than one: the lab cable is probably joined to the storage cable. Use the one storage
+    -- treats as a dock (/dock); never guess a storage barrel.
+    local docks = {}
+    for _, c in ipairs(chests) do if storageDocks[c] then docks[#docks + 1] = c end end
+    if #docks == 1 then
+      l.dock = docks[1]
+      l.dockNote = ("Lab cable joined to storage? Using storage's dock %s"):format(docks[1])
+    else
+      l.dockNote = ("%d chests on the cable (joined to storage?): set DOCK= in neural.env"):format(#chests)
+    end
   end
   L = l
 end
@@ -748,7 +757,8 @@ local function pass()
   local starving = false
   for _, p in ipairs(cols) do if p.state == "NO MATRICES" then starving = true end end
   problem("matrices", starving, "Neural lab: out of prediction matrices. Craft some: storage keeps the dock topped up (/dock on storage, pick the dock, keep prediction_matrix 64).")
-  problem("dock", not L.dock and #L.chambers > 0, "Neural lab: no dock barrel on the lab cable, so drops have nowhere to go.")
+  problem("dock", not L.dock and #L.chambers > 0, L.dockNote and ("Neural lab: " .. L.dockNote)
+    or "Neural lab: no dock barrel on the lab cable, so drops have nowhere to go.")
   problem("counts", #L.chambers > 0 and not countsFresh() and tostring(E.WITHOUT_STORAGE):lower() ~= "run",
     "Neural lab: no item counts from storage, so every column is on hold. It needs a wireless/ender modem.")
   problem("fuel", feeding and #L.furnators > 0 and furnatorFuel == 0 and dockFuel <= 0,
@@ -1087,6 +1097,10 @@ local function netLoop()
     if type(msg) == "table" then
       if msg.type == "storage" and type(msg.items) == "table" then
         storageItems, storageSeen = msg.items, os.clock()
+        if type(msg.docks) == "table" then
+          storageDocks = {}
+          for _, d in ipairs(msg.docks) do storageDocks[d] = true end
+        end
       elseif msg.type == "neural_cmd" and (msg.to == nil or msg.to == os.getComputerID()) then
         if msg.want == "pause" then setPaused(true) elseif msg.want == "go" then setPaused(false) end
       end
