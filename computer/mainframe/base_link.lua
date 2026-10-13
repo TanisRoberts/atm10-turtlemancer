@@ -3,6 +3,7 @@
 -- Listens on "tanis-base" and shares what it hears with the other mainframe programs:
 --   _G.STORAGE_STATS / STORAGE_SEEN / STORAGE_OVERCAP   (alerts, chat, status board, miner panel)
 --   _G.SMELTER / SMELTER_SEEN / SMELT_STATUS            (chat, status board)
+--   _G.FACTORY / FACTORY_SEEN                           (plastic factory: chat, alerts, status board)
 -- and passes smelting orders from chat (_G.SMELT_CMD) on to the smelter until it confirms.
 
 local BASE = "tanis-base"
@@ -21,6 +22,8 @@ while true do
     elseif msg.type == "smelter" then
       _G.SMELTER, _G.SMELTER_SEEN = msg, os.clock()
       _G.SMELT_STATUS = msg.lines
+    elseif msg.type == "factory" then
+      _G.FACTORY, _G.FACTORY_SEEN = msg, os.clock()
     end
   end
   -- Keep repeating a smelting order from chat until the smelter says it has it

@@ -197,6 +197,7 @@ local function farmLine(st)
 end
 
 local lastHaul = {}   -- per Digger
+local factoryKeys = {} -- plastic factory problems we've raised
 local function watch()
   local s = _G.STORAGE_STATS
   if s and s.total and s.total > 0 then
@@ -220,6 +221,16 @@ local function watch()
   end
   if _G.SMELTER_SEEN then
     condition("smelterSilent", os.clock() - _G.SMELTER_SEEN > SILENT_AFTER, "Lost contact with the smelter computer.")
+  end
+  -- The plastic factory sends its own list of problems (dry taps, no water, no power, no fuel)
+  if _G.FACTORY_SEEN then
+    local silent = os.clock() - _G.FACTORY_SEEN > SILENT_AFTER
+    condition("factorySilent", silent, "Lost contact with the plastic factory.")
+    local probs = (not silent and _G.FACTORY and type(_G.FACTORY.problems) == "table") and _G.FACTORY.problems or {}
+    for k in pairs(factoryKeys) do
+      if not probs[k] then condition("plastic:" .. k, false); factoryKeys[k] = nil end
+    end
+    for k, text in pairs(probs) do factoryKeys[k] = true; condition("plastic:" .. k, true, tostring(text)) end
   end
 
   for _, e in ipairs(diggers()) do
@@ -430,7 +441,7 @@ end
 ---------------------------------------------------------------------------
 -- Chat commands
 ---------------------------------------------------------------------------
-local HELP = "Commands: island status | scan | miner | storage | rigger | tigger | figger | smelt | alerts | test."
+local HELP = "Commands: island status | scan | miner | storage | rigger | tigger | figger | smelt | plastic | alerts | test."
   .. " Your inventory: $get [n] <item> | $dump | $pocket"
 
 local function chatLoop()
@@ -501,6 +512,20 @@ local function chatLoop()
         else
           local lines = _G.SMELT_STATUS or { "The smelter hasn't reported in yet." }
           for i = 1, math.min(#lines, 5) do say(lines[i], user) end
+        end
+      elseif cmd == "plastic" or cmd == "factory" then
+        local fac = _G.FACTORY
+        local sub = tostring(msg):lower():match(cmd .. "%s+(%a+)")
+        local orders = { pause = "pause", stop = "pause", go = "go", resume = "go", run = "go", start = "go" }
+        if not fac then
+          say("The plastic factory hasn't checked in. It needs a wireless or ender modem to reach me.", user)
+        elseif sub and orders[sub] then
+          rednet.broadcast({ type = "factory_cmd", to = fac.id, want = orders[sub] }, "tanis-base")
+          say(orders[sub] == "pause" and "Pausing the plastic factory." or "Plastic factory running again.", user)
+        else
+          local lines = fac.lines or { tostring(fac.note) }
+          for i = 1, math.min(#lines, 6) do say(lines[i], user) end
+          say("Orders: island plastic pause | go", user)
         end
       elseif cmd == "rigger" then
         local sub = tostring(msg):lower():match("rigger%s+(%a+)")

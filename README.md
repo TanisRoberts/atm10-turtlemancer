@@ -20,6 +20,7 @@ ComputerCraft (CC:Tweaked + Advanced Peripherals) scripts for Tanis's ATM10 isla
 | Computer | Smelter | `smelter` | Auto-smelting rules (`smelt.txt`); asks storage to move the items |
 | Computer | Foreman | `foreman` | Mining control: overview of every Digger, tap one for its layers / START / DOCK / position / retire; hands out Digger numbers |
 | Computer | GPS host | `gps_host` | One of 4 GPS towers so turtles know their exact X/Y/Z |
+| Computer | Plastic factory | `plastic` | Industrial Foregoing plastic line: tree taps -> Latex Processing Unit -> furnace -> dock barrel (`plastic.env`) |
 | Turtle | Digger | `miner` | Shaft + expanding-square mining (`junk.txt`); numbered Digger-01, -02... by the Foreman; reports its exact position |
 | Turtle | Rigger | `rigger` | Builds from a plan file (`mossy.plan`) |
 | Turtle | Tigger | `lumberjack` | Tree farm |
@@ -61,6 +62,25 @@ and land on the device under their own names. Adding a role = adding its folder 
 - **Foreman:** advanced computer, **ender modem** (reaches Diggers anywhere), advanced monitor touching it (any size; the computer's own screen works too).
 - **GPS hosts (optional, recommended):** 4 computers with ender modems, high up and not all at one height. Diggers then check their position against GPS, notice if they've been carried somewhere, and find their own way back.
 - **Each Digger:** pickaxe + ender modem, a dump barrel (storage input) and a fuel barrel next to its dock. Storage `/fuel` adds each fuel barrel (or `/setup` with a lava bucket in each); storage keeps one refill in every one, but never takes its last stack of coal/charcoal (the smelter needs it).
+
+## Plastic factory
+
+Everything for plastic in one building, run by one computer (role **Plastic factory**).
+
+- **Its own wired cable.** Don't join it to the storage cable: storage would treat the latex machines as storage barrels and the smelter would grab the factory's furnace.
+- On that cable, each with a wired modem (right-click it, red ring):
+  - **Tree Fluid Extractors** ("taps"), each facing away from a log (it drains the block behind it). Power makes them 3x faster. Acacia and mangrove give the most latex (4 mB a pull), oak/birch/spruce/jungle 2.
+  - **Latex Processing Unit(s)** with power. 750 mB latex + 500 mB water = 1 dry rubber.
+  - **Water:** any tank or block holding water (an infinite water source is ideal). Or skip it and fill the unit's 16 B water tank with buckets now and then.
+  - **Buffer tanks (optional):** any other tank soaks up latex while the units are full.
+  - **A furnace** (vanilla or Iron Furnace) for dry rubber -> plastic.
+  - **The dock barrel:** plastic goes out here, furnace fuel comes from here. Give it a **second** wired modem on the **storage** cable and run `/dock` on storage: storage then takes the plastic away and keeps ~32 coal in it. Now nothing needs feeding by hand.
+- A monitor touching the computer shows the units' latex / water / power bars, every tap, the furnace and the dock. Tap **PAUSE / RUN** in its corner.
+- **Taps wear out the log:** each pull has a 1% chance to wear it; about 8 wears turn it into a stripped log (still gives 1 mB a pull), then air. A tap that stops giving latex shows **DRY** and raises an alert: put a new log behind it.
+- With a wireless/ender modem it's on the mainframe's board, raises alerts, and answers `island plastic` (`island plastic pause | go`).
+- No furnace (or `FURNACE=no` in `plastic.env`)? Dry rubber goes to the dock instead; add `plastic all` to `smelt.txt` and the smelter makes it.
+- Terminal: `status`, `list` (what it found on the cable), `pause`, `resume`. Settings in `plastic.env` (same rules as `butler.env`): `DOCK` (if there's more than one chest on the cable), `FURNACE`, `STALL_AFTER`, `WATER_LOW`, `TICK`.
+- If a machine's tanks or slots don't show up, open it and check its side settings (the coloured face buttons): the face with the modem must not be switched off.
 
 ## Diggers and the Foreman
 

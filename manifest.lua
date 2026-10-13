@@ -17,8 +17,8 @@ return {
     computer = {
       name = "Computer",
       about = "A computer that sits at the base",
-      details = "The base's brains: storage, smelting, the mainframe, the Foreman and GPS.",
-      order = { "mainframe", "storage", "smelter", "foreman", "gps" },
+      details = "The base's brains: storage, smelting, the mainframe, the Foreman, GPS and the plastic factory.",
+      order = { "mainframe", "storage", "smelter", "foreman", "gps", "plastic" },
       roles = {
         mainframe = {
           name = "Mainframe",
@@ -69,6 +69,15 @@ return {
             .. "own coordinates once.",
           run = "gps_host",
           files = { "computer/gps/gps_host.lua" },
+        },
+        plastic = {
+          name = "Plastic factory",
+          about = "Latex taps -> rubber -> plastic, hands-off",
+          details = "Runs the Industrial Foregoing plastic line on its OWN cable: drains the tree taps "
+            .. "into the Latex Processing Unit, tops up its water, smelts the dry rubber and puts the "
+            .. "plastic in a dock barrel that storage empties and keeps fuelled (/dock on storage).",
+          run = "plastic",
+          files = { "computer/plastic/plastic.lua" },
         },
       },
     },

@@ -27,7 +27,7 @@ local DEFAULT_SMELT = [[
 #   <item> all        smelt everything of it that comes in, e.g.  iron all
 # Items: stone, smooth_stone, deepslate, glass, iron, gold, copper, charcoal, brick,
 # terracotta, cracked_stone_bricks, smooth_sandstone, smooth_quartz, nether_brick,
-# netherite_scrap, dried_kelp, green_dye, sponge, or any modded metal by name
+# netherite_scrap, dried_kelp, green_dye, sponge, plastic (from dry rubber), or any modded metal by name
 # (e.g. "osmium all" smelts raw osmium into ingots).
 ]]
 local RECIPES = {
@@ -49,6 +49,7 @@ local RECIPES = {
   dried_kelp         = { out = "minecraft:dried_kelp",         inputs = { "minecraft:kelp" } },
   green_dye          = { out = "minecraft:green_dye",          inputs = { "minecraft:cactus" } },
   sponge             = { out = "minecraft:sponge",             inputs = { "minecraft:wet_sponge" } },
+  plastic            = { out = "industrialforegoing:plastic",  inputs = { "industrialforegoing:dryrubber" } },
 }
 RECIPES.iron_ingot, RECIPES.gold_ingot, RECIPES.copper_ingot = RECIPES.iron, RECIPES.gold, RECIPES.copper
 local SMELT_FUELS = { "minecraft:charcoal", "minecraft:coal", "minecraft:coal_block", "minecraft:blaze_rod" }

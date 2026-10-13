@@ -13,6 +13,7 @@ local STATE_COLOUR = {
   surveying = colours.lime, clearing = colours.lime,
   returning = colours.yellow, docked = colours.lightBlue, done = colours.lightBlue,
   waiting = colours.orange, error = colours.red, lost = colours.red,
+  running = colours.lime, paused = colours.orange,
 }
 
 local function ago(t)
@@ -41,6 +42,11 @@ local function rows()
     out[#out + 1] = { sm.label or "Smelter", "ok", tostring(sm.note or ""), _G.SMELTER_SEEN }
   else
     out[#out + 1] = { "Smelter", "?", "not heard from yet", nil }
+  end
+  local fac = _G.FACTORY
+  if fac then
+    out[#out + 1] = { fac.label or "Plastic", fac.state, ("%s. %d plastic made"):format(tostring(fac.note or ""),
+      tonumber(fac.plastic) or 0), _G.FACTORY_SEEN }
   end
   local digs = {}
   for _, e in pairs(_G.DIGGERS or {}) do

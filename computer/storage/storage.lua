@@ -797,6 +797,7 @@ local COMMANDS = {
   { "/setup",    "pick chests with marker items" },
   { "/addinput", "add one more input chest" },
   { "/fuel",     "add a Digger fuel barrel" },
+  { "/dock",     "add a dock (turtle or plastic factory)" },
   { "/inputs",   "show which chest is which" },
   { "/rescan",   "re-read every chest now" },
   { "/drawers",  "what storage sees in the drawers" },
@@ -1407,6 +1408,18 @@ function runCommand(cmd)
       elseif isSpecial(n) then printError("That one's already in use."); waitEnter() else
         cfg.fuels[#cfg.fuels + 1] = n; saveCfg(); scanAll(); buildItems()
         say(termView, ("Fuel barrel added (%d now). I'll keep one refill in each."):format(#cfg.fuels))
+      end
+    elseif found == "/dock" then
+      local n = pickChest("DOCK barrel: I keep ~32 coal in it and take everything else (pick a dock again to remove it)")
+      cfg.docks = cfg.docks or {}
+      local idx
+      for i, d in ipairs(cfg.docks) do if d == n then idx = i end end
+      if idx then
+        table.remove(cfg.docks, idx); saveCfg(); scanAll(); buildItems()
+        say(termView, "Dock removed. It's normal storage again.", C.warn)
+      elseif isSpecial(n) then printError("That one's already in use."); waitEnter() else
+        cfg.docks[#cfg.docks + 1] = n; saveCfg(); scanAll(); buildItems()
+        say(termView, ("Dock added (%d now). The test item gets sorted away."):format(#cfg.docks))
       end
     elseif found == "/lock" then
       cfg.manualLock = true; saveCfg()
