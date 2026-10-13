@@ -372,10 +372,13 @@ local function problem(key, on, msg)
   if on then problems[key] = msg else problems[key] = nil end
 end
 
+-- Drops still sitting in a fab's output slots (couldn't reach the dock): chamber -> { item = n }
+local heldOut = {}
 local function stockOf(id)
   local n = 0
   if storageItems then n = tonumber(storageItems[id]) or 0 end
   for _, it in pairs(dockList) do if it.name == id then n = n + it.count end end
+  for _, t in pairs(heldOut) do n = n + (t[id] or 0) end   -- made, just not moved yet: still counts
   return n
 end
 
@@ -491,20 +494,29 @@ local function column(c, lk, now)
     local fl = call(f, "list") or {}
     p.fin = fl[F_IN] and fl[F_IN].count or 0
     p.fEnergy, p.fCap = powerRead(f)
+    local held = {}
     for slot = 2, 17 do
       local it = fl[slot]
       if it then
         outNow = it.name
+        local m = 0
         if not paused then
-          local m = toDock(f, slot, it.count)
+          m = toDock(f, slot, it.count)
           if m > 0 then
             st.made = st.made + m
             cfg.made[it.name] = (cfg.made[it.name] or 0) + m
             dirty = true
           end
         end
+        if it.count - m > 0 then held[it.name] = (held[it.name] or 0) + it.count - m end
       end
     end
+    heldOut[c] = held
+    local left = 0
+    for _, n in pairs(held) do left = left + n end
+    -- Drops the fab couldn't hand over: no dock, or the dock is full (a full fab stops making more)
+    p.outStuck = (left >= 32 and not paused) and (not L.dock and "NO DOCK" or "DOCK FULL") or nil
+    p.outLeft = left
     if p.finPrev and p.fin < p.finPrev then p.lastFab = now end
     if outNow then
       p.lastFab = now
@@ -617,6 +629,7 @@ local function stateOf(p, now)
   if cfg.paused then return "PAUSED", false, false end
   if not p.mob then return "NO MODEL", true, false end
   if not p.f then return "NO FAB", true, false end
+  if p.outStuck then return p.outStuck, true, false end
   if p.fabStuck then return p.fabStuck, true, false end
   if p.stuck then return p.stuck, true, false end
   if p.needRuns and not p.banking and p.matrices == 0 and dockMatrices <= 0 then return "NO MATRICES", true, false end
@@ -653,6 +666,7 @@ local function pass()
     cols[#cols + 1] = column(c, cfg.links[c] or {}, now)
   end
   for c in pairs(P) do if not seen[c] then P[c] = nil end end
+  for c in pairs(heldOut) do if not seen[c] then heldOut[c] = nil end end
   readDock()   -- outputs just landed
 
   -- Power: every energy cell on the cable added up, and the chambers' own buffers (the chambers are
@@ -754,22 +768,27 @@ local function pass()
       problems[key] = who .. ": the fabricator isn't making anything. Pick a drop in its screen."
     elseif s == "DOCK FULL" then
       key = "dockfull"
-      problems[key] = "Neural lab: the dock barrel is full. Is it on storage (/dock)?"
+      problems[key] = "Neural lab: dock full, drops piling up in the fabs. Is the barrel a dock on storage (/dock)?"
+    elseif s == "NO DOCK" then
+      key = "dock"
+      problems[key] = "Neural lab: no dock, drops piling up in the fabs. " .. (L.dockNote or "Put a barrel with a modem on the lab cable.")
     end
     if key then live[key] = true end
     if p.needRuns then anyWantsMatrix = true end
   end
   for k in pairs(problems) do
     if (k:match("^stuck:") or k:match("^power:") or k:match("^training:") or k:match("^fabpower:")
-        or k:match("^pick:") or k == "dockfull") and not live[k] then
+        or k:match("^pick:") or k == "dockfull" or k == "dock") and not live[k] then
       problems[k] = nil
     end
   end
   local starving = false
   for _, p in ipairs(cols) do if p.state == "NO MATRICES" then starving = true end end
   problem("matrices", starving, "Neural lab: out of prediction matrices. Craft some: storage keeps the dock topped up (/dock on storage, pick the dock, keep prediction_matrix 64).")
-  problem("dock", not L.dock and #L.chambers > 0, L.dockNote and ("Neural lab: " .. L.dockNote)
-    or "Neural lab: no dock barrel on the lab cable, so drops have nowhere to go.")
+  if not live.dock then
+    problem("dock", not L.dock and #L.chambers > 0, L.dockNote and ("Neural lab: " .. L.dockNote)
+      or "Neural lab: no dock barrel on the lab cable, so drops have nowhere to go.")
+  end
   problem("counts", #L.chambers > 0 and not countsFresh() and tostring(E.WITHOUT_STORAGE):lower() ~= "run",
     "Neural lab: no item counts from storage, so every column is on hold. It needs a wireless/ender modem.")
   problem("fuel", feeding and #L.furnators > 0 and furnatorFuel == 0 and dockFuel <= 0,
@@ -936,6 +955,16 @@ local function drawOverview(m, w, h)
     storageItems and (", " .. (tonumber(storageItems[MATRIX]) or 0) .. " stored") or ""):sub(1, w - 2))
   m.setCursorPos(2, 4); m.setTextColour(next(problems) and colours.yellow or colours.white)
   m.write(note:sub(1, w - 2))
+  -- The most useful problem, in words (the cards only have room for a state)
+  local first
+  for _, k in ipairs({ "dock", "dockfull", "counts", "matrices", "fuel", "error" }) do
+    if problems[k] then first = problems[k]; break end
+  end
+  if not first then for _, v in pairs(problems) do first = v; break end end
+  if first then
+    m.setCursorPos(2, 5); m.setTextColour(colours.red)
+    m.write((first:gsub("^Neural lab:? ?", "")):sub(1, w - 2))
+  end
 
   local top = 6
   if #L.chambers == 0 then
