@@ -17,8 +17,8 @@ return {
     computer = {
       name = "Computer",
       about = "A computer that sits at the base",
-      details = "The base's brains: storage, smelting, the mainframe, the Foreman, the Farmhand, the Architect, GPS, the plastic factory, the neural lab and the art wall.",
-      order = { "mainframe", "storage", "smelter", "foreman", "farmhand", "architect", "gps", "plastic", "neural", "art" },
+      details = "The base's brains: storage, smelting, the mainframe, the Foreman, the Nether Foreman, the Farmhand, the Architect, GPS, the plastic factory, the neural lab and the art wall.",
+      order = { "mainframe", "storage", "smelter", "foreman", "nether", "farmhand", "architect", "gps", "plastic", "neural", "art" },
       roles = {
         mainframe = {
           name = "Mainframe",
@@ -41,7 +41,7 @@ return {
             .. "drawers, search + take on its screen, tops up turtle fuel barrels, supplies Rigger "
             .. "and does the smelter's moves. Wired modem on the storage cable + wireless modem.",
           run = "storage",
-          files = { "computer/storage/storage.lua" },
+          files = { "computer/storage/storage.lua", "shared/assignui.lua" },
         },
         smelter = {
           name = "Smelter",
@@ -60,6 +60,16 @@ return {
             .. "modem and an advanced monitor.",
           run = "foreman",
           files = { "computer/foreman/foreman.lua" },
+        },
+        nether = {
+          name = "Nether Foreman",
+          about = "Pigger control + the Nether dock barrels",
+          details = "Lives in the Nether by Pigger's dock. Pigger cards on its monitor (layers, START, "
+            .. "dock, reboot, retire), and the barrels on its cable: empties Pigger's dock, keeps "
+            .. "what the Rules say in Nether stock, sends the rest home through the output barrel "
+            .. "(hopper -> ender chest). Ender modem + wired modem; /assign for the barrels.",
+          run = "nether",
+          files = { "computer/nether/nether.lua", "shared/assignui.lua" },
         },
         farmhand = {
           name = "Farmhand",
@@ -124,13 +134,19 @@ return {
       name = "Turtle",
       about = "A turtle that goes out and works",
       details = "Mining, building, lumberjacking, farming and map-making turtles.",
-      order = { "digger", "rigger", "tigger", "figger", "zigger" },
+      order = { "digger", "pigger", "rigger", "tigger", "figger", "zigger" },
       roles = {
         digger = { name = "Digger", about = "Miner: shaft + expanding squares", run = "miner",
                    details = "Digs a shaft at its dock and mines squares at the layers the Foreman "
                      .. "picks. Gets its number from the Foreman. Pickaxe + ender modem.",
                    label = "auto",
                    files = { "turtle/digger/miner.lua" }, once = { "turtle/digger/junk.txt" } },
+        pigger = { name = "Pigger", about = "Nether miner: drinks lava for fuel", run = "pigger",
+                   details = "Digger's cousin for the Nether: shaft + squares at the layers the Nether "
+                     .. "Foreman picks, refuels from lava with his bucket, one dock barrel. Advanced "
+                     .. "turtle, pickaxe + ender modem, one empty bucket.",
+                   label = "auto",
+                   files = { "turtle/pigger/pigger.lua" } },
         rigger = { name = "Rigger", about = "Builder: follows a plan file", run = "rigger",
                    details = "Builds the island from a plan file, layer by layer, and fetches "
                      .. "materials from storage.",

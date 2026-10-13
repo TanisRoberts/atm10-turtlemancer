@@ -19,6 +19,7 @@ ComputerCraft (CC:Tweaked + Advanced Peripherals) scripts for Tanis's ATM10 isla
 | Computer | Storage | `storage` | Sorts input chests, touch screen, fuels the turtles, fills Rigger's barrel, does the smelter's item moves |
 | Computer | Smelter | `smelter` | Auto-smelting rules (`smelt.txt`); asks storage to move the items |
 | Computer | Foreman | `foreman` | Mining control: overview of every Digger, tap one for its layers / START / DOCK / position / retire; hands out Digger numbers; layer presets (Y range + rings) edited on the Presets page or with `/presets` on its screen; Reboot / Reboot all / `/reboot` (a Digger finishes its block, reboots, updates and carries on) |
+| Computer | Nether Foreman | `nether` | In the Nether by Pigger's dock: Pigger cards (layers / START / DOCK / reboot / retire), the Nether barrels (`/assign`: dock, output home, stock, input), Rules for what stays in the Nether, what Pigger throws away and when he drinks lava |
 | Computer | Farmhand | `farmhand` | Control screen for the farm turtles: overview of Figger, Tigger and friends, tap one for ROUNDS NOW / PAUSE / RE-MAP / FOUND / REBOOT, live settings, position, last haul and running totals |
 | Computer | Architect | `architect` | Rigger's control screen (no monitor, the computer's own screen): what he's doing, a map of the layer he's on (done / to do / him / his next block), the island from the side, materials left vs storage, where the test markers went, a log, and build / stop / test / clear / reboot orders (typed or clicked) |
 | Computer | GPS host | `gps_host` | One of 4 GPS towers so turtles know their exact X/Y/Z |
@@ -26,6 +27,7 @@ ComputerCraft (CC:Tweaked + Advanced Peripherals) scripts for Tanis's ATM10 isla
 | Computer | Neural lab | `neural` | Hostile Neural Networks wall: runs each chamber + fab column until storage has enough of what it makes (`neural.txt`, `neural.env`) |
 | Computer | Art controller | `art` | Monitor wall: live turtle map coloured by height, GPS pylons, Zigger's world map, generative art you can poke (`art.env`) |
 | Turtle | Digger | `miner` | Shaft + expanding-square mining (`junk.txt`); numbered Digger-01, -02... by the Foreman; reports its exact position |
+| Turtle | Pigger | `pigger` | Nether miner: Digger's shaft + squares, refuels by scooping lava with his bucket (under 25% until 75%), one dock barrel; numbered Pigger-01... by the Nether Foreman |
 | Turtle | Rigger | `rigger` | Builds from a plan file (`mossy.plan`, put on him by hand: it's big); run from the Architect or `island rigger ...` in chat |
 | Turtle | Tigger | `lumberjack` | Tree farm: maps a slab-ringed zone, plants a tree grid, chops and replants on a timer (`tigger.env`) |
 | Turtle | Figger | `farmer` | Crop farm: harvests and replants any crop, hoes new soil, picks up what falls (`figger.env`) |
@@ -190,6 +192,19 @@ Figger (crops) and Tigger (trees) run on one shared engine (`shared/farmbot.lua`
 - **Position:** set up at its dock, it learns X/Y/Z (from GPS, or typed in), which way it faces and the dimension, and reports where it is all the time.
 - **Carried off?** With GPS it notices on restart, works out which way it faces by stepping once, and waits. Press START or DOCK on its Foreman page: it digs down to Y 0, tunnels under everything to its shaft and comes up. Put it down outside, not on a floor you care about. Without GPS it counts its moves, so carry it back to its dock instead.
 - **Older Diggers** fill in their dock's X/Z and facing by themselves on the first boot with GPS, or ask once on their screen without it.
+
+## Pigger and the Nether Foreman
+
+Pigger mines the Nether and his haul comes home through a linked ender chest.
+
+- **Pigger:** an **advanced** mining turtle (diamond pickaxe) with an **ender modem**, and **one empty bucket** in his inventory. Set him up (startup.lua, pick Pigger) on top of where his shaft should go, with **one barrel** next to him (a side or above): his dock. He asks for his X/Y/Z and facing (F3) unless there's GPS in the Nether.
+- **The Nether cable:** a wired modem on the Nether Foreman computer, joined by cable to wired modems on: Pigger's **dock** barrel, an **output** barrel, and one or more **stock** barrels (optional: **input** barrels to drop things in by hand). On the computer: `/assign` (or the Barrels button) and give each its job, the same screen as storage's.
+- **Getting it home:** output barrel > hopper > Ender Storage ender chest (orange/orange/orange). Its twin at home feeds storage the same way: ender chest > hopper > a barrel that's a storage Input. A hopper moves ~150 items a minute; a Pipez item pipe is quicker if it ever backs up.
+- **What goes where:** everything Pigger brings (and anything in an input) goes to stock if the Rules keep some of it and stock is short of that; the rest goes home. Stock above its keep count goes home too. Defaults keep 4 buckets, 16 lava buckets and some coal / charcoal / coal blocks / blaze rods for emergencies. `/keep <item> <count>` (0 = stop), or the - / + / x buttons on the Rules page.
+- **Fuel:** under **25%** he scoops every lava source he sees with his bucket and drinks it (1,000 each); finding one, he drinks the whole pool around him (only the lava cells, on his own level, inside his rings) until he's over **75%**, then leaves lava alone. Both numbers are on the Rules page. Running low with no lava about, he comes home and the dock gives him lava buckets / coal from stock. No bucket? The dock gives him one from stock.
+- **Junk:** the Rules page lists what he throws away underground (netherrack, basalt, blackstone...); everything else comes home. `/junk <item>`, `/unjunk <item>`.
+- **Chunk loading:** force-load Pigger's dock, his whole dig area and the Nether Foreman's chunk (FTB Chunks). Keep his rings inside it: ring 24 (the default) is 49x49, about 3x3 chunks around the dock. An unloaded Pigger just stops and carries on when it loads again. Force-load the island base too if you want storage sorting while you're away.
+- **The mainframe** hears Piggers through its ender modem: they show on the status board, in `island miner` and in the alerts like Diggers.
 
 ## Safety
 
