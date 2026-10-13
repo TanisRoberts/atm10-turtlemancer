@@ -203,6 +203,16 @@ local function onStatus(from, msg)
     st.lastKind, st.lastLayer = kind, msg.layer
     addLog(line)
   end
+  -- Blocks he had to skip (something he's not allowed to dig was in the way)
+  local sk = tonumber(msg.skipped) or 0
+  if st.lastSkipped and sk > st.lastSkipped and type(msg.skips) == "table" then
+    local new = math.min(sk - st.lastSkipped, #msg.skips)
+    for i = #msg.skips - new + 1, #msg.skips do
+      local e = msg.skips[i]
+      addLog(("Skipped block at %d %d %d: %s"):format(e[1], e[2], e[3], tostring(e[4])))
+    end
+  end
+  st.lastSkipped = sk
   if first and (msg.v or 0) < 2 then
     notice("Rigger is on old software: reboot him once by hand (hold Ctrl+R) to update.")
   end
@@ -421,6 +431,11 @@ local function drawStatus()
     put(1, y, "Needs  ", colors.gray)
     local lines = wrap(table.concat(m, ", "), W - 8)
     for i = 1, math.min(2, #lines) do put(8, y, lines[i], colors.red); y = y + 1 end
+  end
+  if (tonumber(s.skipped) or 0) > 0 then
+    put(1, y, "Skips  ", colors.gray)
+    put(8, y, fit(comma(s.skipped) .. " blocks he couldn't reach (they're in the Log)", W - 8), colors.orange)
+    y = y + 1
   end
   if order then
     put(1, y, "Order  ", colors.gray)

@@ -128,6 +128,31 @@ local function dropJunk()
   turtle.select(1)
 end
 
+local orderWaiting   -- set further down: true when a newer order has arrived
+
+-- The next block is in a chunk that isn't loaded: wait there (it loads when you come near)
+-- instead of giving up. Returns true once he's moved, or false if a new order arrives first.
+local function waitForChunk(kind, op)
+  local tx, tz = S.x, S.z
+  if kind == "f" then tx, tz = S.x + DX[S.h], S.z + DZ[S.h] end
+  local was, wasMsg = S.status, S.msg
+  setStatus("waiting", ("Chunk at X %d Z %d isn't loaded: waiting for it"):format(tx, tz))
+  while true do
+    os.sleep(5)
+    if orderWaiting and orderWaiting() then setStatus(was, wasMsg); return false end
+    S.pending = { kind = kind, fuel = turtle.getFuelLevel() }
+    save()
+    local ok, why = op.move()
+    if ok then
+      apply(kind); S.pending = nil; save()
+      setStatus(was, wasMsg)
+      return true
+    end
+    S.pending = nil
+    if not tostring(why):find("loaded world") then setStatus(was, wasMsg); return nil end
+  end
+end
+
 -- One block of movement, clearing natural blocks inside the build site.
 -- Returns false, reason if something unbreakable / protected is in the way.
 local function move(kind)
@@ -136,11 +161,20 @@ local function move(kind)
     if turtle.getFuelLevel() == 0 then return false, "Out of fuel" end
     S.pending = { kind = kind, fuel = turtle.getFuelLevel() }
     save()
-    if op.move() then
+    local moved, why = op.move()
+    if moved then
       apply(kind); S.pending = nil; save()
       return true
     end
     S.pending = nil
+    why = tostring(why)
+    if why:find("loaded world") then
+      local r = waitForChunk(kind, op)
+      if r == true then return true elseif r == false then return false, "Chunk not loaded" end
+    elseif why:find("protected area") or why:find("world border") or why:find("leave the world")
+        or why:find("Too high") or why:find("Too low") then
+      save(); return false, "Blocked: " .. why
+    end
     local ok, d = op.inspect()
     if ok and d.name ~= "minecraft:water" and d.name ~= "minecraft:lava" then
       local tx, tz = S.x, S.z
@@ -354,6 +388,7 @@ local function statusMsg()
     at = S.x and { x = S.x, y = S.y, z = S.z, h = S.h } or nil,
     pos = gpsNow() or (S.x and { x = S.x, y = S.y, z = S.z }) or nil, gps = gpsNow() ~= nil,
     corners = S.corners, rebootDone = S.rebootDone, want = S.want, v = 2,
+    skipped = S.skipped, skips = S.skips,
   }
 end
 
@@ -563,6 +598,25 @@ local function checkpoint()
   if fuel() < fuelHome() then abortWith("fuel") end
 end
 
+-- Something he isn't allowed to dig (your shack, a claim, a chest...) keeps him from a block:
+-- note it and move on, so one obstacle can't stall the whole build. Lots in a row = real trouble.
+local SKIP_RUN_MAX = 25
+local function skipBlock(x, y, z, why)
+  why = tostring(why)
+  if why == "Chunk not loaded" then checkpoint(); abortWith("stop") end   -- a new order came in while waiting
+  if why == "Out of fuel" then error("Out of fuel", 0) end
+  S.skipped = (S.skipped or 0) + 1
+  S.skipRun = (S.skipRun or 0) + 1
+  S.skips = S.skips or {}
+  S.skips[#S.skips + 1] = { x, y, z, why }
+  while #S.skips > 20 do table.remove(S.skips, 1) end
+  save()
+  if S.skipRun > SKIP_RUN_MAX then
+    S.skipRun = 0
+    error(("Skipped %d blocks in a row, last: %s"):format(SKIP_RUN_MAX, why), 0)
+  end
+end
+
 local function buildPillar(i)
   local col = P.ext[i]
   local name = pal(col[3])
@@ -574,7 +628,7 @@ local function buildPillar(i)
     local ok, why
     if S.y == plane and inSite(S.x, S.z) then ok, why = goXZ(wx, wz) else ok, why = travel(wx, plane, wz) end
     if ok and S.y ~= plane then ok, why = travel(wx, plane, wz) end
-    if not ok then error("Can't reach edge column: " .. tostring(why), 0) end
+    if not ok then skipBlock(wx, layer1Y() - 1, wz, why); return end
   end
   -- Go down the column until we sit on something solid (your seabed, or a half-built wall)
   descendTo(-60)
@@ -585,8 +639,9 @@ local function buildPillar(i)
     if r == "missing" then abortWith("restock") end
     if r == "placed" then S.placed = (S.placed or 0) + 1 end
     local ok, why = move("u")
-    if not ok then error("Pillar blocked: " .. tostring(why), 0) end
+    if not ok then skipBlock(S.x, S.y + 1, S.z, why); return end
   end
+  S.skipRun = 0
 end
 
 local function buildLayer(n)
@@ -598,19 +653,18 @@ local function buildLayer(n)
     checkpoint()
     local wx, wy, wz = c[4], c[5], c[6]
     local nearPlane = inSite(S.x, S.z) and math.abs(S.y - (wy + 1)) <= 1
+    local ok, why
     if not nearPlane then
-      local ok, why = travel(wx, wy + 1, wz)
-      if not ok then error("Can't reach layer " .. n .. ": " .. tostring(why), 0) end
+      ok, why = travel(wx, wy + 1, wz)
     else
-      local ok, why = goY(wy + 1)                -- step up to the next layer's flying height
+      ok, why = goY(wy + 1)                       -- step up to the next layer's flying height
       if ok then ok, why = goXZ(wx, wz) end
-      if not ok then error("Layer " .. n .. " path blocked: " .. tostring(why), 0) end
-      if S.y ~= wy + 1 then
-        local ok2, why2 = travel(wx, wy + 1, wz)
-        if not ok2 then error("Can't get back to layer " .. n .. ": " .. tostring(why2), 0) end
-      end
+      if ok and S.y ~= wy + 1 then ok, why = travel(wx, wy + 1, wz) end
+      if not ok then ok, why = travel(wx, wy + 1, wz) end   -- try the long way round, over the top
     end
-    local r = placeHere(name)
+    local r = "skip"
+    if ok then r = placeHere(name) else skipBlock(wx, wy, wz, why) end
+    if r ~= "skip" then S.skipRun = 0 end
     if r == "missing" then abortWith("restock") end
     if r == "placed" then
       S.placed = (S.placed or 0) + 1
@@ -673,6 +727,7 @@ local function newOrder()
   return ctrl and type(ctrl.seq) == "number" and (type(S.seq) ~= "number" or ctrl.seq > S.seq)
 end
 local function rebootWanted() return rebootToken ~= nil and rebootToken ~= S.rebootDone end
+orderWaiting = newOrder
 
 -- Sleep, but wake up for a new order or a reboot request
 local function waitFor(sec)
@@ -690,6 +745,13 @@ local function doReboot()
   os.reboot()
 end
 
+-- goHome raises an error if he can't get there; in the main loop that must never crash him
+local function safeHome()
+  local ok, err = pcall(goHome)
+  if not ok then setStatus("error", "Can't get home: " .. tostring(err)); waitFor(30) end
+  return ok
+end
+
 local function mainLoop()
   while true do
     applyCtrl()
@@ -699,16 +761,20 @@ local function mainLoop()
       waitFor(5)
     elseif S.want == "test" then
       S.want = "idle"; save()
-      if not atDock() then goHome() end
-      topUpFuel()
-      placeMarkers()
+      if atDock() or safeHome() then
+        topUpFuel()
+        local ok, err = pcall(placeMarkers)
+        if not ok then setStatus("error", "Marker test: " .. tostring(err)); safeHome() end
+      end
     elseif S.want == "clear" then
       S.want = "idle"; save()
-      if not atDock() then goHome() end
-      topUpFuel()
-      clearMarkers()
+      if atDock() or safeHome() then
+        topUpFuel()
+        local ok, err = pcall(clearMarkers)
+        if not ok then setStatus("error", "Clearing markers: " .. tostring(err)); safeHome() end
+      end
     elseif S.want == "build" and S.phase ~= "done" then
-      if not atDock() and S.phase == nil then goHome() end
+      if not atDock() and S.phase == nil then safeHome() end
       if atDock() then
         dockVisit()
         local need = nextNeededItem()
@@ -724,12 +790,12 @@ local function mainLoop()
           S.missing = nil
           local ok, err = pcall(runBuild)
           if ok then
-            goHome()
+            safeHome()
             setStatus("done", "Build finished! " .. (S.placed or 0) .. " blocks placed.")
           elseif type(err) == "table" and err.abort then
             setStatus("returning", err.abort == "restock" and "Out of the next block"
               or err.abort == "fuel" and "Low on fuel" or "Stop requested")
-            goHome()
+            safeHome()
           else
             setStatus("error", tostring(err))
             pcall(goHome)
@@ -738,10 +804,10 @@ local function mainLoop()
         end
       else
         setStatus("returning", "Heading home")
-        goHome()
+        safeHome()
       end
     else
-      if not atDock() then setStatus("returning", "Heading home"); goHome() end
+      if not atDock() then setStatus("returning", "Heading home"); safeHome() end
       if S.phase == "done" then setStatus("done", "Build finished. " .. (S.placed or 0) .. " blocks placed.")
       elseif S.status ~= "docked" or not ((S.msg or ""):find("^Marker") or (S.msg or ""):find("stopped")) then
         setStatus("docked", "Waiting. Say: island rigger build | test | clear")
