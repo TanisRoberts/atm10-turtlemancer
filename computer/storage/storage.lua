@@ -17,7 +17,12 @@
 --     as you type; click an item (or press Enter for the top one) to send it. Qty / A-Z sorting,
 --     x1 / x16 / Stack buttons and paging (scroll wheel, arrow keys) work the same as on the monitor.
 --   * Commands: type / in the search bar to see them
---     (/setup /addinput /fuel /pocket /inputs /rescan /drawers /tidy /fuelinfo /lock /unlock)
+--     (/assign /setup /rescan /drawers /tidy /fuelinfo /lock /unlock)
+--   * /assign: the list of inventories that have a job (input, output, dock, Digger fuel, Rigger supply,
+--     pocket dump/restock, drawers, ignore), picked by network name (type to narrow it down, e.g.
+--     "barrel_74" or "drawer") or by dropping one item in. Add, edit (type + nickname) or delete them.
+--     ANY number of inputs. Everything not on the list is storage. (/dock /fuel /pocket /addinput
+--     /inputs still work: they open /assign.)
 -- Junk (cobble, deepslate, ...) is capped at JUNK_CAP; the miner is told to stop bringing more.
 --
 -- Storage is the only computer that moves items in or out of storage. Over the network it:
@@ -72,6 +77,9 @@ local function loadCfg()
   if cfg.fuel and not cfg.fuels then cfg.fuels = { cfg.fuel } end -- older config: one fuel barrel
   cfg.fuel = nil
   cfg.fuels = cfg.fuels or {}
+  cfg.drawers = cfg.drawers or {}   -- assigned as drawers (bulk storage) by hand, besides those found by name
+  cfg.ignored = cfg.ignored or {}   -- never touched or counted
+  cfg.names = cfg.names or {}       -- network name -> nickname, shown in /assign
 end
 local function saveCfg()
   local f = fs.open(CONFIG, "w")
@@ -95,8 +103,11 @@ local function isMachine(n)
 end
 
 -- Drawers show up on the network as e.g. "functionalstorage:oak_1_0" or "storagedrawers:..."
+-- (or assigned as Drawers in /assign)
 local function isDrawer(n)
-  return (n:find("drawer") or n:find("functionalstorage")) ~= nil
+  if (n:find("drawer") or n:find("functionalstorage")) ~= nil then return true end
+  for _, d in ipairs(cfg.drawers or {}) do if d == n then return true end end
+  return false
 end
 
 local function listRemove(list, n)
@@ -111,9 +122,66 @@ local function isSpecial(n)
   if n == cfg.output or n == cfg.rigger or n == cfg.pocketIn or n == cfg.pocketOut then return true end
   for _, d in ipairs(cfg.docks or {}) do if d == n then return true end end
   for _, d in ipairs(cfg.fuels) do if d == n then return true end end
+  for _, d in ipairs(cfg.ignored or {}) do if d == n then return true end end
   if isMachine(n) then return true end
   for _, i in ipairs(cfg.inputs) do if i == n then return true end end
   return false
+end
+
+-- Assigned storage: every inventory has at most one job. Lists can hold any number, singles one.
+local TYPES = {
+  { key = "input",     label = "Input",          short = "Input",   tag = "INPUT",  col = colours.lime,
+    about = "Emptied into storage every 2 s. Have as many as you like." },
+  { key = "output",    label = "Output",         short = "Output",  tag = "OUTPUT", col = colours.cyan,
+    about = "Where items you take from the screens go. Only one." },
+  { key = "dock",      label = "Dock",           short = "Dock",    tag = "DOCK",   col = colours.yellow,
+    about = "Turtle/machine dock: ~32 coal kept in it (plus its keep list), everything else taken." },
+  { key = "fuel",      label = "Digger fuel",    short = "Fuel",    tag = "FUEL",   col = colours.orange,
+    about = "Kept at one Digger refill (lava, coal blocks, coal...). One per Digger." },
+  { key = "rigger",    label = "Rigger supply",  short = "Rigger",  tag = "RIGGER", col = colours.purple,
+    about = "Filled with what Rigger asks for. Only one." },
+  { key = "pocketIn",  label = "Pocket dump",    short = "P.dump",  tag = "P.DUMP", col = colours.pink,
+    about = "The butler's $dump lands here and gets sorted. Only one." },
+  { key = "pocketOut", label = "Pocket restock", short = "P.stock", tag = "P.STCK", col = colours.magenta,
+    about = "The butler's top-ups wait here. Only one." },
+  { key = "drawer",    label = "Drawers",        short = "Drawers", tag = "DRAWER", col = colours.lightBlue,
+    about = "Bulk storage (a drawer controller): items it holds go there first. Still storage." },
+  { key = "ignore",    label = "Ignore",         short = "Ignore",  tag = "IGNORE", col = colours.lightGrey,
+    about = "Never touched or counted: storage pretends it isn't there." },
+}
+local TYPE_BY = {}
+for _, t in ipairs(TYPES) do TYPE_BY[t.key] = t end
+local LISTS   = { input = "inputs", dock = "docks", fuel = "fuels", drawer = "drawers", ignore = "ignored" }
+local SINGLES = { output = "output", rigger = "rigger", pocketIn = "pocketIn", pocketOut = "pocketOut" }
+
+local function typeOf(n)
+  for key, field in pairs(SINGLES) do if cfg[field] == n then return key end end
+  for key, field in pairs(LISTS) do
+    for _, x in ipairs(cfg[field] or {}) do if x == n then return key end end
+  end
+end
+
+local function unassign(n)
+  for _, field in pairs(SINGLES) do if cfg[field] == n then cfg[field] = nil end end
+  for _, field in pairs(LISTS) do if cfg[field] then listRemove(cfg[field], n) end end
+  if cfg.dockKeep then cfg.dockKeep[n] = nil end
+  for _, b in pairs(cfg.diggerBarrels or {}) do
+    if b.fuel == n then b.fuel = nil end
+    if b.dump == n then b.dump = nil end
+  end
+end
+
+-- Give n a job (taking any old one away). Returns the inventory it pushed out of a single job.
+local function assign(n, key)
+  unassign(n)
+  local single = SINGLES[key]
+  if single then
+    local bumped = cfg[single]
+    cfg[single] = n
+    return bumped
+  end
+  cfg[LISTS[key]] = cfg[LISTS[key]] or {}
+  listAdd(cfg[LISTS[key]], n)
 end
 
 ---------------------------------------------------------------------------
@@ -157,41 +225,15 @@ local function itemTotals()
   return t
 end
 
--- While a chest is being picked, sorting holds off: otherwise a dock (or input) would have the test
--- item sorted out of it before the second count, and the wrong chest would be picked.
+-- While /assign watches for a dropped item, sorting holds off: otherwise an input (or dock) would
+-- have the test item sorted out of it before the second count, and the wrong chest would be picked.
 local picking, workerBusy = false, false   -- workerBusy: a sorting pass is running (also for barrel probes)
-local function pickChest(label)
-  picking = true
-  while workerBusy do os.sleep(0.2) end
-  local function done(n) picking = false; return n end
-  while true do
-    print()
-    print(("Setting up the %s."):format(label))
-    print("Press Enter, then drop ONE item into it.")
-    read()
-    local before = itemTotals()
-    print("Now drop the item in, then press Enter.")
-    read()
-    local after = itemTotals()
-    local found = {}
-    for n, c in pairs(after) do
-      if c > (before[n] or 0) then found[#found + 1] = n end
-    end
-    if #found == 1 then
-      print(("Got it: %s"):format(found[1]))
-      return done(found[1])
-    elseif #found == 0 then
-      printError("Didn't see any chest change. Is its modem connected (right-clicked, red ring)?")
-    else
-      printError("More than one chest changed. Try again and only touch one.")
-    end
-  end
-end
 
 -- Marker setup: put exactly one marker item in each special chest, press Enter.
--- A chest only counts if it holds that single item and nothing else.
+-- A chest only counts if it holds that single item and nothing else. Markers ADD to what's
+-- assigned (a single job like the output moves to the new chest); /assign changes or removes them.
 local MARKERS = {
-  { key = "input",  item = "minecraft:stick",       what = "1 stick",       label = "MAIN INPUT",   need = true },
+  { key = "input",  item = "minecraft:stick",       what = "1 stick",       label = "INPUT",        need = true, many = true },
   { key = "output", item = "minecraft:dirt",        what = "1 dirt",        label = "OUTPUT",       need = true },
   { key = "dump",   item = "minecraft:cobblestone", what = "1 cobblestone", label = "DIGGER DUMP", many = true },
   { key = "fuel",   item = "minecraft:lava_bucket", what = "1 lava bucket", label = "DIGGER FUEL", many = true },
@@ -228,42 +270,33 @@ local paused = false -- sorting and fuel top-up stop while setup runs
 local function setup()
   paused = true
   term.clear(); term.setCursorPos(1, 1)
-  print("STORAGE SETUP (sorting paused)")
-  print("Put exactly one marker in each chest:")
+  print("MARKER SETUP (sorting paused)")
+  print("One marker in each chest you want to assign:")
   for _, m in ipairs(MARKERS) do
-    print(("  %-14s %s%s"):format(m.what, m.label, m.many and " (one in each)" or m.need and "" or " (optional)"))
+    print(("  %-14s %s%s"):format(m.what, m.label, m.many and " (one in each)" or ""))
   end
+  print("Adds to /assign; nothing gets removed.")
   while true do
-    print("Press Enter when they're all in.")
+    print("Press Enter when they're in.")
     read()
     local f, ok = markerScan(), true
     for _, m in ipairs(MARKERS) do
       local list = f[m.key] or {}
-      if m.many and #list >= 1 then
-        for _, n in ipairs(list) do print(("  %-11s %s"):format(m.label, n)) end
-      elseif #list == 1 then
-        print(("  %-11s %s"):format(m.label, list[1]))
-      elseif #list == 0 then
-        if m.need then printError("  " .. m.label .. ": not found"); ok = false
-        elseif m.keep and cfg[m.key] then print(("  %-11s kept: %s"):format(m.label, cfg[m.key]))
-        else print(("  %-11s none (skipped)"):format(m.label)) end
-      else
+      local have = (m.key == "input" and #cfg.inputs > 0) or (m.key == "output" and cfg.output)
+      if #list >= 1 and (m.many or #list == 1) then
+        for _, n in ipairs(list) do print(("  %-14s %s"):format(m.label, n)) end
+      elseif #list > 1 then
         printError(("  %s: %d chests have it. Keep it in one."):format(m.label, #list)); ok = false
+      elseif m.need and not have then
+        printError("  " .. m.label .. ": not found"); ok = false
       end
     end
     if ok then
-      cfg.inputs = { f.input[1] }
-      for _, n in ipairs(f.dump or {}) do cfg.inputs[#cfg.inputs + 1] = n end
-      cfg.output = f.output[1]
-      cfg.fuels = f.fuel or {}
-      for _, b in pairs(cfg.diggerBarrels or {}) do  -- barrels Diggers registered themselves
-        if b.fuel then listAdd(cfg.fuels, b.fuel) end
-        if b.dump then listAdd(cfg.inputs, b.dump) end
+      local types = { input = "input", output = "output", dump = "input", fuel = "fuel", rigger = "rigger",
+        docks = "dock", pocketIn = "pocketIn", pocketOut = "pocketOut" }
+      for _, m in ipairs(MARKERS) do
+        for _, n in ipairs(f[m.key] or {}) do assign(n, types[m.key]) end
       end
-      cfg.rigger = f.rigger and f.rigger[1] or nil
-      cfg.docks = f.docks or {}
-      cfg.pocketIn = f.pocketIn and f.pocketIn[1] or cfg.pocketIn     -- no marker: keep the old one
-      cfg.pocketOut = f.pocketOut and f.pocketOut[1] or cfg.pocketOut
       saveCfg()
       break
     end
@@ -846,16 +879,12 @@ local TAKE     = { { "x1", 1 }, { "x16", 16 }, { "Stack", "stack" } }
 local uiBusy   = false        -- a command (/setup...) is using the computer's screen
 
 local COMMANDS = {
-  { "/setup",    "pick chests with marker items" },
-  { "/addinput", "add one more input chest" },
-  { "/fuel",     "add a Digger fuel barrel" },
-  { "/dock",     "add a dock (turtle, plastic factory, neural lab) or set what it keeps" },
-  { "/inputs",   "show which chest is which" },
+  { "/assign",   "inputs, output, docks, fuel...: add/edit/delete" },
+  { "/setup",    "assign chests with marker items" },
   { "/rescan",   "re-read every chest now" },
   { "/drawers",  "what storage sees in the drawers" },
   { "/tidy",     "fill big drawers first; barrels in" },
   { "/fuelinfo", "Digger fuel barrels and fuel stock" },
-  { "/pocket",   "pick the butler's dump + restock chests" },
   { "/lock",     "lock the monitor (padlock screen)" },
   { "/unlock",   "lift a /lock" },
 }
@@ -918,6 +947,7 @@ local function say(v, msg, colour)
 end
 
 local function take(v, e)
+  if not cfg.output then say(v, "No output chest yet: /assign on the computer", C.warn); return end
   local n, full = retrieve(e.key, amountFor(e))
   buildItems()
   say(v, n > 0 and ("Sent %d %s%s"):format(n, e.label, full and " (output full)" or "") or "Output chest is full",
@@ -1172,7 +1202,7 @@ local function waitTick()
   end
 end
 
--- workerBusy (declared with pickChest): a sorting pass is running (a barrel probe waits for it to finish)
+-- workerBusy (declared with picking): a sorting pass is running (a barrel probe waits for it to finish)
 
 local function workerLoop()
   local lastFull = os.clock()
@@ -1365,8 +1395,491 @@ local function waitEnter()
   read()
 end
 
+-- A dock's keep list ("<item> <count>" lines besides its coal, e.g. the neural lab's matrices).
+-- Edits `keep` ({ [item id] = count }) in place.
+local function editDockKeep(keep)
+  print("Besides coal, this dock keeps:")
+  local any = false
+  for name, c in pairs(keep) do print(("  %d %s"):format(c, name)); any = true end
+  if not any then print("  nothing") end
+  print("Type <item> <count> to keep some (0 = stop),")
+  print("e.g. prediction_matrix 64. Blank line = done.")
+  while true do
+    write("> ")
+    local line = read()
+    if not line or line:match("^%s*$") then break end
+    local item, cnt = line:match("^%s*(%S+)%s+(%d+)%s*$")
+    if not item then printError("Like this: prediction_matrix 64")
+    else
+      item = item:lower()
+      local id = item:find(":") and item or nil
+      if not id then
+        local hits, seen = {}, {}
+        for name in pairs(byName) do
+          if name:match(":(.+)$") == item and not seen[name] then hits[#hits + 1] = name; seen[name] = true end
+        end
+        if #hits == 0 then   -- none in storage: look in every chest on the cable (the dock itself, say)
+          for _, inv in ipairs(inventories()) do
+            for _, it in pairs(call(inv, "list") or {}) do
+              if it.name:match(":(.+)$") == item and not seen[it.name] then hits[#hits + 1] = it.name; seen[it.name] = true end
+            end
+          end
+        end
+        if #hits == 1 then id = hits[1]
+        elseif #hits > 1 then printError("Which one? " .. table.concat(hits, ", "))
+        else printError("None of that on the cable. Use its full id, like hostilenetworks:prediction_matrix") end
+      end
+      if id then
+        cnt = tonumber(cnt)
+        keep[id] = cnt > 0 and cnt or nil
+        print(cnt > 0 and ("Keeping %d %s in it."):format(cnt, id) or ("Not keeping %s any more."):format(id))
+      end
+    end
+  end
+end
+
+---------------------------------------------------------------------------
+-- /assign: which inventory on the cable does what. List -> click one to edit (type, nickname,
+-- delete); + Add -> pick by network name (typing narrows the list) or by dropping one item in.
+-- Everything that isn't on the list is storage.
+---------------------------------------------------------------------------
+local function shortName(n) return (n:gsub("^minecraft:", "")) end
+local function cut(text, n)
+  if n <= 0 then return "" end
+  if #text <= n then return text end
+  if n <= 2 then return text:sub(1, n) end
+  return text:sub(1, n - 2) .. ".."
+end
+-- Network names keep their end (the number is what tells barrels apart): "..storage_controller_0"
+local function cutName(n, width)
+  local text = shortName(n)
+  if #text <= width then return text end
+  return ".." .. text:sub(-(width - 2))
+end
+
+local function assignScreen()
+  local w, h = term.getSize()
+  local st = { page = "list", filter = "", pg = 1 }
+  local hits, desc = {}, {}
+
+  -- What's in each inventory, for the lists (cached while the screen is open)
+  local function describe(names)
+    local fns = {}
+    for _, n in ipairs(names) do
+      if not desc[n] then
+        fns[#fns + 1] = function()
+          local list = peripheral.isPresent(n) and call(n, "list")
+          if not list then desc[n] = { missing = true, text = "not on the cable", count = 0 }; return end
+          local size = call(n, "size") or 0
+          local totals, kinds, count, top = {}, 0, 0, nil
+          for _, it in pairs(list) do
+            if not totals[it.name] then kinds = kinds + 1; totals[it.name] = 0 end
+            totals[it.name] = totals[it.name] + it.count
+            count = count + it.count
+          end
+          for name, c in pairs(totals) do if not top or c > totals[top] then top = name end end
+          desc[n] = { count = count, size = size, text = top
+            and (fmt(totals[top]) .. " " .. prettyName(top) .. (kinds > 1 and (" +" .. (kinds - 1) .. " more") or ""))
+            or ("empty, " .. size .. " slots") }
+        end
+      end
+    end
+    runBatched(fns)
+  end
+
+  local function assigned()
+    local out, seen = {}, {}
+    for _, t in ipairs(TYPES) do
+      local names = {}
+      if SINGLES[t.key] then
+        if cfg[SINGLES[t.key]] then names[1] = cfg[SINGLES[t.key]] end
+      else
+        for _, n in ipairs(cfg[LISTS[t.key]] or {}) do names[#names + 1] = n end
+      end
+      table.sort(names)
+      for _, n in ipairs(names) do
+        if not seen[n] then seen[n] = true; out[#out + 1] = { name = n, key = t.key } end
+      end
+      if t.key == "drawer" then   -- drawers found by their name are drawers too (shown, not deletable)
+        for _, n in ipairs(inventories()) do
+          if not seen[n] and not typeOf(n) and isDrawer(n) then
+            seen[n] = true; out[#out + 1] = { name = n, key = "drawer", auto = true }
+          end
+        end
+      end
+    end
+    return out
+  end
+
+  local function unassigned()
+    local out = {}
+    for _, n in ipairs(inventories()) do
+      if not typeOf(n) and not isMachine(n) then out[#out + 1] = n end
+    end
+    return out
+  end
+
+  local function matches(n)
+    if st.filter == "" then return true end
+    local q, d = st.filter:lower(), desc[n]
+    return n:lower():find(q, 1, true) ~= nil or (cfg.names[n] or ""):lower():find(q, 1, true) ~= nil
+      or (d ~= nil and d.text:lower():find(q, 1, true) ~= nil)
+  end
+
+  -- Drawing
+  local function put(x, y, text, fg, bg)
+    term.setCursorPos(x, y)
+    term.setBackgroundColour(bg or C.bg)
+    term.setTextColour(fg or C.fg)
+    term.write(text)
+  end
+  local function btn(x, y, label, active, fn, colour)
+    put(x, y, " " .. label .. " ", active and colours.black or C.fg, active and (colour or C.accent) or C.bar)
+    hits[#hits + 1] = { x1 = x, x2 = x + #label + 1, y = y, fn = fn }
+    return x + #label + 3
+  end
+  local function region(x1, x2, y, fn) hits[#hits + 1] = { x1 = x1, x2 = x2, y = y, fn = fn } end
+  local function titleBar(left, right)
+    term.setCursorPos(1, 1); term.setBackgroundColour(C.bar); term.clearLine()
+    put(1, 1, left, C.accent, C.bar)
+    if right then put(math.max(#left + 2, w - #right + 1), 1, right, C.dim, C.bar) end
+  end
+  local function say2(msg, col) st.note, st.noteCol, st.noteUntil = msg, col or C.good, os.clock() + 5 end
+  local function line2(default, col)
+    if st.note and os.clock() < st.noteUntil then put(2, 2, cut(st.note, w - 2), st.noteCol)
+    else put(2, 2, cut(default, w - 2), col or C.dim) end
+  end
+  local function searchBar()
+    term.setCursorPos(1, h); term.setBackgroundColour(C.bar); term.clearLine()
+    put(1, h, " Search: ", C.dim, C.bar)
+    local room = w - 13
+    local shownText = #st.filter > room and st.filter:sub(-room) or st.filter
+    put(10, h, shownText, C.fg, C.bar)
+    if st.filter ~= "" then
+      put(w - 2, h, " x ", C.dim, C.bar)
+      region(w - 2, w, h, function() st.filter, st.pg = "", 1 end)
+    end
+    term.setCursorPos(10 + #shownText, h); term.setTextColour(C.fg); term.setCursorBlink(true)
+  end
+  local function pager(y, total, rows)
+    local pages = math.max(1, math.ceil(total / rows))
+    st.pg = math.min(math.max(st.pg, 1), pages)
+    if pages > 1 then
+      local label = ("%d/%d"):format(st.pg, pages)
+      local px = w - #label - 11
+      btn(px, y, "<", st.pg > 1, function() st.pg = st.pg - 1 end)
+      put(px + 4, y, label, C.dim)
+      btn(w - 4, y, ">", st.pg < pages, function() st.pg = st.pg + 1 end)
+    end
+  end
+
+  local function openEdit(n, isNew)
+    desc[n] = nil   -- fresh look at what's in it (an item may just have been dropped in)
+    describe({ n })
+    local key = typeOf(n)
+    local auto = not key and isDrawer(n)
+    local keep = {}
+    for k, v in pairs((cfg.dockKeep or {})[n] or {}) do keep[k] = v end
+    st.edit = { name = n, orig = key, auto = auto, nick = cfg.names[n] or "", keep = keep, isNew = isNew,
+      key = key or (auto and "drawer") or (not cfg.output and "output") or "input" }
+    st.page, st.note = "edit", nil
+  end
+
+  -- Wait for one chest to gain exactly one item (the one you drop in). Sorting holds off meanwhile.
+  local function findByItem()
+    picking = true
+    while workerBusy do os.sleep(0.2) end
+    local function screen(lines, col)
+      term.setCursorBlink(false)
+      term.setBackgroundColour(C.bg); term.clear()
+      titleBar(" ADD STORAGE", "find it ")
+      for i, l in ipairs(lines) do put(2, 2 + i, cut(l, w - 2), i == 1 and (col or C.fg) or C.dim) end
+      put(2, h, "Backspace or click: cancel", C.dim)
+    end
+    local before, found, gone = itemTotals(), nil, os.clock() + 60
+    local note = nil
+    while os.clock() < gone and not found do
+      screen({ note or "Drop ONE item into the chest you mean.",
+        "Sorting is paused while I watch every inventory.",
+        ("Waiting... %ds"):format(math.ceil(gone - os.clock())) }, note and C.warn or C.fg)
+      local t, cancel = os.startTimer(1), false
+      while true do
+        local e, a = os.pullEvent()
+        if e == "timer" and a == t then break end
+        if (e == "key" and a == keys.backspace) or e == "mouse_click" then cancel = true; break end
+      end
+      if cancel then break end
+      local after = itemTotals()
+      local one = {}
+      for n, c in pairs(after) do if c - (before[n] or 0) == 1 then one[#one + 1] = n end end
+      if #one == 1 then found = one[1]
+      elseif #one > 1 then note = "Two chests gained one item. Try again, just one."; before = after
+      else before = after end   -- a hopper filling something else doesn't count
+    end
+    picking = false
+    os.queueEvent("storage_work")
+    return found
+  end
+
+  local function save()
+    local e = st.edit
+    while workerBusy do os.sleep(0.1) end
+    local bumped
+    if e.key ~= e.orig then bumped = assign(e.name, e.key) end
+    if bumped == e.name then bumped = nil end
+    if e.key == "dock" then
+      cfg.dockKeep = cfg.dockKeep or {}
+      cfg.dockKeep[e.name] = next(e.keep) and e.keep or nil
+    end
+    cfg.names[e.name] = e.nick ~= "" and e.nick or nil
+    saveCfg(); scanAll(); buildItems()
+    desc = {}
+    local t = TYPE_BY[e.key]
+    say2(("Saved: %s = %s%s"):format(shortName(e.name), t.label,
+      bumped and (" (" .. shortName(bumped) .. " now storage)") or "."))
+    st.page, st.edit, st.filter, st.pg = "list", nil, "", 1
+  end
+
+  local function delete()
+    local e = st.edit
+    while workerBusy do os.sleep(0.1) end
+    unassign(e.name)
+    cfg.names[e.name] = nil
+    saveCfg(); scanAll(); buildItems()
+    desc = {}
+    say2(shortName(e.name) .. " is normal storage again.", C.warn)
+    st.page, st.edit, st.filter, st.pg = "list", nil, "", 1
+  end
+
+  -- Pages
+  local function drawList()
+    local all = assigned()
+    local names = {}
+    for _, r in ipairs(all) do names[#names + 1] = r.name end
+    describe(names)
+    local shown = {}
+    for _, r in ipairs(all) do if matches(r.name) then shown[#shown + 1] = r end end
+    st.shown = shown
+    titleBar(" ASSIGNED STORAGE", ("%d set "):format(#all))
+    if not cfg.output then line2("No OUTPUT yet: taken items have nowhere to go.", C.warn)
+    elseif #cfg.inputs == 0 then line2("No INPUT yet: nothing gets sorted in.", C.warn)
+    else line2(#shown == 1 and st.filter ~= "" and "Enter edits it." or "Click one to change it. The rest is storage.") end
+    local nw = math.max(10, math.floor((w - 10) / 2))
+    put(2, 3, "Job", C.dim); put(10, 3, "Network name", C.dim); put(11 + nw, 3, "Nickname / in it", C.dim)
+    local top, rows = 4, math.max(1, h - 5)
+    pager(h - 1, #shown, rows)
+    if #shown == 0 then
+      put(2, top, cut(#all == 0 and "Nothing assigned yet. + Add, or /setup (markers)." or "Nothing matches.", w - 2), C.dim)
+    end
+    for i = 1, rows do
+      local r = shown[(st.pg - 1) * rows + i]
+      if not r then break end
+      local y, t, d = top + i - 1, TYPE_BY[r.key], desc[r.name] or { text = "" }
+      term.setCursorPos(1, y); term.setBackgroundColour(i % 2 == 0 and C.stripe or C.bg); term.clearLine()
+      local bg = i % 2 == 0 and C.stripe or C.bg
+      put(2, y, t.tag, t.col, bg)
+      put(10, y, cutName(r.name, nw), C.fg, bg)
+      local info, col = d.text, C.dim
+      if d.missing then info, col = "missing", C.warn
+      elseif cfg.names[r.name] then info, col = cfg.names[r.name], C.fg
+      elseif r.auto then info = "(by name) " .. info end
+      put(11 + nw, y, cut(info, w - 11 - nw), col, bg)
+      local name = r.name
+      region(1, w, y, function() openEdit(name, false) end)
+    end
+    local x = btn(2, h - 1, "+ Add", true, function() st.page, st.filter, st.pg, st.note = "pick", "", 1, nil end)
+    btn(x, h - 1, "Done", false, function() st.done = true end)
+    searchBar()
+  end
+
+  local function drawPick()
+    local cands = unassigned()
+    describe(cands)
+    local shown = {}
+    for _, n in ipairs(cands) do if matches(n) then shown[#shown + 1] = n end end
+    st.shown = shown
+    titleBar(" ADD STORAGE", "step 1 of 2 ")
+    if #shown == 1 and st.filter ~= "" then line2("Enter (or click) picks " .. shortName(shown[1]), C.good)
+    else line2("Type part of its name to narrow it down, or:") end
+    btn(2, 3, "Find it: drop one item in", false, function()
+      local n = findByItem()
+      if not n then say2("Didn't see an item go in. Try again?", C.warn)
+      elseif typeOf(n) then openEdit(n, false); say2("That one's already assigned: here it is.", C.warn)
+      else openEdit(n, true) end
+    end)
+    local top, rows = 4, math.max(1, h - 5)
+    pager(h - 1, #shown, rows)
+    if #shown == 0 then
+      put(2, top, cut(#cands == 0 and "Every inventory on the cable is assigned already." or "No unassigned inventory matches.", w - 2), C.dim)
+    end
+    local nw = math.max(10, math.floor((w - 4) / 2))
+    for i = 1, rows do
+      local n = shown[(st.pg - 1) * rows + i]
+      if not n then break end
+      local y, d = top + i - 1, desc[n] or { text = "" }
+      local only = #shown == 1 and st.filter ~= ""
+      local bg = only and C.accent or (i % 2 == 0 and C.stripe or C.bg)
+      term.setCursorPos(1, y); term.setBackgroundColour(bg); term.clearLine()
+      put(2, y, cutName(n, nw), only and colours.black or C.fg, bg)
+      local info = cfg.names[n] or d.text
+      put(3 + nw, y, cut(info, w - 3 - nw), only and colours.black or C.dim, bg)
+      region(1, w, y, function() openEdit(n, true) end)
+    end
+    btn(2, h - 1, "Back", false, function() st.page, st.filter, st.pg = "list", "", 1 end)
+    searchBar()
+  end
+
+  local function drawEdit()
+    local e = st.edit
+    local t = TYPE_BY[e.key]
+    local d = desc[e.name] or { text = "?" }
+    titleBar(e.isNew and " ADD STORAGE" or " EDIT", e.isNew and "step 2 of 2 " or nil)
+    line2(e.isNew and "Pick its job, then Save." or e.auto and "Found by its name. Give it a job, or Ignore it."
+      or "Change its job or nickname, or Delete it.")
+    put(2, 3, "Name", C.dim);     put(12, 3, cut(e.name, w - 12), C.fg)
+    put(2, 4, "In it", C.dim);    put(12, 4, cut(d.text, w - 12), d.missing and C.warn or C.fg)
+    put(2, 5, "Nickname", C.dim)
+    local fw = w - 12
+    local shownNick = #e.nick > fw - 1 and e.nick:sub(-(fw - 1)) or e.nick
+    if e.focus then
+      put(12, 5, shownNick .. (" "):rep(fw - #shownNick), colours.black, colours.white)
+    else
+      local txt = cut(e.nick ~= "" and e.nick or "click to name it (optional)", fw)
+      put(12, 5, txt .. (" "):rep(fw - #txt), e.nick ~= "" and C.fg or C.dim, C.bar)
+    end
+    region(12, w, 5, function() e.focus = true end)
+    put(2, 7, "Job", C.dim)
+    local per = 3
+    local bw = math.floor((w - 1) / per) - 1
+    for i, ty in ipairs(TYPES) do
+      local col, row = (i - 1) % per, math.floor((i - 1) / per)
+      local x, y = 2 + col * (bw + 1), 8 + row
+      local label = #ty.label <= bw - 1 and ty.label or ty.short
+      local sel = ty.key == e.key
+      local pad = bw - #label
+      put(x, y, cut((" "):rep(math.floor(pad / 2)) .. label .. (" "):rep(pad - math.floor(pad / 2)), bw),
+        sel and colours.black or C.fg, sel and ty.col or C.bar)
+      local key = ty.key
+      region(x, x + bw - 1, y, function() e.key = key; e.delArm = false end)
+    end
+    local y = 8 + math.ceil(#TYPES / per) + 1
+    -- About the chosen job, wrapped over two lines
+    local about, lines = t.about, {}
+    while #about > 0 and #lines < 2 do
+      local piece = about
+      if #piece > w - 2 then
+        local cutAt = piece:sub(1, w - 2):match("^.*() ") or (w - 2)
+        piece = about:sub(1, cutAt - 1)
+      end
+      lines[#lines + 1] = piece
+      about = about:sub(#piece + 1):gsub("^ +", "")
+    end
+    for i, l in ipairs(lines) do put(2, y + i - 1, l, t.col) end
+    y = y + 2
+    -- What saving this will do
+    local warn
+    local single = SINGLES[e.key]
+    if single and cfg[single] and cfg[single] ~= e.name then
+      warn = ("Replaces %s; that goes back to storage."):format(shortName(cfg[single]))
+    elseif e.auto and e.key == "drawer" then
+      warn = "Already counts as drawers: nothing changes."
+    elseif e.key ~= e.orig and not e.orig and not e.auto and (d.count or 0) > 0 and e.key ~= "drawer" then
+      warn = e.key == "input" and ("Its %d items get sorted into storage."):format(d.count)
+        or ("Its %d items stop counting as storage."):format(d.count)
+    end
+    if warn and y < h - 1 then put(2, y, cut(warn, w - 2), C.warn); y = y + 1 end
+    if e.key == "dock" and y < h - 1 then
+      local parts = {}
+      for name, c in pairs(e.keep) do parts[#parts + 1] = c .. " " .. name:gsub("^[^:]+:", "") end
+      table.sort(parts)
+      local x = btn(2, y, "Keeps", false, function() e.editKeep = true end)
+      put(x, y, cut("~32 coal" .. (#parts > 0 and (", " .. table.concat(parts, ", ")) or ""), w - x), C.dim)
+    end
+    -- Buttons
+    local x = btn(2, h - 1, "Save", true, save, colours.lime)
+    x = btn(x, h - 1, "Cancel", false, function() st.page, st.edit = e.isNew and "pick" or "list", nil end)
+    if e.orig then
+      btn(x, h - 1, e.delArm and "Sure? Delete" or "Delete", e.delArm, function()
+        if e.delArm then delete() else e.delArm = true end
+      end, colours.red)
+    end
+    put(2, h, cut(e.focus and "Typing the nickname. Enter: done" or "Enter: save   Tab: nickname   Backspace: back", w - 2), C.dim)
+    if e.focus then
+      term.setCursorPos(12 + #shownNick, 5); term.setTextColour(colours.black); term.setCursorBlink(true)
+    end
+  end
+
+  describe(unassigned())   -- one read of everything up front: searching by contents works straight away
+  while not st.done do
+    w, h = term.getSize()
+    hits = {}
+    term.setCursorBlink(false)
+    term.setBackgroundColour(C.bg); term.setTextColour(C.fg); term.clear()
+    if st.page == "list" then drawList() elseif st.page == "pick" then drawPick() else drawEdit() end
+    local redraw = false
+    while not redraw do
+      local ev, a, b, c = os.pullEvent()
+      redraw = true
+      local e = st.edit
+      if ev == "mouse_click" then
+        if e then e.focus = false end
+        for _, r in ipairs(hits) do
+          if c == r.y and b >= r.x1 and b <= r.x2 then r.fn(); break end
+        end
+      elseif ev == "mouse_scroll" then
+        st.pg = st.pg + a
+      elseif ev == "char" or ev == "paste" then
+        local text = ev == "paste" and a:gsub("[\r\n]", "") or a
+        if st.page == "edit" then
+          if e.focus then e.nick = (e.nick .. text):sub(1, 24) else redraw = false end
+        else
+          st.filter, st.pg = st.filter .. text, 1
+        end
+      elseif ev == "key" then
+        if a == keys.backspace then
+          if st.page == "edit" then
+            if e.focus then e.nick = e.nick:sub(1, -2)
+            else st.page, st.edit = e.isNew and "pick" or "list", nil end
+          elseif st.filter ~= "" then st.filter, st.pg = st.filter:sub(1, -2), 1
+          elseif st.page == "pick" then st.page = "list" end
+        elseif a == keys.delete and st.page ~= "edit" then
+          st.filter, st.pg = "", 1
+        elseif a == keys.enter or a == keys.numPadEnter then
+          if st.page == "edit" then
+            if e.focus then e.focus = false else save() end
+          elseif st.shown and #st.shown == 1 and st.filter ~= "" then
+            local only = st.shown[1]
+            openEdit(type(only) == "table" and only.name or only, st.page == "pick")
+          else redraw = false end
+        elseif a == keys.tab and st.page == "edit" then
+          e.focus = not e.focus
+        elseif a == keys.up or a == keys.pageUp then st.pg = st.pg - 1
+        elseif a == keys.down or a == keys.pageDown then st.pg = st.pg + 1
+        else redraw = false end
+      elseif ev == "term_resize" then
+        redraw = true
+      else
+        redraw = false
+      end
+      if st.edit and st.edit.editKeep then   -- the keep list is a typed list: plain screen for a moment
+        st.edit.editKeep = false
+        term.setCursorBlink(false)
+        term.setBackgroundColour(colours.black); term.setTextColour(colours.white)
+        term.clear(); term.setCursorPos(1, 1)
+        print("Dock " .. st.edit.name)
+        editDockKeep(st.edit.keep)
+      end
+    end
+  end
+  term.setCursorBlink(false)
+end
+
+local ALIASES = { ["/addinput"] = "/assign", ["/fuel"] = "/assign", ["/dock"] = "/assign",
+  ["/pocket"] = "/assign", ["/inputs"] = "/assign" }   -- the old commands: all of that lives in /assign now
+
 function runCommand(cmd)
   cmd = cmd:lower():match("^%s*(%S+)") or ""
+  cmd = ALIASES[cmd] or cmd
   local found
   for _, c in ipairs(COMMANDS) do if c[1] == cmd then found = c[1] end end
   if not found then
@@ -1443,7 +1956,7 @@ function runCommand(cmd)
       end
       local value = {}
       for _, fv in ipairs(FUEL_VALUES) do value[fv[1]] = fv[2] end
-      if #cfg.fuels == 0 then printError("No fuel barrels set: use /fuel or /setup (lava bucket).") end
+      if #cfg.fuels == 0 then printError("No fuel barrels set: /assign one as Digger fuel.") end
       for _, b in ipairs(cfg.fuels) do
         local have, parts = 0, {}
         for _, it in pairs(call(b, "list") or {}) do
@@ -1465,89 +1978,8 @@ function runCommand(cmd)
     elseif found == "/rescan" then
       print("Rescanning..."); scanAll(); buildItems()
       say(termView, "Rescanned.")
-    elseif found == "/addinput" then
-      local n = pickChest("extra INPUT chest (e.g. the miner's dump barrel)")
-      if isSpecial(n) then printError("That one's already in use."); waitEnter() else
-        cfg.inputs[#cfg.inputs + 1] = n; saveCfg(); scanAll(); buildItems()
-        say(termView, "Input added. Anything dropped in it gets sorted.")
-      end
-    elseif found == "/fuel" then
-      local n = pickChest("Digger FUEL barrel (pick one that's already a fuel barrel to remove it)")
-      local idx
-      for i, f in ipairs(cfg.fuels) do if f == n then idx = i end end
-      if idx then
-        table.remove(cfg.fuels, idx); saveCfg(); scanAll(); buildItems()
-        say(termView, "Fuel barrel removed. It's normal storage again.", C.warn)
-      elseif isSpecial(n) then printError("That one's already in use."); waitEnter() else
-        cfg.fuels[#cfg.fuels + 1] = n; saveCfg(); scanAll(); buildItems()
-        say(termView, ("Fuel barrel added (%d now). I'll keep one refill in each."):format(#cfg.fuels))
-      end
-    elseif found == "/dock" then
-      local n = pickChest("DOCK barrel: I keep ~32 coal in it and take everything else (pick a dock again to change or remove it)")
-      cfg.docks = cfg.docks or {}
-      cfg.dockKeep = cfg.dockKeep or {}
-      local idx
-      for i, d in ipairs(cfg.docks) do if d == n then idx = i end end
-      -- "<item> <count>" lines: what this dock keeps besides coal (the neural lab: prediction_matrix 64)
-      local function editKeep()
-        local keep = cfg.dockKeep[n] or {}
-        print("Besides coal, this dock keeps:")
-        local any = false
-        for name, c in pairs(keep) do print(("  %d %s"):format(c, name)); any = true end
-        if not any then print("  nothing") end
-        print("Type <item> <count> to keep some (0 = stop),")
-        print("e.g. prediction_matrix 64. Blank line = done.")
-        while true do
-          write("> ")
-          local line = read()
-          if not line or line:match("^%s*$") then break end
-          local item, cnt = line:match("^%s*(%S+)%s+(%d+)%s*$")
-          if not item then printError("Like this: prediction_matrix 64")
-          else
-            item = item:lower()
-            local id = item:find(":") and item or nil
-            if not id then
-              local hits, seen = {}, {}
-              for name in pairs(byName) do
-                if name:match(":(.+)$") == item and not seen[name] then hits[#hits + 1] = name; seen[name] = true end
-              end
-              if #hits == 0 then   -- none in storage: look in every chest on the cable (the dock itself, say)
-                for _, inv in ipairs(inventories()) do
-                  for _, it in pairs(call(inv, "list") or {}) do
-                    if it.name:match(":(.+)$") == item and not seen[it.name] then hits[#hits + 1] = it.name; seen[it.name] = true end
-                  end
-                end
-              end
-              if #hits == 1 then id = hits[1]
-              elseif #hits > 1 then printError("Which one? " .. table.concat(hits, ", "))
-              else printError("None of that on the cable. Use its full id, like hostilenetworks:prediction_matrix") end
-            end
-            if id then
-              cnt = tonumber(cnt)
-              keep[id] = cnt > 0 and cnt or nil
-              print(cnt > 0 and ("Keeping %d %s in it."):format(cnt, id) or ("Not keeping %s any more."):format(id))
-            end
-          end
-        end
-        cfg.dockKeep[n] = next(keep) and keep or nil
-      end
-      if idx then
-        print("That's already a dock. 1 = change what it keeps, 2 = remove it")
-        write("> ")
-        local ch = read()
-        if ch and ch:match("^%s*2") then
-          table.remove(cfg.docks, idx); cfg.dockKeep[n] = nil; saveCfg(); scanAll(); buildItems()
-          say(termView, "Dock removed. It's normal storage again.", C.warn)
-        else
-          editKeep(); saveCfg(); scanAll(); buildItems()
-          say(termView, "Dock keep list saved.")
-        end
-      elseif isSpecial(n) then printError("That one's already in use."); waitEnter() else
-        cfg.docks[#cfg.docks + 1] = n
-        print("Dock added. Keep anything else in it? (blank = just coal)")
-        editKeep(); saveCfg(); scanAll(); buildItems()
-        say(termView, ("Dock added (%d now). The test item gets sorted away."):format(#cfg.docks))
-      end
+    elseif found == "/assign" then
+      assignScreen()
     elseif found == "/lock" then
       cfg.manualLock = true; saveCfg()
       say(termView, "Monitor locked. /unlock to open it again.", C.warn)
@@ -1558,35 +1990,6 @@ function runCommand(cmd)
       else
         say(termView, "Monitor unlocked.")
       end
-    elseif found == "/pocket" then
-      print("The butler's pocket chests, each with a wired modem on")
-      print("this storage cable: touching the mainframe's Inventory")
-      print("Manager, or anywhere if the mainframe is on this cable.")
-      local function free(n) return not isSpecial(n) or n == cfg.pocketIn or n == cfg.pocketOut end
-      local a = pickChest("POCKET DUMP chest ($dump sends your stuff here)")
-      if not free(a) then printError("That one's already in use."); waitEnter(); return end
-      local b = pickChest("POCKET RESTOCK chest (torch top-ups wait here)")
-      if not free(b) then printError("That one's already in use."); waitEnter(); return end
-      if a == b then printError("That's the same chest twice. Use two."); waitEnter(); return end
-      cfg.pocketIn, cfg.pocketOut = a, b
-      saveCfg(); scanAll(); buildItems()
-      say(termView, "Pocket chests set. Take the test items back out of the restock chest.")
-    elseif found == "/inputs" then
-      for i, n in ipairs(cfg.inputs) do print(i .. "  " .. n) end
-      print("Output: " .. tostring(cfg.output))
-      print("Fuel:   " .. (#cfg.fuels > 0 and table.concat(cfg.fuels, ", ") or "not set"))
-      print("Rigger: " .. tostring(cfg.rigger or "not set"))
-      print("Docks:  " .. (#(cfg.docks or {}) > 0 and table.concat(cfg.docks, ", ") or "none"))
-      for d, keep in pairs(cfg.dockKeep or {}) do
-        local t = {}
-        for name, c in pairs(keep) do t[#t + 1] = c .. " " .. name:gsub("^[^:]+:", "") end
-        print(("  %s keeps %s"):format(d, table.concat(t, ", ")))
-      end
-      print("Pocket: dump " .. tostring(cfg.pocketIn or "not set") .. ", restock " .. tostring(cfg.pocketOut or "not set"))
-      local dn = 0
-      for _, n in ipairs(storage) do if isDrawer(n) then dn = dn + 1 end end
-      print(("Drawers: %d (filled first for items they hold)"):format(dn))
-      waitEnter()
     end
   end)
   uiBusy = false
@@ -1643,7 +2046,10 @@ end
 -- Start
 ---------------------------------------------------------------------------
 loadCfg()
-if #cfg.inputs == 0 or not cfg.output then setup() end
 print("Scanning storage...")
 scanAll(); buildItems(); draw()
-parallel.waitForAny(workerLoop, touchLoop, terminalLoop, netLoop)
+local firstRun = #cfg.inputs == 0 and not cfg.output
+parallel.waitForAny(workerLoop, touchLoop, function()
+  if firstRun then runCommand("/assign") end   -- brand-new storage: start on the assign screen
+  terminalLoop()
+end, netLoop)

@@ -57,10 +57,12 @@ Every role is defined in `manifest.lua`: its files live under `computer/<role>/`
 ## Hardware for the base computers
 
 - **Mainframe and storage** need a wireless or ender modem: they talk on the `tanis-base` network (the smelter can use the storage cable instead, see below).
-- **Storage:** a wired modem on the storage cable (barrels, drawers, input/output chests), its own monitor for the touch screen, then `/setup` with the marker items.
+- **Storage:** a wired modem on the storage cable (barrels, drawers, input/output chests), its own monitor for the touch screen, then `/assign` on its computer to say which inventory does what.
+  - **`/assign`** lists every inventory with a job: Input (any number), Output, Dock, Digger fuel, Rigger supply, Pocket dump, Pocket restock, Drawers, Ignore. Click one to change its job, give it a nickname ("Nether chest") or delete it. **+ Add** shows every unassigned inventory on the cable with what's in it: type part of its network name (`barrel_74`, `drawer`, `ender`) and the list narrows, Enter picks the last one left. Or **Find it**: drop one item into the chest you mean. Everything not on the list is storage. `/setup` with marker items still works and adds to the list.
+  - **Wired modems won't go on chests here:** feed a chest into a barrel with a hopper (chest > hopper > barrel) and put the modem on the barrel. The barrel is the Input.
 - **Smelter:** just a wired modem on the **same** storage cable, with the furnaces on that cable too. No wireless modem needed: it talks to storage over the cable, and storage passes its news to the mainframe. Storage is the only computer that moves items, so they never fight.
 - **Mainframe:** Environment Detector, optional Chat Box, monitor wall (island strip + status board, plus a visitor column when the wall is at least 50 characters wide). For the butler: an **Inventory Manager** with your bound Memory Card and a **Player Detector**, both touching the mainframe.
-- **Where the butler's items go:** the Inventory Manager can only move items into a chest it can reach, so the modem the mainframe's blocks sit on must be **joined to the storage cable**. Then `$dump` goes straight into storage's main input chest and torch top-ups come out of storage's output chest (or a dedicated restock chest picked with `/pocket` on storage). That's the default (`POCKET_DUMP=storage`, `POCKET_RESTOCK=storage`). A chest touching the manager also works: `$pocket dump <side>`.
+- **Where the butler's items go:** the Inventory Manager can only move items into a chest it can reach, so the modem the mainframe's blocks sit on must be **joined to the storage cable**. Then `$dump` goes straight into storage's main input chest and torch top-ups come out of storage's output chest (or a dedicated restock chest: `/assign` it as Pocket restock on storage). That's the default (`POCKET_DUMP=storage`, `POCKET_RESTOCK=storage`). A chest touching the manager also works: `$pocket dump <side>`.
 
 ## The butler (mainframe)
 
@@ -73,7 +75,7 @@ Every role is defined in `manifest.lua`: its files live under `computer/<role>/`
 - **Foreman:** advanced computer, **ender modem** (reaches Diggers anywhere), advanced monitor touching it (any size; the computer's own screen works too).
 - **Farmhand:** advanced computer, wireless or **ender modem**, advanced monitor touching it (any size; the computer's own screen works too).
 - **GPS hosts (optional, recommended):** 4 computers with ender modems, high up and not all at one height. Diggers then check their position against GPS, notice if they've been carried somewhere, and find their own way back. Farm turtles pin their farm map to GPS and can't get lost.
-- **Each Digger:** pickaxe + ender modem, a dump barrel (storage input) and a fuel barrel next to its dock. Storage `/fuel` adds each fuel barrel (or `/setup` with a lava bucket in each); storage keeps one refill in every one, but never takes its last stack of coal/charcoal (the smelter needs it).
+- **Each Digger:** pickaxe + ender modem, a dump barrel (storage input) and a fuel barrel next to its dock. Storage `/assign` each fuel barrel as Digger fuel (or `/setup` with a lava bucket in each; Diggers also link their own barrels); storage keeps one refill in every one, but never takes its last stack of coal/charcoal (the smelter needs it).
 
 ## Plastic factory
 
@@ -86,7 +88,7 @@ Everything for plastic in one building, run by one computer (role **Plastic fact
   - **Water:** any tank or block holding water (an infinite water source is ideal). Or skip it and fill the unit's 16 B water tank with buckets now and then.
   - **Buffer tanks (optional):** any other tank soaks up latex while the units are full.
   - **A furnace** (vanilla or Iron Furnace) for dry rubber -> plastic.
-  - **The dock barrel:** plastic goes out here, furnace fuel comes from here. Give it a **second** wired modem on the **storage** cable and run `/dock` on storage: storage then takes the plastic away and keeps ~32 coal in it. Now nothing needs feeding by hand.
+  - **The dock barrel:** plastic goes out here, furnace fuel comes from here. Give it a **second** wired modem on the **storage** cable and `/assign` it as a Dock on storage: storage then takes the plastic away and keeps ~32 coal in it. Now nothing needs feeding by hand.
 - A monitor touching the computer shows the units' latex / water / power bars, every tap, the furnace and the dock. Tap **PAUSE / RUN** in its corner.
 - **Taps wear out the log:** each pull has a 1% chance to wear it; about 8 wears turn it into a stripped log (still gives 1 mB a pull), then air. A tap that stops giving latex shows **DRY** and raises an alert: put a new log behind it.
 - With a wireless/ender modem it's on the mainframe's board, raises alerts, and answers `island plastic` (`island plastic pause | go`).
@@ -104,7 +106,7 @@ A wall of **columns**, one per mob: a **Simulation Chamber** on top, **its Loot 
 - **Each column:** chamber, fab, and the modems that join them to the lab cable. Full-block wired modems behind the wall work well. Right-click each modem (red ring).
 - **Lamp (optional):** a **Redstone Relay** (CC:Tweaked) or AP **Redstone Integrator** touching a modem, with any lamp touching the relay. The relay switches on every side, so a flush wall works: lamp in the middle row, relay behind it between the two modems. **Steady** = running, **off** = stopped (target reached or switched off), **blinking** = needs you.
 - **Power** goes to the chambers and fabs separately (power cables or Flux Points): wired modems don't carry FE. Each chamber stores 2M FE and each fab 1M, so a new column drains your cell once while it fills.
-- **Dock barrel** (own cable only) on the lab cable with a second modem on the storage cable. On storage: `/dock`, pick it, and keep `prediction_matrix 64` in it. Drops and generalized predictions leave through it; matrices and Furnator fuel come in.
+- **Dock barrel** (own cable only) on the lab cable with a second modem on the storage cable. On storage: `/assign` it as a Dock, then Keeps: `prediction_matrix 64`. Drops and generalized predictions leave through it; matrices and Furnator fuel come in.
 - Optional on the lab cable: **energy cell(s)** (the lab reads stored power from them) and **Powah Furnator(s)**.
 - A **wireless/ender modem** on the computer: it gets item counts from storage and reports to the mainframe.
 
@@ -145,7 +147,7 @@ bottom-right corner** to switch screens:
 **Zigger (cartographer turtle):** a turtle with a **Geo Scanner** on one side and an **ender modem** on the other. No pickaxe:
 he never digs, he flies over things. Needs the GPS towers.
 
-- **Dock:** a barrel touching him that storage keeps fuelled. On storage: `/dock`, pick the barrel, keep e.g. `coal 128`
+- **Dock:** a barrel touching him that storage keeps fuelled. On storage: `/assign` the barrel as a Dock, Keeps e.g. `coal 128`
   in it (fewer trips home than the default ~32). **Open sky above his dock spot**: he leaves and lands straight up and down.
 - First start: put him on his dock spot and start him. He finds the barrel, steps once to learn which way he faces, and waits.
 - Press **MAP** on the World map (or **M** on his screen). He covers the area in strips 16 blocks apart, `CLEARANCE` (3) blocks
@@ -164,7 +166,7 @@ Figger (crops) and Tigger (trees) run on one shared engine (`shared/farmbot.lua`
 
 - **Farm:** ring the area with slabs: on the ground for Tigger, at crop height for Figger (he flies one block above the
   crops). Start the turtle inside it next to its dock barrel (Figger can also start ON a dock built into the ring, facing
-  in). Make the barrel a storage dock (`/dock`, or the coal marker in `/setup`): storage takes the produce and keeps fuel in it.
+  in). Make the barrel a storage dock (`/assign` it as a Dock, or the coal marker in `/setup`): storage takes the produce and keeps fuel in it.
 - **It maps the farm by itself** and re-maps every few rounds (`RESURVEY_EVERY`), so new rows or a bigger field get picked
   up. Tigger keeps his tree grid on re-maps. A map that fails (gap in the slabs, no fuel) is retried every few minutes.
 - **Never lost with GPS:** the map is pinned to world coordinates. After a restart, even one mid-turn, it asks GPS where it
