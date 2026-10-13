@@ -43,6 +43,8 @@ local NO_POWER_FE = 20000   -- a chamber/fab holding less than this is out of po
 
 -- Furnator fuels from the dock, best for the job first (never blaze rods: that's burning the product)
 local FUELS = { "minecraft:charcoal", "minecraft:coal", "minecraft:coal_block" }
+-- Storage never hands out its last stack of these: the smelter burns them
+local SMELTER_RESERVE = { ["minecraft:charcoal"] = 64, ["minecraft:coal"] = 64 }
 local IS_FUEL = {}
 for _, f in ipairs(FUELS) do IS_FUEL[f] = true end
 
@@ -409,7 +411,9 @@ local function readDock()
     -- Drops still in storage's input chest count as stock; matrices and fuel are whatever storage has
     dockList = call(L.out, "list") or {}
     dockMatrices = storageItems and tonumber(storageItems[MATRIX]) or 0
-    for _, f in ipairs(FUELS) do dockFuel = dockFuel + (storageItems and tonumber(storageItems[f]) or 0) end
+    for _, f in ipairs(FUELS) do   -- only what storage will actually give (not the smelter's last stack)
+      dockFuel = dockFuel + math.max(0, (storageItems and tonumber(storageItems[f]) or 0) - (SMELTER_RESERVE[f] or 0))
+    end
     return
   end
   if not L.dock then return end
@@ -432,11 +436,13 @@ end
 -- On storage's network: storage does the moves (it's the only computer that takes from storage).
 -- Requests are collected during a pass and sent together; one outstanding ask per target.
 local ops, asked = {}, {}
+local firstUnanswered, lastAnswer = nil, nil   -- storage replying to our requests? (old storage script ignores them)
 local ASK_AGAIN = 8      -- seconds before asking again for the same target
 local function ask(to, item, count, slot)
   if count <= 0 or (asked[to] and os.clock() - asked[to] < ASK_AGAIN) then return end
   ops[#ops + 1] = { op = "fill", to = to, item = item, count = math.min(64, count), slot = slot }
   asked[to] = os.clock()
+  firstUnanswered = firstUnanswered or os.clock()
 end
 
 -- Matrices from the dock into a chamber's input slot
@@ -765,7 +771,7 @@ local function pass()
     for _, it in pairs(call(fz, "list") or {}) do if IS_FUEL[it.name] then have = have + it.count end end
     if feeding and not cfg.paused and L.direct and have < (E.FURNATOR_KEEP or 8) then
       for _, name in ipairs(FUELS) do
-        if storageItems and (tonumber(storageItems[name]) or 0) > 0 then
+        if storageItems and (tonumber(storageItems[name]) or 0) - (SMELTER_RESERVE[name] or 0) > 0 then
           ask(fz, name, (E.FURNATOR_KEEP or 8) - have); break
         end
       end
@@ -839,7 +845,10 @@ local function pass()
   problem("counts", #L.chambers > 0 and not countsFresh() and tostring(E.WITHOUT_STORAGE):lower() ~= "run",
     "Neural lab: no item counts from storage, so every column is on hold. It needs a wireless/ender modem.")
   problem("fuel", feeding and #L.furnators > 0 and furnatorFuel == 0 and dockFuel <= 0,
-    ("Neural lab: power is at %s%% and there's no charcoal or coal in the dock for the Furnator."):format(tostring(power.pct)))
+    L.direct and ("Neural lab: power is at %s%% and storage has no spare charcoal or coal for the Furnator (it keeps the last 64 of each for the smelter)."):format(tostring(power.pct))
+    or ("Neural lab: power is at %s%% and there's no charcoal or coal in the dock for the Furnator."):format(tostring(power.pct)))
+  problem("ops", L.direct and firstUnanswered ~= nil and os.clock() - firstUnanswered > 20,
+    "Neural lab: storage isn't answering my requests for matrices and fuel. Reboot the storage computer to update it.")
 
   -- Note
   local running, atTarget, attention = 0, 0, 0
@@ -1007,7 +1016,7 @@ local function drawOverview(m, w, h)
   m.write(note:sub(1, w - 2))
   -- The most useful problem, in words (the cards only have room for a state)
   local first
-  for _, k in ipairs({ "dock", "dockfull", "counts", "matrices", "fuel", "error" }) do
+  for _, k in ipairs({ "ops", "dock", "dockfull", "counts", "fuel", "matrices", "error" }) do
     if problems[k] then first = problems[k]; break end
   end
   if not first then for _, v in pairs(problems) do first = v; break end end
@@ -1200,6 +1209,8 @@ local function netLoop()
           storageDocks = {}
           for _, d in ipairs(msg.docks) do storageDocks[d] = true end
         end
+      elseif msg.type == "neural_done" then
+        firstUnanswered, lastAnswer = nil, os.clock()
       elseif msg.type == "neural_cmd" and (msg.to == nil or msg.to == os.getComputerID()) then
         if msg.want == "pause" then setPaused(true) elseif msg.want == "go" then setPaused(false) end
       end
