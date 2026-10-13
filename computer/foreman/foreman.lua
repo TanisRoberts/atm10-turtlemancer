@@ -10,6 +10,11 @@
 --   A Digger keeps its number when you move it or reset it. Saved in foreman.cfg.
 -- Orders are repeated every few seconds, so a Digger picks them up whenever it's in range.
 -- Junk caps from storage are passed on, so Diggers stop bringing home what storage has plenty of.
+--
+-- Presets: named layer settings (Min/Max Y + which rings around the shaft to mine). Ring 1 = 3x3,
+--   ring 50 = 101x101; "from ring 51" skips a middle that's already mined out. Saved in foreman.cfg.
+--   Edit them on either screen: the Presets button, or type /presets on the computer (/help lists
+--   the commands). Each screen keeps its own page, so editing on the computer leaves the wall alone.
 
 local PROTOCOL   = "tanis-miner"
 local BASE       = "tanis-base"
@@ -18,28 +23,48 @@ local SEND_EVERY = 3     -- seconds between order broadcasts
 local STALE      = 15    -- seconds without news before a Digger greys out
 local TEXT_SCALE = 0.5
 
--- Presets (absolute Y). Each pass covers 3 levels, so small ranges are cheap.
-local PRESETS = {
-  { "Diamonds",  -59, -58 },
-  { "Deep ores", -59, -48 },
-  { "Gold",      -19, -13 },
-  { "Lapis",      -3,   3 },
-  { "Iron",       13,  19 },
-  { "Copper",     45,  51 },
+local RING_CAP   = 150   -- furthest ring a Digger will mine (301x301; matches miner.lua)
+local DEF_R2     = 50    -- default outer ring (101x101)
+local Y_MIN, Y_MAX = -63, 319
+local NAME_MAX   = 16
+
+-- First-run presets (absolute Y). Each pass covers 3 levels, so small ranges are cheap.
+-- After that they live in foreman.cfg and are edited on the Presets page.
+local DEFAULT_PRESETS = {
+  { name = "Diamonds",  minY = -59, maxY = -58, r1 = 1, r2 = DEF_R2 },
+  { name = "Deep ores", minY = -59, maxY = -48, r1 = 1, r2 = DEF_R2 },
+  { name = "Gold",      minY = -19, maxY = -13, r1 = 1, r2 = DEF_R2 },
+  { name = "Lapis",     minY =  -3, maxY =   3, r1 = 1, r2 = DEF_R2 },
+  { name = "Iron",      minY =  13, maxY =  19, r1 = 1, r2 = DEF_R2 },
+  { name = "Copper",    minY =  45, maxY =  51, r1 = 1, r2 = DEF_R2 },
 }
 
 ---------------------------------------------------------------------------
 -- Registry: every Digger ever seen, keyed by computer ID
---   { num, label, retired, want, minY, maxY, seq, pMin, pMax }
+--   { num, label, retired, want, minY, maxY, r1, r2, seq, pMin, pMax, pR1, pR2 }
+--   minY/maxY/r1/r2 = the order it's running; pMin/pMax/pR1/pR2 = picked on screen, sent on START.
+-- Presets: list of { name, minY, maxY, r1, r2 }.
 ---------------------------------------------------------------------------
-local cfg = { nextNum = 1, diggers = {}, retiredNums = {} }
+local cfg = { nextNum = 1, diggers = {}, retiredNums = {}, presets = nil }
+local function copyPreset(p) return { name = p.name, minY = p.minY, maxY = p.maxY, r1 = p.r1, r2 = p.r2 } end
 local function loadCfg()
-  if not fs.exists(CONFIG) then return end
-  local f = fs.open(CONFIG, "r"); local t = textutils.unserialize(f.readAll()); f.close()
-  if type(t) == "table" then
-    cfg.nextNum = tonumber(t.nextNum) or 1
-    cfg.diggers = type(t.diggers) == "table" and t.diggers or {}
-    cfg.retiredNums = type(t.retiredNums) == "table" and t.retiredNums or {}
+  if fs.exists(CONFIG) then
+    local f = fs.open(CONFIG, "r"); local t = textutils.unserialize(f.readAll()); f.close()
+    if type(t) == "table" then
+      cfg.nextNum = tonumber(t.nextNum) or 1
+      cfg.diggers = type(t.diggers) == "table" and t.diggers or {}
+      cfg.retiredNums = type(t.retiredNums) == "table" and t.retiredNums or {}
+      cfg.presets = type(t.presets) == "table" and t.presets or nil
+    end
+  end
+  if not cfg.presets then
+    cfg.presets = {}
+    for _, p in ipairs(DEFAULT_PRESETS) do cfg.presets[#cfg.presets + 1] = copyPreset(p) end
+  end
+  for _, p in ipairs(cfg.presets) do p.r1, p.r2 = p.r1 or 1, p.r2 or DEF_R2 end
+  for _, dd in pairs(cfg.diggers) do  -- entries from before rings were adjustable
+    dd.r1, dd.r2 = dd.r1 or 1, dd.r2 or DEF_R2
+    dd.pR1, dd.pR2 = dd.pR1 or dd.r1, dd.pR2 or dd.r2
   end
 end
 local function saveCfg()
@@ -47,7 +72,8 @@ local function saveCfg()
 end
 
 local function newEntry(num)
-  return { num = num, want = "dock", minY = -59, maxY = -58, pMin = -59, pMax = -58, seq = os.epoch("utc") }
+  return { num = num, want = "dock", minY = -59, maxY = -58, pMin = -59, pMax = -58,
+           r1 = 1, r2 = DEF_R2, pR1 = 1, pR2 = DEF_R2, seq = os.epoch("utc") }
 end
 local function numTaken(num, exceptId)
   if cfg.retiredNums[num] then return true end
@@ -94,7 +120,7 @@ local function order(id, want)
   local d = cfg.diggers[id]
   if not d or d.retired then return end
   d.want = want
-  if want == "run" then d.minY, d.maxY = d.pMin, d.pMax end
+  if want == "run" then d.minY, d.maxY, d.r1, d.r2 = d.pMin, d.pMax, d.pR1, d.pR2 end
   d.seq = os.epoch("utc") -- unique id for this order
   saveCfg()
   sendNow[id] = true
@@ -125,13 +151,24 @@ local function pretty(id)
   local s = tostring(id):gsub("^.-:", ""):gsub("_", " ")
   return (s:gsub("^%l", string.upper))
 end
-local function presetName(a, b)
-  for _, p in ipairs(PRESETS) do if p[2] == a and p[3] == b then return p[1] end end
+local function presetName(a, b, r1, r2)
+  for _, p in ipairs(cfg.presets) do
+    if p.minY == a and p.maxY == b and (r1 == nil or (p.r1 == r1 and p.r2 == r2)) then return p.name end
+  end
 end
-local function rangeText(a, b)
+local function rangeText(a, b, r1, r2)
   if not a then return "-" end
-  local n = presetName(a, b)
+  local n = presetName(a, b, r1, r2)
   return (n and (n .. " ") or "") .. a .. ".." .. b
+end
+local function sq(r) return 2 * r + 1 end
+local function ringText(r1, r2)
+  r1, r2 = r1 or 1, r2 or DEF_R2
+  if r1 <= 1 then return ("rings 1-%d, %dx%d"):format(r2, sq(r2), sq(r2)) end
+  return ("rings %d-%d, %dx%d"):format(r1, r2, sq(r2), sq(r2))
+end
+local function isSelected(dd, p)
+  return dd.pMin == p.minY and dd.pMax == p.maxY and dd.pR1 == p.r1 and dd.pR2 == p.r2
 end
 local function posText(s)
   if not s or not s.pos then return "position unknown" end
@@ -167,7 +204,12 @@ end
 -- Screens: the monitor (if one touches the computer) and the computer's own screen.
 -- Both show the same page; each keeps its own tap areas.
 ---------------------------------------------------------------------------
-local ui = { page = "overview", id = nil, scroll = 1, showRetired = false, confirmRetire = nil, notice = nil }
+-- Each screen has its own page state (ui is pointed at the right one while drawing / handling a tap)
+local function newUi()
+  return { page = "overview", id = nil, scroll = 1, showRetired = false, confirmRetire = nil, notice = nil,
+           pscroll = 1, lscroll = 1, edit = nil, cmd = nil }
+end
+local ui = nil
 
 local function findMonitor()
   for _, side in ipairs(rs.getSides()) do
@@ -176,9 +218,11 @@ local function findMonitor()
 end
 local mon, monSide = findMonitor()
 local views = {
-  { dev = function() return mon end, kind = "monitor", hits = {} },
-  { dev = function() return term end, kind = "term", hits = {} },
+  { dev = function() return mon end, kind = "monitor", hits = {}, ui = newUi() },
+  { dev = function() return term end, kind = "term", hits = {}, ui = newUi() },
 }
+local termUi = views[2].ui
+ui = termUi
 
 local d, hits -- current device and its hit list while drawing
 local function at(x, y, text, fg, bg)
@@ -228,7 +272,10 @@ local function header(w, title, right)
   end
 end
 
-local function say(text, colour) ui.notice = { text = text, colour = colour or K.lime, untilT = os.clock() + 5 } end
+-- Notices show on every screen
+local function say(text, colour)
+  for _, v in ipairs(views) do v.ui.notice = { text = text, colour = colour or K.lime, untilT = os.clock() + 5 } end
+end
 
 ---------------------------------------------------------------------------
 -- Overview
@@ -330,6 +377,9 @@ local function drawOverview(w, h)
     x = smallButton(x, fy, ui.showRetired and "Back" or ("Retired " .. retiredN), K.grey,
       function() ui.showRetired = not ui.showRetired; ui.scroll = 1 end, K.white)
   end
+  if not ui.showRetired then
+    x = smallButton(x, fy, "Presets", K.lightBlue, function() ui.page, ui.lscroll = "presets", 1 end)
+  end
   if pages > 1 then
     local label = ("%d/%d"):format(ui.scroll, pages)
     local px = w - #label - 9
@@ -360,7 +410,9 @@ local function drawStatus(id, x, y, w, maxY)
   line(function() lr(x, y, w, "Cargo", s and ((s.slots or "?") .. "/16") or "-") end)
   line(function() bar(x, y, w, s and ((s.slots or 0) / 16) or 0, (s and (s.slots or 0) >= 14) and K.orange or K.lightBlue) end)
   line(function() lr(x, y, w, "Layer", s and s.layer and s.layers and (s.layer .. "/" .. s.layers) or "-") end)
-  line(function() lr(x, y, w, "Ring", s and s.ring and (s.ring .. "/" .. (s.maxRing or 50)) or "-") end)
+  line(function()
+    lr(x, y, w, "Ring", s and s.ring and ("%s of %d-%d"):format(s.ring, s.minRing or 1, s.maxRing or DEF_R2) or "-")
+  end)
   line(function() lr(x, y, w, "Range", s and s.minY and (s.minY .. ".." .. s.maxY) or "-") end)
   y = y + 1
   line(function() lr(x, y, w, "At", posText(s), K.lightGrey, K.white) end)
@@ -401,49 +453,105 @@ local function drawHaul(id, x, y, w, maxY)
   end
 end
 
+local function clampY(v) return math.max(Y_MIN, math.min(Y_MAX, v)) end
+local function clampR(v) return math.max(1, math.min(RING_CAP, v)) end
+
+-- Digger page: nudge the picked (not yet started) settings
 local function adjust(dd, key, delta)
-  dd[key] = math.max(-63, math.min(319, dd[key] + delta))
-  if dd.pMin > dd.pMax then
-    if key == "pMin" then dd.pMax = dd.pMin else dd.pMin = dd.pMax end
+  if key == "pR1" or key == "pR2" then
+    dd[key] = clampR(dd[key] + delta)
+    if dd.pR1 > dd.pR2 then if key == "pR1" then dd.pR2 = dd.pR1 else dd.pR1 = dd.pR2 end end
+  else
+    dd[key] = clampY(dd[key] + delta)
+    if dd.pMin > dd.pMax then if key == "pMin" then dd.pMax = dd.pMin else dd.pMin = dd.pMax end end
   end
   saveCfg()
+end
+
+-- One "Label value  [-][+]" row; steps = { {label, delta}, ... }
+local function numRow(x, y, w, label, value, steps, fn, fieldFn, focused, buf)
+  local bw = 0
+  for _, s in ipairs(steps) do bw = bw + #s[1] + 3 end
+  local vx = x + math.min(11, w - bw - 7)
+  at(x, y, pad(label, w), K.white)
+  if fieldFn then
+    local txt = focused and (buf .. "_") or tostring(value)
+    at(vx, y, pad(" " .. txt, 7), focused and K.black or K.white, focused and K.white or K.grey)
+    hit(vx, y, vx + 6, y, fieldFn)
+  else
+    at(vx, y, tostring(value), K.white)
+  end
+  local bx = x + w - bw
+  for _, s in ipairs(steps) do
+    bx = smallButton(bx, y, s[1], K.grey, function() fn(s[2]) end, K.white) - 1
+  end
 end
 
 local function drawControls(id, x, y, w, maxY)
   local dd, l = cfg.diggers[id], live[id]
   local s = l and l.s
-  local tall = maxY - y >= 20
-  local bh = tall and 3 or 1
+  local yStep = { { "-", -1 }, { "+", 1 } }
+  local rStep = { { "-5", -5 }, { "+5", 5 } }
+  if w < 24 then rStep = { { "-", -5 }, { "+", 5 } } end
+
+  -- How tall can things be? Everything below the preset list needs `fixed` rows.
+  local room = maxY - y + 1
+  local function fixedRows(bh, gap) return 1 + 4 + 1 + bh + gap + bh + 1 + 1 end
+  local bh, gap = 3, 1
+  if room - fixedRows(3, 1) < math.min(#cfg.presets, 4) then bh, gap = 1, 0 end
+  local listRows = math.max(1, room - fixedRows(bh, gap))
+
   at(x, y, pad("LAYERS", w), K.grey)
+  if w >= 16 then
+    smallButton(x + w - 6, y, "Edit", K.lightBlue, function() ui.page, ui.lscroll = "presets", 1 end)
+  end
   y = y + 1
-  for _, p in ipairs(PRESETS) do
-    local sel = dd.pMin == p[2] and dd.pMax == p[3]
+  -- Preset list (paged if it doesn't fit)
+  local n = #cfg.presets
+  local per = (n > listRows) and math.max(1, listRows - 1) or listRows
+  local pages = math.max(1, math.ceil(n / per))
+  ui.pscroll = math.max(1, math.min(ui.pscroll or 1, pages))
+  for i = 1, per do
+    local p = cfg.presets[(ui.pscroll - 1) * per + i]
+    if not p then break end
+    local sel = isSelected(dd, p)
     local bg, fg = sel and K.cyan or K.black, sel and K.black or K.white
     at(x, y, (" "):rep(w), fg, bg)
-    at(x + 1, y, p[1]:sub(1, w - 2), fg, bg)
+    at(x + 1, y, p.name:sub(1, w - 2), fg, bg)
     if w >= 20 then
-      local r = p[2] .. ".." .. p[3]
-      at(x + w - #r - 1, y, r, sel and K.black or K.lightGrey, bg)
+      local r = p.minY .. ".." .. p.maxY
+      if w >= 30 then r = r .. "  r" .. (p.r1 > 1 and (p.r1 .. "-") or "") .. p.r2 end
+      if #p.name + #r + 3 <= w then at(x + w - #r - 1, y, r, sel and K.black or K.lightGrey, bg) end
     end
-    hit(x, y, x + w - 1, y, function() dd.pMin, dd.pMax = p[2], p[3]; saveCfg() end)
+    hit(x, y, x + w - 1, y, function()
+      dd.pMin, dd.pMax, dd.pR1, dd.pR2 = p.minY, p.maxY, p.r1, p.r2; saveCfg()
+    end)
     y = y + 1
   end
-  for _, row in ipairs({ { "Min Y", "pMin" }, { "Max Y", "pMax" } }) do
-    at(x, y, pad(row[1] .. " " .. dd[row[2]], w), K.white)
-    at(x + w - 7, y, " - ", K.white, K.grey)
-    hit(x + w - 7, y, x + w - 5, y, function() adjust(dd, row[2], -1) end)
-    at(x + w - 3, y, " + ", K.white, K.grey)
-    hit(x + w - 3, y, x + w - 1, y, function() adjust(dd, row[2], 1) end)
+  if n == 0 then at(x, y, pad("No presets: tap Edit", w), K.grey); y = y + 1 end
+  if pages > 1 then
+    at(x, y, (" "):rep(w))
+    smallButton(x, y, "<", ui.pscroll > 1 and K.cyan or K.grey, function() ui.pscroll = ui.pscroll - 1 end)
+    at(x + 4, y, ("%d/%d"):format(ui.pscroll, pages), K.lightGrey)
+    smallButton(x + w - 3, y, ">", ui.pscroll < pages and K.cyan or K.grey, function() ui.pscroll = ui.pscroll + 1 end)
     y = y + 1
   end
-  local hint, hc = "", K.grey
+  -- Fine tuning
+  numRow(x, y, w, "Min Y", dd.pMin, yStep, function(dv) adjust(dd, "pMin", dv) end); y = y + 1
+  numRow(x, y, w, "Max Y", dd.pMax, yStep, function(dv) adjust(dd, "pMax", dv) end); y = y + 1
+  numRow(x, y, w, w >= 26 and "From ring" or "Ring>", dd.pR1, rStep, function(dv) adjust(dd, "pR1", dv) end); y = y + 1
+  numRow(x, y, w, w >= 26 and "To ring" or "Ring<", dd.pR2, rStep, function(dv) adjust(dd, "pR2", dv) end); y = y + 1
+  local hint, hc = ("Area %dx%d"):format(sq(dd.pR2), sq(dd.pR2)), K.grey
+  if dd.pR1 > 1 then hint = hint .. (", skips middle %dx%d"):format(sq(dd.pR1 - 1), sq(dd.pR1 - 1)) end
   if s and s.seq ~= dd.seq then hint, hc = "Sending...", K.yellow
   elseif s and s.offPath then hint, hc = "START/DOCK: send it home", K.orange
-  elseif dd.want == "run" and (dd.minY ~= dd.pMin or dd.maxY ~= dd.pMax) then hint, hc = "START to switch", K.orange end
+  elseif dd.want == "run" and (dd.minY ~= dd.pMin or dd.maxY ~= dd.pMax or dd.r1 ~= dd.pR1 or dd.r2 ~= dd.pR2) then
+    hint, hc = "START to switch", K.orange
+  end
   at(x, y, pad(hint, w), hc)
   y = y + 1
   button(x, y, w, bh, "START", K.lime, function() order(id, "run"); say(dd.label .. ": START sent.") end)
-  y = y + bh + (tall and 1 or 0)
+  y = y + bh + gap
   button(x, y, w, bh, w >= 11 and "STOP + DOCK" or "STOP", K.red, function()
     order(id, "dock"); say(dd.label .. ": heading home.", K.yellow)
   end)
@@ -457,6 +565,240 @@ local function drawControls(id, x, y, w, maxY)
     else
       button(x, y, w, 1, "Retire " .. (dd.label or ""), K.grey, function() ui.confirmRetire = id end, K.white)
     end
+  end
+end
+
+---------------------------------------------------------------------------
+-- Presets: list + editor
+---------------------------------------------------------------------------
+local function findPreset(name)
+  name = (name or ""):lower()
+  if name == "" then return nil end
+  for i, p in ipairs(cfg.presets) do if p.name:lower() == name then return i end end
+  local hitI, count = nil, 0
+  for i, p in ipairs(cfg.presets) do
+    if p.name:lower():sub(1, #name) == name then hitI, count = i, count + 1 end
+  end
+  if count == 1 then return hitI end
+end
+
+local function openEditor(idx, name)
+  local p = idx and cfg.presets[idx] or { name = name or "", minY = -59, maxY = -48, r1 = 1, r2 = DEF_R2 }
+  ui.edit = { idx = idx, name = p.name, minY = p.minY, maxY = p.maxY, r1 = p.r1, r2 = p.r2,
+              focus = (idx == nil and (name or "") == "") and "name" or nil, buf = "", err = nil, confirmDel = false }
+  if ui.edit.focus == "name" then ui.edit.buf = "" end
+  ui.page = "edit"
+end
+
+local FIELDS = { "name", "minY", "maxY", "r1", "r2" }
+
+-- Typing into a field ends when you press Enter/Tab or tap anything else
+local function commitFocus(e)
+  if not e or not e.focus then return end
+  local f, b = e.focus, e.buf
+  if f == "name" then
+    e.name = b:gsub("^%s+", ""):gsub("%s+$", ""):sub(1, NAME_MAX)
+  elseif b ~= "" and b ~= "-" then
+    local v = math.floor(tonumber(b) or 0)
+    if f == "minY" or f == "maxY" then e[f] = clampY(v) else e[f] = clampR(v) end
+  end
+  e.focus, e.buf = nil, ""
+end
+
+local function startFocus(e, f)
+  commitFocus(e)
+  e.focus = f
+  e.buf = (f == "name") and e.name or ""
+end
+
+local function validate(e)
+  if e.name == "" then return "Give it a name" end
+  for i, p in ipairs(cfg.presets) do
+    if i ~= e.idx and p.name:lower() == e.name:lower() then return "There's already a preset called " .. p.name end
+  end
+  if e.minY > e.maxY then return "Min Y is above Max Y" end
+  if e.r1 > e.r2 then return "From ring is past To ring" end
+end
+
+local function savePreset()
+  local e = ui.edit
+  commitFocus(e)
+  local err = validate(e)
+  if err then e.err = err; return end
+  local new = { name = e.name, minY = e.minY, maxY = e.maxY, r1 = e.r1, r2 = e.r2 }
+  if e.idx and cfg.presets[e.idx] then
+    local old = cfg.presets[e.idx]
+    -- Diggers that had the old version picked (not started yet) get the new one picked instead
+    for _, dd in pairs(cfg.diggers) do
+      if isSelected(dd, old) then dd.pMin, dd.pMax, dd.pR1, dd.pR2 = new.minY, new.maxY, new.r1, new.r2 end
+    end
+    cfg.presets[e.idx] = new
+  else
+    cfg.presets[#cfg.presets + 1] = new
+  end
+  saveCfg()
+  ui.edit, ui.page = nil, "presets"
+  say(("Saved %s: pick it on a Digger's page."):format(new.name))
+end
+
+local function deletePreset(idx)
+  local p = cfg.presets[idx]
+  if not p then return end
+  table.remove(cfg.presets, idx)
+  saveCfg()
+  say(("Deleted %s. Diggers keep what they're running."):format(p.name), K.orange)
+end
+
+local function movePreset(idx, dir)
+  local j = idx + dir
+  if j < 1 or j > #cfg.presets then return end
+  cfg.presets[idx], cfg.presets[j] = cfg.presets[j], cfg.presets[idx]
+  saveCfg()
+end
+
+local function drawPresets(w, h)
+  header(w, "< PRESETS", ("%d preset%s"):format(#cfg.presets, #cfg.presets == 1 and "" or "s"))
+  hit(1, 1, 12, 1, function() ui.page = "overview" end)
+  local top, bottom = 3, h - 2
+  local per = math.max(1, bottom - top + 1)
+  local pages = math.max(1, math.ceil(#cfg.presets / per))
+  ui.lscroll = math.max(1, math.min(ui.lscroll or 1, pages))
+  if #cfg.presets == 0 then at(2, top, "No presets yet: + New", K.grey) end
+  local arrows = w >= 40
+  for i = 1, per do
+    local idx = (ui.lscroll - 1) * per + i
+    local p = cfg.presets[idx]
+    if not p then break end
+    local y = top + i - 1
+    local bg = (i % 2 == 0) and K.grey or K.black
+    at(1, y, (" "):rep(w), K.white, bg)
+    at(2, y, pad(p.name, NAME_MAX), K.white, bg)
+    local infoX = NAME_MAX + 4
+    local infoW = w - infoX - (arrows and 7 or 1)
+    local info = ("Y %d..%d  %s"):format(p.minY, p.maxY, ringText(p.r1, p.r2))
+    if #info > infoW then info = ("Y %d..%d  rings %d-%d"):format(p.minY, p.maxY, p.r1, p.r2) end
+    if infoW > 6 then at(infoX, y, pad(info, infoW), K.lightGrey, bg) end
+    hit(1, y, w - (arrows and 7 or 0), y, function() openEditor(idx) end)
+    if arrows then
+      smallButton(w - 6, y, "^", idx > 1 and K.lightBlue or bg, function() movePreset(idx, -1) end)
+      smallButton(w - 3, y, "v", idx < #cfg.presets and K.lightBlue or bg, function() movePreset(idx, 1) end)
+    end
+  end
+  at(1, h, (" "):rep(w))
+  local x = smallButton(2, h, "+ New", K.lime, function() openEditor(nil) end)
+  x = smallButton(x, h, "Back", K.grey, function() ui.page = "overview" end, K.white)
+  if pages > 1 then
+    local label = ("%d/%d"):format(ui.lscroll, pages)
+    local px = w - #label - 9
+    if px > x then
+      smallButton(px, h, "<", ui.lscroll > 1 and K.cyan or K.grey, function() ui.lscroll = ui.lscroll - 1 end)
+      at(px + 4, h, label, K.lightGrey)
+      smallButton(w - 3, h, ">", ui.lscroll < pages and K.cyan or K.grey, function() ui.lscroll = ui.lscroll + 1 end)
+    end
+  end
+end
+
+local function drawEdit(w, h, kind)
+  local e = ui.edit
+  if not e then ui.page = "presets"; return drawPresets(w, h) end
+  header(w, e.idx and ("< EDIT " .. (cfg.presets[e.idx] and cfg.presets[e.idx].name or "")) or "< NEW PRESET")
+  hit(1, 1, 12, 1, function() ui.edit, ui.page = nil, "presets" end)
+  local cw = math.min(w - 2, 46)
+  local x, y = 2, 3
+  -- Name
+  local nf = e.focus == "name"
+  at(x, y, "Name", K.white)
+  local nx = x + 11
+  local nw = math.min(NAME_MAX + 2, cw - 11)
+  local ntxt = nf and (e.buf .. "_") or (e.name ~= "" and e.name or "tap to type")
+  at(nx, y, pad(" " .. ntxt, nw), nf and K.black or (e.name ~= "" and K.white or K.lightGrey), nf and K.white or K.grey)
+  hit(nx, y, nx + nw - 1, y, function()
+    startFocus(e, "name")
+    if kind == "monitor" then say("Type the name on the computer's keyboard", K.yellow) end
+  end)
+  y = y + 2
+  local yS = cw >= 36 and { { "-5", -5 }, { "-1", -1 }, { "+1", 1 }, { "+5", 5 } } or { { "-", -1 }, { "+", 1 } }
+  local rS = cw >= 36 and { { "-10", -10 }, { "-1", -1 }, { "+1", 1 }, { "+10", 10 } } or { { "-", -1 }, { "+", 1 } }
+  local rows = {
+    { "Min Y", "minY", yS }, { "Max Y", "maxY", yS }, { "From ring", "r1", rS }, { "To ring", "r2", rS },
+  }
+  for _, r in ipairs(rows) do
+    local key = r[2]
+    numRow(x, y, cw, r[1], e[key], r[3], function(dv)
+      if key == "minY" or key == "maxY" then e[key] = clampY(e[key] + dv) else e[key] = clampR(e[key] + dv) end
+      e.err = nil
+    end, function()
+      startFocus(e, key)
+      if kind == "monitor" then say("Type the number on the computer's keyboard", K.yellow) end
+    end, e.focus == key, e.buf)
+    y = y + 1
+  end
+  y = y + 1
+  -- What it means
+  local passes = 0
+  do local c = e.maxY - 1; while c + 1 >= e.minY and c >= Y_MIN do passes = passes + 1; c = c - 3 end end
+  local info = {
+    { ("Mines Y %d..%d: %d pass%s of 3 levels"):format(e.minY, e.maxY, passes, passes == 1 and "" or "es"), K.lightGrey },
+    { e.r1 > 1 and ("Square %dx%d, skipping the middle %dx%d"):format(sq(e.r2), sq(e.r2), sq(e.r1 - 1), sq(e.r1 - 1))
+        or ("Square %dx%d around the shaft"):format(sq(e.r2), sq(e.r2)), K.lightGrey },
+  }
+  if e.r2 > 100 then info[#info + 1] = { "Far out: stay near the base so its chunks load", K.orange } end
+  if e.err then info[#info + 1] = { e.err, K.red } end
+  for _, l in ipairs(info) do
+    if y <= h - 2 then at(x, y, pad(l[1], w - 2), l[2]) end
+    y = y + 1
+  end
+  -- Buttons
+  local by = h - 1
+  local tall = h - 1 - y >= 3
+  local bh = tall and 3 or 1
+  by = h - bh + 1
+  if kind == "term" then by = h - bh end  -- term keeps its bottom row for the command bar
+  local bw = math.max(8, math.floor((cw - 2) / 3))
+  button(x, by, bw, bh, "Save", K.lime, savePreset)
+  button(x + bw + 1, by, bw, bh, "Cancel", K.grey, function() ui.edit, ui.page = nil, "presets" end, K.white)
+  if e.idx then
+    button(x + 2 * (bw + 1), by, bw, bh, e.confirmDel and "Sure?" or "Delete", e.confirmDel and K.orange or K.red, function()
+      if e.confirmDel then deletePreset(e.idx); ui.edit, ui.page = nil, "presets" else e.confirmDel = true end
+    end)
+  end
+end
+
+---------------------------------------------------------------------------
+-- Commands typed on the computer (bottom row): /presets, /new, /edit, /delete, /home, /help
+---------------------------------------------------------------------------
+local HELP = "/presets  /new <name>  /edit <name>  /delete <name>  /home"
+
+local function runCommand(line)
+  local cmd, arg = line:match("^/?(%S*)%s*(.-)%s*$")
+  cmd = (cmd or ""):lower()
+  ui = termUi
+  if cmd == "" or cmd == "help" or cmd == "?" then say(HELP, K.lightBlue)
+  elseif cmd == "presets" or cmd == "preset" or cmd == "settings" or cmd == "p" then ui.page, ui.edit = "presets", nil
+  elseif cmd == "home" or cmd == "back" or cmd == "overview" then ui.page, ui.edit = "overview", nil
+  elseif cmd == "new" or cmd == "add" then openEditor(nil, arg)
+  elseif cmd == "edit" or cmd == "delete" or cmd == "remove" or cmd == "del" then
+    local idx = findPreset(arg)
+    if not idx then say(arg == "" and ("/" .. cmd .. " <preset name>") or ("No preset called " .. arg), K.red); return end
+    openEditor(idx)
+    if cmd ~= "edit" then ui.edit.confirmDel = true; say("Tap Sure? (or Enter) to delete " .. cfg.presets[idx].name, K.orange) end
+  else
+    say("Unknown command. " .. HELP, K.red)
+  end
+end
+
+-- Bottom row of the computer's own screen
+local function drawCmdBar(w, h)
+  local y = h - 1
+  if ui.page == "presets" or ui.page == "edit" then y = h end
+  if ui.page == "digger" and not ui.cmd then return end
+  if ui.page == "presets" and not ui.cmd then return end
+  if ui.cmd then
+    at(1, y, pad("> " .. ui.cmd .. "_", w), K.white, K.grey)
+  elseif ui.page == "overview" then
+    at(1, y, pad(" Type /presets to edit layer presets, /help", w), K.grey)
+  elseif ui.page == "edit" then
+    at(1, y, pad(ui.edit and ui.edit.focus and " Enter/Tab: next field" or " Enter: save   /home   /presets", w), K.grey)
   end
 end
 
@@ -487,12 +829,17 @@ local function draw()
     d = v.dev()
     if d then
       hits = {}
+      ui = v.ui
       local ok = pcall(function()
         if v.kind == "monitor" then d.setTextScale(TEXT_SCALE) end
         local w, h = d.getSize()
         if not w then return end
         d.setBackgroundColour(K.black); d.clear()
-        if ui.page == "digger" then drawDigger(w, h) else drawOverview(w, h) end
+        if ui.page == "digger" then drawDigger(w, h)
+        elseif ui.page == "presets" then drawPresets(w, h)
+        elseif ui.page == "edit" then drawEdit(w, h, v.kind)
+        else drawOverview(w, h) end
+        if v.kind == "term" then drawCmdBar(w, h) end
       end)
       v.hits = hits
       if not ok and v.kind == "monitor" then mon, monSide = findMonitor() end
@@ -509,7 +856,7 @@ local function sendOrder(id)
   for name in pairs(capped) do list[#list + 1] = name end
   rednet.send(id, {
     type = "cmd", to = id, want = dd.retired and "dock" or dd.want, minY = dd.minY, maxY = dd.maxY,
-    seq = dd.seq, retired = dd.retired == true, capped = list,
+    r1 = dd.r1 or 1, r2 = dd.r2 or DEF_R2, seq = dd.seq, retired = dd.retired == true, capped = list,
   }, PROTOCOL)
 end
 
@@ -543,6 +890,10 @@ local function netLoop()
           dd = newEntry(tonumber(msg.num))
           dd.label = msg.label or nameOf(dd.num)
           if msg.minY then dd.minY, dd.maxY, dd.pMin, dd.pMax = msg.minY, msg.maxY, msg.minY, msg.maxY end
+          if msg.maxRing then
+            dd.r1, dd.r2 = msg.minRing or 1, msg.maxRing
+            dd.pR1, dd.pR2 = dd.r1, dd.r2
+          end
           if msg.want then dd.want = msg.want end
           if msg.seq then dd.seq = msg.seq end
           if msg.retired then dd.retired = true; cfg.retiredNums[dd.num] = dd.label end
@@ -569,24 +920,83 @@ local function netLoop()
   end
 end
 
+-- Keys: typing into a preset field (whichever screen last tapped one), else the command bar
+local focusView = nil
+local function handleKey(e, a)
+  local v = focusView
+  if not (v and v.ui.page == "edit" and v.ui.edit and v.ui.edit.focus) then
+    v = (termUi.page == "edit" and termUi.edit and termUi.edit.focus) and views[2] or nil
+  end
+  if v and not termUi.cmd then
+    ui = v.ui
+    local ed = ui.edit
+    if e == "char" then
+      local ok = ed.focus == "name" and #ed.buf < NAME_MAX
+        or ed.focus ~= "name" and (a:match("%d") or (a == "-" and ed.buf == "")) and #ed.buf < 4
+      if ok then ed.buf = ed.buf .. a end
+    elseif e == "paste" and ed.focus == "name" then
+      ed.buf = (ed.buf .. a):sub(1, NAME_MAX)
+    elseif a == keys.backspace then ed.buf = ed.buf:sub(1, -2)
+    elseif a == keys.enter or a == keys.numPadEnter or a == keys.tab then
+      local fi = 1
+      for i, f in ipairs(FIELDS) do if f == ed.focus then fi = i end end
+      commitFocus(ed)
+      if fi < #FIELDS then startFocus(ed, FIELDS[fi + 1]) end
+    end
+    ui.edit.err = nil
+    return
+  end
+  -- Command bar (computer screen)
+  ui = termUi
+  if e == "char" or e == "paste" then
+    if ui.cmd == nil and not (e == "char" and a == "/") then return end   -- commands start with /
+    ui.cmd = ((ui.cmd or "") .. a):sub(1, 60)
+  elseif a == keys.backspace and ui.cmd then
+    ui.cmd = ui.cmd:sub(1, -2)
+    if ui.cmd == "" then ui.cmd = nil end
+  elseif (a == keys.enter or a == keys.numPadEnter) then
+    if ui.cmd then
+      local line = ui.cmd; ui.cmd = nil
+      runCommand(line)
+    elseif ui.page == "edit" and ui.edit then
+      if ui.edit.confirmDel then
+        deletePreset(ui.edit.idx); ui.edit, ui.page = nil, "presets"
+      else
+        savePreset()
+      end
+    end
+  end
+end
+
 local function inputLoop()
   while true do
     local e, a, b, c = os.pullEvent()
     local v, x, y
     if e == "monitor_touch" and a == monSide then v, x, y = views[1], b, c
     elseif e == "mouse_click" then v, x, y = views[2], b, c
-    elseif e == "mouse_scroll" and ui.page == "overview" then ui.scroll = ui.scroll + a; draw()
+    elseif e == "mouse_scroll" then
+      local u = views[2].ui
+      if u.page == "overview" then u.scroll = u.scroll + a
+      elseif u.page == "presets" then u.lscroll = u.lscroll + a
+      elseif u.page == "digger" then u.pscroll = u.pscroll + a end
+      draw()
+    elseif e == "char" or e == "key" or e == "paste" then
+      handleKey(e, a); draw()
     elseif e == "peripheral" or e == "peripheral_detach" or e == "monitor_resize" then
       mon, monSide = findMonitor(); draw()
     end
     if v then
+      ui = v.ui
+      local wasEditing = ui.page == "edit" and ui.edit
       for _, r in ipairs(v.hits) do
         if x >= r.x1 and x <= r.x2 and y >= r.y1 and y <= r.y2 then
+          if wasEditing then commitFocus(ui.edit) end
           r.fn()
-          draw()
+          if ui.page == "edit" and ui.edit and ui.edit.focus then focusView = v end
           break
         end
       end
+      draw()
     end
   end
 end

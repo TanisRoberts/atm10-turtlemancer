@@ -214,6 +214,13 @@ end
 ---------------------------------------------------------------------------
 local cfg = textutils.unserialize(readFile(CFG) or "") or {}
 
+-- startup.lua updating itself: the new version only takes effect from the next boot, so reboot once.
+-- REBOOT_FLAG stops a loop (e.g. GitHub's cache serving old and new copies by turns): it's set just
+-- before that reboot and cleared on the boot after, which never reboots again.
+local REBOOT_FLAG = "startup.reboot"
+local secondBoot = fs.exists(REBOOT_FLAG)
+if secondBoot then fs.delete(REBOOT_FLAG) end
+
 local function loadManifest(body)
   local fn = load(body, "@manifest.lua", "t", {})
   if not fn then return nil end
@@ -265,6 +272,15 @@ else
   print("Already up to date.")
 end
 if not offline then for _, p in ipairs(problems) do printError("Kept old " .. p) end end
+
+local selfUpdated = false
+for _, n in ipairs(changed) do if n == "startup.lua" then selfUpdated = true end end
+if selfUpdated and not secondBoot then
+  say(colours.yellow, "startup.lua changed: rebooting to use it...")
+  local f = fs.open(REBOOT_FLAG, "w"); f.write("1"); f.close()
+  os.sleep(1)
+  os.reboot()
+end
 
 if fs.exists(R.run .. ".lua") then
   if BOOT_PAUSE > 0 then os.sleep(BOOT_PAUSE) end

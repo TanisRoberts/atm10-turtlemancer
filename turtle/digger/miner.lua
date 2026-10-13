@@ -14,7 +14,8 @@
 --
 -- What it does, once you press START on the Foreman:
 --   * digs a shaft straight down from the dock to the chosen Y range
---   * mines expanding squares around the shaft (3x3, 5x5 ... up to 101x101), 3 levels per pass:
+--   * mines expanding squares around the shaft, 3 levels per pass, ring by ring between the
+--     Foreman's "from ring" and "to ring" (ring 1 = 3x3, ring 50 = 101x101; default 1..50, max 150):
 --     it walks the middle level and digs the block above/below only if it's an ore
 --   * drops 3 levels and repeats until the range is done
 --   * comes home through the shaft when full or low on fuel, unloads, refuels, goes back
@@ -24,7 +25,8 @@
 
 local PROTOCOL     = "tanis-miner"
 local STATE_FILE   = "miner.state"
-local MAX_RING     = 50     -- 50 rings = 101x101
+local DEFAULT_R2   = 50     -- outer ring when the Foreman doesn't say (50 rings = 101x101)
+local RING_CAP     = 150    -- furthest ring allowed (301x301): further out, chunks may unload
 local FUEL_RESERVE = 60     -- spare fuel kept on top of the trip home
 local STATUS_EVERY = 3      -- seconds between status broadcasts
 
@@ -434,12 +436,14 @@ local function applyCtrl()
   if ctrl.seq == S.seq then return end
   S.seq = ctrl.seq
   if ctrl.want == "run" then
-    local changed = ctrl.minY ~= S.minY or ctrl.maxY ~= S.maxY
+    local r1 = math.max(1, math.min(RING_CAP, math.floor(tonumber(ctrl.r1) or 1)))
+    local r2 = math.max(r1, math.min(RING_CAP, math.floor(tonumber(ctrl.r2) or DEFAULT_R2)))
+    local changed = ctrl.minY ~= S.minY or ctrl.maxY ~= S.maxY or r1 ~= (S.r1 or 1) or r2 ~= (S.r2 or DEFAULT_R2)
     if changed or S.done then
-      S.layerIdx, S.k, S.step, S.done = 1, 1, 1, false
+      S.layerIdx, S.k, S.step, S.done = 1, r1, 1, false
       if changed and S.want == "run" then S.regionChanged = true end
     end
-    S.minY, S.maxY, S.want = ctrl.minY, ctrl.maxY, "run"
+    S.minY, S.maxY, S.r1, S.r2, S.want = ctrl.minY, ctrl.maxY, r1, r2, "run"
   else
     S.want = "dock"
   end
@@ -531,7 +535,8 @@ local function mineRegion()
     end
     -- Expanding squares
     local blocked = false
-    for k = S.k or 1, MAX_RING do
+    local r1, r2 = S.r1 or 1, S.r2 or DEFAULT_R2
+    for k = math.max(S.k or r1, r1), r2 do
       S.k = k
       local cells = ringCells(k)
       for i = S.step or 1, #cells do
@@ -544,7 +549,7 @@ local function mineRegion()
       S.step = 1
     end
     if blocked then setStatus("mining", ("Hit unbreakable blocks at Y %d, next layer"):format(layers[li])) end
-    S.k, S.step = 1, 1
+    S.k, S.step = S.r1 or 1, 1
     S.layerIdx = li + 1
     save()
   end
@@ -807,7 +812,7 @@ local function lostFlow()
   print("then press Enter here.")
   read()
   S.x, S.y, S.z, S.h, S.lost = 0, 0, 0, 0, nil
-  S.k, S.step = 1, 1
+  S.k, S.step = S.r1 or 1, 1
   save()
 end
 
@@ -965,7 +970,7 @@ local function statusMsg()
     state = S.status, msg = S.msg, seq = S.seq,
     fuel = f, fuelLimit = l, slots = used,
     y = S.dockY and (S.dockY + (S.y or 0)), x = S.x, z = S.z,
-    layer = S.layerIdx, layers = S.layerCount, ring = S.k, maxRing = MAX_RING,
+    layer = S.layerIdx, layers = S.layerCount, ring = S.k, minRing = S.r1 or 1, maxRing = S.r2 or DEFAULT_R2,
     minY = S.minY, maxY = S.maxY, want = S.want, done = S.done, ores = S.ores, haul = haul,
   }
 end
