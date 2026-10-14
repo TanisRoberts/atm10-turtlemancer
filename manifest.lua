@@ -52,9 +52,10 @@ local M = {
         },
         smelter = {
           name = "Smelter",
-          about = "Auto-smelting rules (smelt.txt)",
-          details = "Watches the furnaces and keeps them busy from smelt.txt rules and one-off "
-            .. "jobs. Storage moves the items. Just a wired modem on the storage cable.",
+          about = "Auto-smelting, fastest furnaces first, + a training furnace",
+          details = "Keeps the furnaces busy from smelt.txt rules and one-off jobs, fastest tier "
+            .. "first. Teach it new recipes with a training furnace. Storage moves the items. "
+            .. "Wired modem on the storage cable; advanced monitor optional (3x2 is ideal).",
           run = "smelter",
           files = { "computer/smelter/smelter.lua" },
           once = { "computer/smelter/smelt.txt" },

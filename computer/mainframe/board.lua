@@ -39,7 +39,7 @@ local function rows()
   end
   local sm = _G.SMELTER
   if sm then
-    out[#out + 1] = { sm.label or "Smelter", "ok", tostring(sm.note or ""), _G.SMELTER_SEEN }
+    out[#out + 1] = { sm.label or "Smelter", sm.state or "ok", tostring(sm.note or ""), _G.SMELTER_SEEN }
   else
     out[#out + 1] = { "Smelter", "?", "not heard from yet", nil }
   end
