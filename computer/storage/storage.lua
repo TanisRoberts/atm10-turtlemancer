@@ -27,7 +27,7 @@
 --
 -- Storage is the only computer that moves items in or out of storage. Over the network it:
 --   * broadcasts its status (fill level, item totals, junk caps) for the mainframe and smelter
---   * fills Weaver's supply barrel when he asks, and keeps each Canary fuel barrel at one refill
+--   * fills Weaver's supply barrel when he asks, and keeps each Canary fuel barrel at one stack of coal's worth
 --   * carries out the smelter's moves (furnace output back to storage, inputs and fuel in)
 --   * the mainframe's butler: empties the POCKET DUMP chest ($dump) and fills the POCKET RESTOCK chest
 --     (torch top-ups). Both chests touch the mainframe's Inventory Manager and sit on this cable.
@@ -46,6 +46,8 @@ local FULL_SCAN    = 30      -- seconds between full rescans (catches things you
 local TEXT_SCALE   = 0.5
 local JUNK_CAP     = 20 * 64 -- items of one kind before the miner stops bringing more of it
 local REFILL       = 20000   -- fuel units in one turtle refill (updated live from the miner's tank size)
+local CANARY_FUEL  = 64 * 80 -- fuel units kept in each Canary fuel barrel: one stack of coal's worth
+                             -- (6 coal blocks, 5 lava buckets ...). Anything over that goes back to storage.
 local BASE         = "tanis-base"   -- network protocol shared by the base computers
 local STATUS_EVERY = 3              -- seconds between status broadcasts
 local PRESENCE_STALE = 60           -- seconds without news from the butler before auto-lock lets go
@@ -709,11 +711,17 @@ local function topUpDocks()
   return changed
 end
 
--- Keep every Canary fuel barrel at (as close as possible to) one refill.
+-- Fuel kept in each Canary fuel barrel: one stack of coal's worth (never more than a Canary's tank)
+local function canaryFuelTarget()
+  return math.min(CANARY_FUEL, minerFuelLimit or REFILL)
+end
+
+-- Keep every Canary fuel barrel at (as close as possible to) one stack of coal's worth, and hand
+-- anything over that back to storage so the smelter and the neural lab get it.
 -- fuelUnits = the emptiest barrel, for the screen and the mainframe's "running dry" alert.
 local function topUpFuel()
   if #cfg.fuels == 0 then return false end
-  local target = minerFuelLimit or REFILL
+  local target = canaryFuelTarget()
   local value = {}
   for _, fv in ipairs(FUEL_VALUES) do value[fv[1]] = fv[2] end
   local changed, lowest = false, nil
@@ -722,6 +730,26 @@ local function topUpFuel()
     if list then
       local have = 0
       for _, it in pairs(list) do have = have + (value[it.name] or 0) * it.count end
+      -- Too much in there (filled to a whole tank by an older version): take the extra back
+      if have > target then
+        for slot, it in pairs(list) do
+          local v = value[it.name]
+          local n = v and math.min(it.count, math.floor((have - target) / v)) or 0
+          if n > 0 then
+            local key, moved = keyOf(it), 0
+            for _, t in ipairs(targetsFor(key)) do
+              if moved >= n then break end
+              local m = moveInto(barrel, slot, n - moved, t, key)
+              if m > 0 then moved = moved + m; scanInv(t) end
+            end
+            if moved > 0 then
+              have = have - moved * v
+              byName[it.name] = (byName[it.name] or 0) + moved
+              changed = true
+            end
+          end
+        end
+      end
       local deficit = target - have
       for _, fv in ipairs(FUEL_VALUES) do
         local name, v = fv[1], fv[2]
@@ -997,7 +1025,7 @@ local function drawView(v)
   d.setTextColour(C.accent); d.write(" STORAGE")
   local pct = stats.total > 0 and math.floor(stats.used / stats.total * 100) or 0
   local right = ("%d items  %d/%d slots  %d%% "):format(stats.kinds, stats.used, stats.total, pct)
-  if #cfg.fuels > 0 then right = ("Fuel %d%%  "):format(math.floor(fuelUnits / (minerFuelLimit or REFILL) * 100)) .. right end
+  if #cfg.fuels > 0 then right = ("Fuel %d%%  "):format(math.floor(fuelUnits / canaryFuelTarget() * 100)) .. right end
   if #right > w - 9 then right = ("%d/%d slots %d%% "):format(stats.used, stats.total, pct) end
   if isTerm and isLocked() and #right + 9 <= w - 9 then right = "MONITOR LOCKED  " .. right end
   d.setTextColour(pct >= 90 and C.warn or C.dim)
@@ -1187,7 +1215,7 @@ local function statusMsg()
     type = "storage", id = os.getComputerID(), label = os.getComputerLabel(),
     used = stats.used, total = stats.total, kinds = stats.kinds, inputStuck = inputStuck,
     fuelUnits = #cfg.fuels > 0 and fuelUnits or nil,
-    fuelTarget = #cfg.fuels > 0 and (minerFuelLimit or REFILL) or nil,
+    fuelTarget = #cfg.fuels > 0 and canaryFuelTarget() or nil,
     fuelBarrels = #cfg.fuels,
     fuelAvailable = avail, overcap = overCapList, items = byName, paused = paused,
     locked = (isLocked()), pocketDump = cfg.pocketIn ~= nil, pocketRestock = cfg.pocketOut ~= nil,
@@ -1583,9 +1611,9 @@ function runCommand(cmd)
       waitEnter()
     elseif found == "/fuelinfo" then
       print("Rescanning..."); scanAll(); buildItems()
-      local target = minerFuelLimit or REFILL
+      local target = canaryFuelTarget()
       print(("Each Canary fuel barrel is kept at %d fuel"):format(target))
-      print(minerFuelLimit and "(a Canary's full tank)." or "(default: no Canary heard yet).")
+      print("(one stack of coal's worth; extra goes back to storage).")
       if not minerFuelLimit then
         printError("Storage hasn't heard a Canary: it needs a wireless or ender modem on it.")
       end
