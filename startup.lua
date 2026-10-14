@@ -251,7 +251,7 @@ if newRole and T.roles[newRole] then
   local old = T.oldNames and T.oldNames[newRole]
   local lbl = os.getComputerLabel()
   if old and lbl and lbl:lower():sub(1, #old) == old:lower() then
-    os.setComputerLabel(T.roles[newRole].name .. lbl:sub(#old + 1))
+    os.setComputerLabel((T.roles[newRole].labelName or T.roles[newRole].name) .. lbl:sub(#old + 1))
   end
   say(colours.yellow, ("Renamed: I'm a %s now."):format(T.roles[newRole].name))
 end

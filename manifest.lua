@@ -14,9 +14,10 @@ local M = {
   common = { "startup.lua", "reset.lua" },
 
   -- Files from before the Oct 2026 rename: startup deletes them from any device that still has them.
-  gone = { "rigger.lua", "pigger.lua", "riggerplan.lua", "rigger_link.lua" },
+  gone = { "rigger.lua", "pigger.lua", "riggerplan.lua", "rigger_link.lua", "firecrest.lua" },
   -- Saved state/config under an old name: startup renames it (only if the new one doesn't exist yet).
-  moved = { ["rigger.state"] = "weaver.state", ["rigger.cfg"] = "weaver.cfg", ["pigger.state"] = "firecrest.state",
+  moved = { ["rigger.state"] = "weaver.state", ["rigger.cfg"] = "weaver.cfg", ["pigger.state"] = "miner.state",
+            ["firecrest.state"] = "miner.state",
             ["rigger_link.cfg"] = "weaver_link.cfg", ["zigger.env"] = "seagull.env", ["zigger.state"] = "seagull.state",
             ["zigger.map"] = "seagull.map", ["tigger.env"] = "woodpecker.env", ["figger.env"] = "partridge.env" },
 
@@ -142,19 +143,18 @@ local M = {
       name = "Turtle",
       about = "A turtle that goes out and works",
       details = "Mining, building, lumberjacking, farming, map-making and crafting turtles.",
-      order = { "canary", "firecrest", "weaver", "woodpecker", "partridge", "seagull", "bowerbird" },
+      order = { "canary", "weaver", "woodpecker", "partridge", "seagull", "bowerbird" },
       roles = {
-        canary = { name = "Canary", about = "Miner: shaft + expanding squares", run = "miner",
-                   details = "Digs a shaft at its dock and mines squares at the layers the Foreman "
-                     .. "picks. Gets its number from the Foreman. Pickaxe + ender modem.",
+        -- One miner for every dimension (Oct 2026): Canary, Firecrest in the Nether, Starling in the End.
+        -- The role id stays "canary" so existing Canaries' device.cfg keeps working.
+        canary = { name = "Miner", about = "Miner: named by his dimension", run = "miner",
+                   alsoNames = { "canary", "firecrest", "starling" }, labelName = "Canary",
+                   details = "Digs a shaft at its dock and mines squares at the layers its Foreman picks. "
+                     .. "Named by dimension: Nether = Firecrest (Nether Foreman, one dock barrel, drinks lava "
+                     .. "with one empty bucket); End = Starling; anywhere else = Canary. "
+                     .. "Pickaxe + ender modem.",
                    label = "auto",
-                   files = { "turtle/canary/miner.lua" }, once = { "turtle/canary/junk.txt" } },
-        firecrest = { name = "Firecrest", about = "Nether miner: drinks lava for fuel", run = "firecrest",
-                   details = "Canary's cousin for the Nether: shaft + squares at the layers the Nether "
-                     .. "Foreman picks, refuels from lava with his bucket, one dock barrel. Advanced "
-                     .. "turtle, pickaxe + ender modem, one empty bucket.",
-                   label = "auto",
-                   files = { "turtle/firecrest/firecrest.lua" } },
+                   files = { "turtle/miner/miner.lua" }, once = { "turtle/miner/junk.txt" } },
         weaver = { name = "Weaver", about = "Builder: follows a plan file", run = "weaver",
                    details = "Builds the island from a plan file, layer by layer, and fetches "
                      .. "materials from storage.",
@@ -205,11 +205,11 @@ local M = {
 -- the alias once; startup.lua then switches their device.cfg (and a label starting with the old
 -- name, e.g. Digger-04 -> Canary-04) to the new one. Aliases aren't in `order`, so setup never offers them.
 local T = M.types.turtle
-T.renamed = { digger = "canary", pigger = "firecrest", rigger = "weaver",
+T.renamed = { digger = "canary", pigger = "canary", firecrest = "canary", rigger = "weaver",
               tigger = "woodpecker", figger = "partridge", zigger = "seagull" }
-T.oldNames = { canary = "Digger", firecrest = "Pigger", weaver = "Rigger",
+T.oldNames = { canary = "Digger", weaver = "Rigger",
                woodpecker = "Tigger", partridge = "Figger", seagull = "Zigger" }
-T.roles.digger, T.roles.pigger, T.roles.rigger = T.roles.canary, T.roles.firecrest, T.roles.weaver
+T.roles.digger, T.roles.pigger, T.roles.firecrest, T.roles.rigger = T.roles.canary, T.roles.canary, T.roles.canary, T.roles.weaver
 T.roles.tigger, T.roles.figger, T.roles.zigger = T.roles.woodpecker, T.roles.partridge, T.roles.seagull
 
 return M

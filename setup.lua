@@ -246,7 +246,10 @@ local first = ((label or ""):match("^%a+") or ""):lower()
 for _, t in pairs(M.types) do
   local nk = t.renamed and t.renamed[first]
   if nk and t.roles[nk] then
-    label = t.roles[nk].name .. label:sub(#first + 1)
+    -- (Firecrest-01 keeps its name: it's the same Miner role, named by dimension)
+    local keep = false
+    for _, a in ipairs(t.roles[nk].alsoNames or {}) do if a == first then keep = true end end
+    if not keep then label = (t.roles[nk].labelName or t.roles[nk].name) .. label:sub(#first + 1) end
     first = nk
   end
 end
@@ -255,7 +258,9 @@ local guessRole = nil
 for tk, t in pairs(M.types) do
   for _, rk in ipairs(t.order or {}) do
     local r = t.roles[rk]
-    if r and first ~= "" and (rk == first or r.name:lower() == first) and fits(tk) then guessType, guessRole = tk, rk end
+    local also = false
+    for _, a in ipairs(r and r.alsoNames or {}) do if a == first then also = true end end
+    if r and first ~= "" and (rk == first or r.name:lower() == first or also) and fits(tk) then guessType, guessRole = tk, rk end
   end
 end
 -- Only one role on this type? Pre-pick it.
@@ -296,6 +301,9 @@ while true do
     if R.label == "auto" then
       -- Named by its own program (Canaries get their number from the Foreman)
       local keep = label and label:lower():find(R.name:lower(), 1, true) and label or R.name
+      for _, n in ipairs(R.alsoNames or {}) do  -- Canary-04 / Firecrest-01 / Starling-05 stay as they are
+        if label and ((label:match("^%a+") or ""):lower()) == n then keep = label end
+      end
       local opts = { { "ok", "Save and reboot", "Label: " .. keep,
         ("A %s gets its name from the network when it starts, so there's nothing to type."):format(R.name) } }
       local a = menu(3, 3, "Ready", opts, "ok", true)

@@ -87,7 +87,9 @@ local function numTaken(num, exceptId)
   end
   return false
 end
-local function nameOf(num) return ("Canary-%02d"):format(num) end
+-- Canary-04, or Starling-05 for a miner in the End (the turtle says which bird it is)
+local BIRDS = { Canary = true, Starling = true }
+local function nameOf(num, bird) return ("%s-%02d"):format(BIRDS[bird] and bird or "Canary", num) end
 local REBOOT_WAIT = 600000 -- ms: stop asking a Canary to reboot if it hasn't confirmed by then
 
 local live = {}        -- id -> { s = last status, seen = os.clock() }
@@ -98,7 +100,7 @@ local sendNow = {}     -- id -> true: send its order on the next pass
 
 -- A Canary asks for a number. Same computer keeps its number; a hint (its old label) is honoured
 -- if free; otherwise the next number. Retired numbers are never reused.
-local function assign(id, hint)
+local function assign(id, hint, bird)
   local d = cfg.canaries[id]
   if d and not d.retired then return d.num end
   local num = tonumber(hint)
@@ -107,7 +109,7 @@ local function assign(id, hint)
     while numTaken(num, id) do num = num + 1 end
   end
   cfg.canaries[id] = newEntry(num)
-  cfg.canaries[id].label = nameOf(num)
+  cfg.canaries[id].label = nameOf(num, bird)
   cfg.nextNum = math.max(cfg.nextNum, num + 1)
   saveCfg()
   return num
@@ -926,8 +928,8 @@ local function netLoop()
     local from, msg, proto = rednet.receive(1)
     if type(msg) == "table" and proto == PROTOCOL then
       if msg.type == "register" and msg.id == from then
-        local num = assign(from, msg.want)
-        local label = nameOf(num)
+        local num = assign(from, msg.want, msg.name)
+        local label = nameOf(num, msg.name)
         rednet.send(from, { type = "assigned", id = from, num = num, label = label }, PROTOCOL)
         say(("%s joined the crew."):format(label))
         sendNow[from] = true

@@ -26,8 +26,7 @@ ComputerCraft (CC:Tweaked + Advanced Peripherals) scripts for Tanis's ATM10 isla
 | Computer | Plastic factory | `plastic` | Industrial Foregoing plastic line: tree taps -> Latex Processing Unit -> furnace -> dock barrel (`plastic.env`) |
 | Computer | Neural lab | `neural` | Hostile Neural Networks wall: runs each chamber + fab column until storage has enough of what it makes (`neural.txt`, `neural.env`) |
 | Computer | Art controller | `art` | Monitor wall: live turtle map coloured by height, GPS pylons, Seagull's world map, generative art you can poke (`art.env`) |
-| Turtle | Canary | `miner` | Shaft + expanding-square mining (`junk.txt`); numbered Canary-01, -02... by the Foreman; reports its exact position |
-| Turtle | Firecrest | `firecrest` | Nether miner: Canary's shaft + squares, refuels by scooping lava with his bucket (under 25% until 75%), one dock barrel; numbered Firecrest-01... by the Nether Foreman |
+| Turtle | Miner | `miner` | One miner, named by the dimension he's set up in. **Canary** (anywhere but the Nether/End): shaft + expanding squares, `junk.txt`, dump + fuel barrels, numbered Canary-01... by the Foreman. **Firecrest** (Nether): one dock barrel, drinks lava with his bucket (under 25% until 75%), numbered by the Nether Foreman. **Starling** (End): a Canary in the End. All of them empty chests before digging them and never dig turtles, cables, barrels or hoppers |
 | Turtle | Weaver | `weaver` | Builds from a plan file (`mossy.plan`, put on him by hand: it's big); run from the Architect or `island weaver ...` in chat. If storage runs out of a block he leaves a gap, builds everything else he can (never on top of a gap) and fills the gaps when the block turns up |
 | Turtle | Woodpecker | `lumberjack` | Tree farm: maps a slab-ringed zone, plants a tree grid, chops and replants on a timer (`woodpecker.env`) |
 | Turtle | Partridge | `farmer` | Crop farm: harvests and replants any crop, hoes new soil, picks up what falls (`partridge.env`) |
@@ -188,6 +187,36 @@ Partridge (crops) and Woodpecker (trees) run on one shared engine (`shared/farmb
 - **ATM10 note:** with a hoe, CC:Tweaked right-clicks a crop before digging it, and ATM10 harvests ripe crops on right-click,
   dropping them on the ground. Partridge hoovers up under him at every plot.
 
+## One miner, three birds (Oct 2026)
+
+Canary, Firecrest and Starling are the same program (`turtle/miner/miner.lua`, `miner` on the turtle). Setup picks
+**Miner** and asks the dimension first; that decides who he is:
+
+| Dimension | Name | Boss | Dock |
+|---|---|---|---|
+| Overworld, mining dimension, anything else | Canary-NN | Foreman (`tanis-miner`) | dump barrel + fuel barrel, `junk.txt` |
+| The Nether | Firecrest-NN | Nether Foreman (`tanis-nether`) | one barrel + one empty bucket; drinks lava |
+| The End | Starling-NN | Foreman (`tanis-miner`) | dump barrel + fuel barrel, like a Canary |
+
+A numbered miner whose label names a different bird than his dimension relabels himself on boot (Firecrest-01,
+Starling-04). The Foreman numbers Canaries and Starlings from one list. In the End storage can't reach his
+barrels, so a Starling doesn't try to link them: fill his fuel barrel by hand, and send his dump barrel home the
+Nether way (barrel > hopper > ender chest). Lowest level he'll mine: Y -63 (Canary), Y 6 (Firecrest, bedrock under
+Y 5), Y 1 (Starling, void under Y 0).
+
+## Chests underground
+
+Every miner empties a chest (dungeon, mineshaft corridor, fortress, bastion, stronghold, end city...) **before**
+digging it, since a dug chest drops its loot on the floor and he'd walk on. A chest just above or below his tunnel
+gets emptied and left standing. Loot always comes home and is never thrown away to make room, except things on
+his junk list (netherrack in a fortress chest is still netherrack). Too full to take it all: he goes home,
+unloads and comes back to that chest for the rest. The Foreman status carries `chests` (how many he's emptied).
+
+He never touches **barrels, hoppers, ender chests** (vanilla and Ender Storage) or Functional Storage /
+Sophisticated Storage / Storage Drawers blocks: he goes round them like a cable. That's how your own storage is
+wired, and natural loot underground is in chests. A chest of yours inside a mining area **will** be emptied (the
+contents come home) and dug, so keep chests out of the rings or swap them for barrels.
+
 ## Canaries and the Foreman
 
 - **Numbers:** a new Canary asks the Foreman for one when it first starts (Canary-01, -02...). It keeps it when moved or reset. **Retire** (tap twice on its page) docks it for good; its number is never handed out again.
@@ -199,7 +228,7 @@ Partridge (crops) and Woodpecker (trees) run on one shared engine (`shared/farmb
 
 Firecrest mines the Nether and his haul comes home through a linked ender chest.
 
-- **Firecrest:** an **advanced** mining turtle (diamond pickaxe) with an **ender modem**, and **one empty bucket** in his inventory. Set him up (startup.lua, pick Firecrest) on top of where his shaft should go, with **one barrel** next to him (a side or above): his dock. He asks for his X/Y/Z and facing (F3) unless there's GPS in the Nether.
+- **Firecrest:** an **advanced** mining turtle (diamond pickaxe) with an **ender modem**, and **one empty bucket** in his inventory. Set him up (startup.lua, pick Miner, answer "Nether") on top of where his shaft should go, with **one barrel** next to him (a side or above): his dock. He asks for his X/Y/Z and facing (F3) unless there's GPS in the Nether.
 - **The Nether cable:** a wired modem on the Nether Foreman computer, joined by cable to wired modems on: Firecrest's **dock** barrel, an **output** barrel, and one or more **stock** barrels (optional: **input** barrels to drop things in by hand). On the computer: `/assign` (or the Barrels button) and give each its job, the same screen as storage's.
 - **Getting it home:** output barrel > hopper > Ender Storage ender chest (orange/orange/orange). Its twin at home feeds storage the same way: ender chest > hopper > a barrel that's a storage Input. A hopper moves ~150 items a minute; a Pipez item pipe is quicker if it ever backs up.
 - **What goes where:** everything Firecrest brings (and anything in an input) goes to stock if the Rules keep some of it and stock is short of that; the rest goes home. Stock above its keep count goes home too. Defaults keep 4 buckets, 16 lava buckets and some coal / charcoal / coal blocks / blaze rods for emergencies. `/keep <item> <count>` (0 = stop), or the - / + / x buttons on the Rules page.
@@ -210,15 +239,15 @@ Firecrest mines the Nether and his haul comes home through a linked ender chest.
 
 ## Renamed turtles (Oct 2026)
 
-The turtles are birds now: Canary (miner), Firecrest (Nether miner), Weaver (builder), Woodpecker (lumberjack),
+The turtles are birds now: Canary (miner; Firecrest in the Nether, Starling in the End), Weaver (builder), Woodpecker (lumberjack),
 Partridge (farmer), Seagull (map-maker). Nothing to do by hand: on its next boot each turtle switches its role, its
 label (Digger-04 becomes Canary-04), and its saved state and `.env` settings over to the new name, and drops its old
 program files. The Foreman, Nether Foreman and storage carry their saved settings over too. Chat commands use the new
 names (`island weaver build`, `island partridge rounds`).
 
-## Canaries never dig turtles
+## Miners never dig turtles
 
-ComputerCraft lets a turtle mine another turtle (it turns into an item in the digger's bag). Canaries and Firecrests
+ComputerCraft lets a turtle mine another turtle (it turns into an item in the digger's bag). Canaries, Firecrests and Starlings
 never do: a turtle in the way makes them wait up to 2 minutes for it to move on (status "Another turtle in my way"),
 and a turtle item they pick up always comes home rather than being thrown away underground.
 

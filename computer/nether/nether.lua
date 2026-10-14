@@ -29,7 +29,7 @@ local TEXT_SCALE = 0.5
 local TICK       = 2     -- seconds between barrel passes
 local HOLD_FOR   = 90    -- seconds a dock stays untouched while its Firecrest takes his supplies
 
-local RING_CAP   = 100   -- furthest ring a Firecrest will mine (matches firecrest.lua)
+local RING_CAP   = 100   -- furthest ring a Firecrest will mine (matches miner.lua's Firecrest)
 local DEF_R2     = 24    -- default outer ring (49x49: about 3x3 chunks)
 local Y_MIN, Y_MAX = 6, 120
 local NAME_MAX   = 16

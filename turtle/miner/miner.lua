@@ -1,57 +1,139 @@
--- firecrest.lua  --  Nether miner: shaft + expanding squares, drinks lava for fuel (CC:Tweaked, ATM10 / MC 1.21.1)
+-- miner.lua  --  shaft + expanding-square mining turtle (CC:Tweaked, ATM10 / MC 1.21.1)
 --
--- Canary's cousin for the Nether. Needs: an ADVANCED mining turtle (diamond pickaxe) with an ender
--- modem on its other side, and ONE empty bucket in his inventory (he never lets go of it).
--- Dock: place him where his shaft should start, with ONE barrel next to him (a side or above). The
--- Nether Foreman's computer has that barrel on its wired cable as a Dock: it takes what he brings,
--- sends it home (output barrel -> ender chest) or keeps it in the Nether, and puts in what he asks
--- for (a bucket, fuel). Below him must be free to dig.
+-- One program for every miner. Who he is depends on the dimension he's set up in:
+--   Overworld, mining dimension, anything else: a CANARY (Canary-04). Orders from the Foreman.
+--     Dock: the DUMP barrel (a storage input) on one side and the FUEL barrel on another (or above).
+--   The Nether: a FIRECREST (Firecrest-01). Orders from the Nether Foreman. Advanced turtle, ONE dock
+--     barrel (a Dock on the Nether Foreman's cable: it empties it and puts in what he asks for), and
+--     ONE empty bucket he never lets go of: under 25% fuel he scoops and drinks every lava source he
+--     sees (1,000 each), whole pools at a time, until he's over 75% (both set on the Nether Foreman).
+--     Junk (netherrack, basalt ...) is thrown away underground; the Nether Foreman sends the list.
+--   The End: a STARLING (Starling-05). Works exactly like a Canary, with the Foreman.
+-- Needs: a mining turtle (diamond pickaxe) with an ender modem on its other side. Below the dock must
+-- be free to dig. His number comes from his Foreman the first time he starts and is kept for good.
 --
--- Orders come from the Nether Foreman (layers, rings, START, STOP + DOCK, reboot, retire, his junk
--- list and when to drink lava). His name (Firecrest-01) comes from the Nether Foreman the first time.
+-- Position: he knows his dock's X/Y/Z, the way he faced and the dimension, and reports his exact
+-- position. With GPS towers (the "GPS host" role, 4 of them) he also checks himself against GPS:
+-- if he was carried somewhere he notices, works out which way he faces, and waits for an order;
+-- then he digs down, tunnels to his shaft and comes up it. Without GPS he counts his moves.
 --
--- Fuel: an advanced turtle holds 100,000. Once he drops under 25% he scoops every lava source he
--- sees (in front, above, below) with his bucket and drinks it (1,000 each), and when he finds some
--- he drinks the whole pool around him (only the lava cells, on his own level, inside his rings),
--- until he's back over 75%. Then he leaves lava alone. Both numbers are set on the Nether Foreman.
--- No lava for a while and running low: he comes home and asks the dock for fuel.
---
--- Mining is Canary's: a shaft down from the dock to the chosen Y range, then expanding squares,
--- 3 levels per pass (walks the middle, digs ores above/below), ring by ring between the Foreman's
--- "from ring" and "to ring". Keep the rings inside your force-loaded chunks: an unloaded Firecrest
--- just stops until it loads again (he saves his position after every move and carries on).
--- Junk (netherrack, basalt ...) is thrown away underground; the Nether Foreman sends the list.
+-- What he does, once you press START on the Foreman:
+--   * digs a shaft straight down from the dock to the chosen Y range
+--   * mines expanding squares around the shaft, 3 levels per pass, ring by ring between the
+--     Foreman's "from ring" and "to ring" (ring 1 = 3x3, ring 50 = 101x101):
+--     he walks the middle level and digs the block above/below only if it's an ore
+--   * on each new level he first walks out from the shaft N/E/S/W through open tunnel (never digging)
+--     until he meets a block, then starts at the ring after the shortest of the four, so a level
+--     that's already mined out doesn't get walked ring by ring again
+--   * drops 3 levels and repeats until the range is done
+--   * comes home through the shaft when full or low on fuel, unloads, refuels, goes back
+--   * saves his position after every move, so he resumes after chunk unloads / restarts
+--   * never digs another turtle (waits for it), or a cable, pipe, modem, computer, barrel, hopper,
+--     ender chest or storage block (goes under or over it), so storage can run right through his area
+--   * a chest (dungeon, fortress, bastion, stronghold...) in his way gets emptied BEFORE he digs it,
+--     and one just above or below his tunnel gets emptied and left standing. Loot always comes home.
+--     Too full to take it all: he goes home, unloads and comes back for the rest
 -- Hold Ctrl+T to stop the program (the turtle stays where it is).
+-- REBOOT from the Foreman: he finishes the block he's on (never mid-move or mid-turn), reboots,
+-- pulls the latest files and carries on exactly where he was.
 
-local PROTOCOL     = "tanis-nether"
-local STATE_FILE   = "firecrest.state"
-local DEFAULT_R2   = 24     -- outer ring when the Foreman doesn't say (24 rings = 49x49, about 3x3 chunks)
-local RING_CAP     = 100    -- furthest ring allowed (201x201): keep it inside the force-loaded chunks
-local FUEL_RESERVE = 200    -- spare fuel kept on top of the trip home
+local STATE_FILE   = "miner.state"
 local STATUS_EVERY = 3      -- seconds between status broadcasts
-local NETHER_FLOOR = 5      -- lowest Y he mines (bedrock below)
-local HUNGRY_AT    = 25     -- % of the tank: start drinking lava (the Foreman can change these)
+
+-- Who I am, by dimension (see the top). r2 = outer ring when the Foreman doesn't say, cap = furthest
+-- ring allowed, reserve = spare fuel kept on top of the trip home, floor = lowest Y a level may reach.
+local MODES = {
+  canary    = { name = "Canary",    protocol = "tanis-miner",  boss = "the Foreman",
+                r2 = 50, cap = 150, reserve = 60,  floor = -64 },
+  firecrest = { name = "Firecrest", protocol = "tanis-nether", boss = "the Nether Foreman", nether = true,
+                r2 = 24, cap = 100, reserve = 200, floor = 5 },   -- 24 rings = 49x49, about 3x3 chunks
+  starling  = { name = "Starling",  protocol = "tanis-miner",  boss = "the Foreman", isEnd = true,
+                r2 = 50, cap = 150, reserve = 60,  floor = 0 },   -- the End: void under Y 0
+}
+local function modeFor(dim)
+  local d = tostring(dim or ""):lower():gsub("^minecraft:", "")
+  if d == "the_nether" or d == "nether" then return "firecrest" end
+  if d == "the_end" or d == "end" then return "starling" end
+  return "canary"
+end
+-- Set by setMode() once the dimension is known (canary until then)
+local MODE, MODE_KEY = MODES.canary, "canary"
+local PROTOCOL, DEFAULT_R2, RING_CAP, FUEL_RESERVE = "tanis-miner", 50, 150, 60
+
+-- Firecrest's lava
+local NETHER_FLOOR = 5      -- lowest Y he mines in the Nether (bedrock below)
+local HUNGRY_AT    = 25     -- % of the tank: start drinking lava (the Nether Foreman can change these)
 local FULL_AT      = 75     -- % of the tank: stop drinking
 local DRINK_STEPS  = 48     -- most cells he walks into while drinking one pool
 local BUCKET, LAVA_BUCKET = "minecraft:bucket", "minecraft:lava_bucket"
 
--- Junk he may throw away underground. The Nether Foreman sends his real list; this is the fallback.
-local DEFAULT_JUNK = { "netherrack", "blackstone", "basalt", "smooth_basalt", "soul_sand", "soul_soil",
+-- Canary/Starling: things that count as junk live in junk.txt (one item per line, # for comments).
+-- Junk is carried home while storage still wants it (under its cap), up to 4 slots, else dumped.
+-- Edit junk.txt any time: it's re-read every time he docks.
+-- Firecrest: the Nether Foreman sends his junk list (DEFAULT_NETHER_JUNK until it does); junk.txt
+-- isn't used in the Nether, and junk never comes home from there.
+local JUNK_FILE = "junk.txt"
+local DEFAULT_JUNK = [[
+# Canary's junk list: blocks he may throw away underground.
+# One item per line. "minecraft:" is optional. Lines starting with # are ignored.
+# Junk still comes home (up to 4 slots) while storage has less than its cap of it.
+# Ores, raw metals and gems always come home. Anything else (flint, dripstone...)
+# gets thrown out when his bag is full, unless you add a "keep" line, e.g.:
+#   keep flint
+cobblestone
+cobbled_deepslate
+stone
+deepslate
+tuff
+granite
+diorite
+andesite
+calcite
+dirt
+gravel
+sand
+sandstone
+netherrack
+smooth_basalt
+basalt
+blackstone
+mud
+clay
+]]
+local DEFAULT_NETHER_JUNK = { "netherrack", "blackstone", "basalt", "smooth_basalt", "soul_sand", "soul_soil",
   "magma_block", "gravel", "crimson_nylium", "warped_nylium", "nether_wart_block", "warped_wart_block",
   "cobblestone", "cobbled_deepslate", "polished_blackstone_bricks" }
 local JUNK, KEEP = {}, {}
+local function loadJunk()
+  if not fs.exists(JUNK_FILE) then
+    local f = fs.open(JUNK_FILE, "w"); f.write(DEFAULT_JUNK); f.close()
+  end
+  local f = fs.open(JUNK_FILE, "r")
+  local text = f.readAll(); f.close()
+  local junk, keep = {}, {}
+  for line in text:gmatch("[^\r\n]+") do
+    local item = line:gsub("#.*", ""):match("^%s*(.-)%s*$")
+    local isKeep = false
+    if item:lower():sub(1, 5) == "keep " then isKeep = true; item = item:sub(6):match("^%s*(.-)%s*$") end
+    if item ~= "" then
+      if not item:find(":") then item = "minecraft:" .. item end
+      if isKeep then keep[item] = true else junk[item] = true end
+    end
+  end
+  JUNK, KEEP = junk, keep
+end
+-- Firecrest: the list from the Nether Foreman
 local function setJunk(list)
   local junk = {}
-  for _, item in ipairs(list or DEFAULT_JUNK) do
+  for _, item in ipairs(list or DEFAULT_NETHER_JUNK) do
     if type(item) == "string" and item ~= "" then
       if not item:find(":") then item = "minecraft:" .. item end
       junk[item] = true
     end
   end
   junk[BUCKET], junk[LAVA_BUCKET] = nil, nil   -- never junk
-  JUNK = junk
+  JUNK, KEEP = junk, {}
 end
-setJunk(nil)
 
 ---------------------------------------------------------------------------
 -- State (saved to disk after every move)
@@ -68,6 +150,14 @@ local function load()
   local t = textutils.unserialize(f.readAll())
   f.close()
   if type(t) == "table" then S = t end
+end
+
+-- Pick Canary / Firecrest / Starling from the dimension, and load the right junk list
+local function setMode()
+  MODE_KEY = modeFor(S.dim)
+  MODE = MODES[MODE_KEY]
+  PROTOCOL, DEFAULT_R2, RING_CAP, FUEL_RESERVE = MODE.protocol, MODE.r2, MODE.cap, MODE.reserve
+  if MODE.nether then setJunk(S.junk) else loadJunk() end
 end
 
 local ctrl = nil -- latest command from the panel (set by the network loop)
@@ -132,11 +222,15 @@ end
 -- Blocks I never dig. ComputerCraft lets a turtle mine another turtle (it ends up as an item in
 -- my bag), and a pickaxe happily breaks storage cables, so:
 --   * another turtle in my way: I wait for it to move on (isTurtle)
---   * a cable, pipe, modem or computer (anything isProtected): it isn't going anywhere, so I go
---     round it, one block under it (or over, if under won't work), and never dig it
+--   * a cable, pipe, modem, computer, barrel, hopper, ender chest or storage block (anything
+--     isProtected): it isn't going anywhere, so I go round it, one block under it (or over, if under
+--     won't work), and never dig it. Barrels and hoppers are how Tanis's storage is wired (chests
+--     don't take modems); the loot underground is in chests, which I empty and dig (isLootable).
 local KEEP_MODS = { "computercraft:", "refinedstorage:", "pipez:", "laserio:", "integrateddynamics:",
-  "integratedtunnels:", "xnet:", "prettypipes:", "modularrouters:" }
-local KEEP_WORDS = { "cable", "pipe", "conduit", "transporter", "duct", "pressurized_tube", "conductor" }
+  "integratedtunnels:", "xnet:", "prettypipes:", "modularrouters:", "functionalstorage:",
+  "sophisticatedstorage:", "storagedrawers:", "enderstorage:" }
+local KEEP_WORDS = { "cable", "pipe", "conduit", "transporter", "duct", "pressurized_tube", "conductor",
+  "barrel", "hopper", "ender_chest" }
 local function blockName(ok, d)
   if ok == true and type(d) == "table" and type(d.name) == "string" then return d.name end
 end
@@ -155,6 +249,20 @@ local function isProtected(ok, d)
 end
 local isMachine = isProtected -- old name
 
+-- A chest, shulker box or any other inventory that isn't protected: empty it before digging it.
+local PSIDE = { f = "front", u = "top", d = "bottom" }
+local function isLootable(kind, ok, d)
+  local n = blockName(ok, d)
+  if not n or isProtected(ok, d) then return false end
+  if n:find("chest", 1, true) or n:find("shulker_box", 1, true) then return true end
+  if d.tags and (d.tags["c:chests"] or d.tags["c:shulker_boxes"]) then return true end
+  local side = PSIDE[kind]
+  if peripheral.hasType then return peripheral.hasType(side, "inventory") == true end
+  local t = { peripheral.getType(side) }
+  for _, x in ipairs(t) do if x == "inventory" then return true end end
+  return false
+end
+
 -- Which way am I facing? Step one block (turning to find a free side), ask GPS, step back.
 -- allowDig: may dig the block in front (only underground).
 -- Returns the compass direction it now faces (or nil), how many right turns it made looking, and
@@ -165,14 +273,15 @@ local function compassByStep(allowDig)
   for turns = 0, 3 do
     local moved = false
     if not turtle.detect() then moved = turtle.forward()
-    elseif allowDig and not isMachine(turtle.inspect()) and turtle.dig() then moved = turtle.forward() end
+    elseif allowDig and not isMachine(turtle.inspect()) and not isLootable("f", turtle.inspect())
+      and turtle.dig() then moved = turtle.forward() end
     if moved then
       local x1, _, z1 = locate()
       local stuck = not turtle.back()
       if stuck and allowDig then
         -- Something fell in behind: turn round, clear it, step back, turn round again
         turtle.turnRight(); turtle.turnRight()
-        if not isMachine(turtle.inspect()) then turtle.dig() end
+        if not isMachine(turtle.inspect()) and not isLootable("f", turtle.inspect()) then turtle.dig() end
         stuck = not turtle.forward()
         turtle.turnRight(); turtle.turnRight()
       end
@@ -204,6 +313,8 @@ local OPS = {
 
 local TURTLE_WAIT = 120 -- seconds to wait for another turtle to get out of my way before giving up
 local CABLE = "Cable in the way" -- move() refused: a protected block (isProtected) is there
+local CHEST_FULL = "Chest in the way, I'm full" -- move() refused: a chest I couldn't empty all of
+local lootAt -- lootAt(kind): empty the container on that side; false if I'm too full (Inventory section)
 
 -- Move one block, digging/attacking whatever is in the way (never a turtle or cable: see isProtected).
 -- The fuel level before the move is saved, so after a crash we can tell if the move happened.
@@ -239,6 +350,8 @@ local function move(kind)
       tries = tries - 1 -- waiting doesn't use up the dig attempts
       os.sleep(1)
     elseif op.detect() then
+      -- A chest: take everything out first (a dug chest spills its loot on the floor)
+      if isLootable(kind, okI, info) and not lootAt(kind) then unwait(); save(); return false, CHEST_FULL end
       local ok, why = op.dig()
       if not ok then
         why = tostring(why)
@@ -304,14 +417,15 @@ local function climbCable(k)
 end
 
 -- Walk to (tx, tz) on the current level, x first (or z first), calling onStep after each block.
--- Cables on the way are hopped (never dug). If (tx, tz) IS a cable, returns false, CABLE.
+-- Cables on the way are hopped (never dug). If (tx, tz) IS a cable, returns false, CABLE (a chest I'm
+-- too full to empty: CHEST_FULL; one on the way is hopped too and emptied another time).
 local function goToXZ(tx, tz, onStep, zFirst, retried)
   local function walk(axis, target, plus, minus)
     while S[axis] ~= target do
       face(target > S[axis] and plus or minus)
       local ok, why = move("f")
-      if not ok and why == CABLE then
-        if math.abs(target - S[axis]) == 1 then return false, CABLE end -- that cell is the cable
+      if not ok and (why == CABLE or why == CHEST_FULL) then
+        if math.abs(target - S[axis]) == 1 then return false, why end -- that cell is the cable/chest
         ok, why = hopCable()
       end
       if not ok then return false, why end
@@ -325,7 +439,7 @@ local function goToXZ(tx, tz, onStep, zFirst, retried)
   if zFirst then a, b = walkZ, walkX end
   local ok, why = a()
   if ok then ok, why = b() end
-  if not ok and why == CABLE and not retried then
+  if not ok and (why == CABLE or why == CHEST_FULL) and not retried then
     -- A cable at a corner: try the other way round (the final cell itself can't be reached)
     return goToXZ(tx, tz, onStep, not zFirst, true)
   end
@@ -336,8 +450,8 @@ local function goY(ty)
   while S.y ~= ty do
     local k = S.y < ty and "u" or "d"
     local ok, why = move(k)
-    if not ok and why == CABLE then
-      if math.abs(ty - S.y) == 1 then return false, CABLE end
+    if not ok and (why == CABLE or why == CHEST_FULL) then
+      if math.abs(ty - S.y) == 1 then return false, why end
       ok, why = climbCable(k)
     end
     if not ok then return false, why end
@@ -347,11 +461,17 @@ end
 
 local function atDock() return S.x == 0 and S.y == 0 and S.z == 0 end
 
--- Carried somewhere (S.offPath): don't walk through whatever is around. Dig down
--- (a few blocks under the dock, above the bedrock floor), tunnel to below the shaft, come up it.
+-- Carried somewhere (S.offPath): don't walk through whatever is around. Dig down to Y 0
+-- (well under the island and the sea floor; in the Nether a few blocks under the dock, above the
+-- bedrock floor), tunnel to below the shaft, then come up it.
 local function tunnelDepth()
   local y = math.min(S.y, -4)
-  if S.home then y = math.max(y, NETHER_FLOOR + 1 - S.home.y) end -- stay above the bedrock floor
+  if S.home and MODE.nether then
+    y = math.max(y, NETHER_FLOOR + 1 - S.home.y) -- stay above the bedrock floor
+  elseif S.home then
+    y = math.min(y, -S.home.y)
+    y = math.max(y, (MODE.isEnd and 1 or -60) - S.home.y) -- above bedrock (the End: above the void)
+  end
   return y
 end
 
@@ -395,7 +515,7 @@ local function dumpJunk(all)
   if not all and not next(capped) then return end
   for s = 1, 16 do
     local d = turtle.getItemDetail(s)
-    if d and JUNK[d.name] and (all or capped[d.name]) then
+    if d and JUNK[d.name] and (all or capped[d.name]) and not (S.loot and S.loot[d.name]) then
       turtle.select(s); dropAway()
     end
   end
@@ -413,6 +533,7 @@ local valuableCache = {}
 local function isValuable(slot)
   local d = turtle.getItemDetail(slot)
   if not d then return false end
+  if S.loot and S.loot[d.name] then return true end -- out of a chest: always comes home
   local v = valuableCache[d.name]
   if v ~= nil then return v end
   if KEEP[d.name] or d.name == BUCKET or d.name == LAVA_BUCKET then valuableCache[d.name] = true; return true end
@@ -590,9 +711,10 @@ local function drinkPool()
   setStatus(prevSt or "mining", prevMsg)
 end
 
--- Every step: hungry? Then any lava next to him gets drunk, and a pool gets drunk dry.
+-- Every step: hungry? Then any lava next to him gets drunk, and a pool gets drunk dry. (Firecrest only:
+-- Canaries and Starlings carry no bucket and leave lava alone.)
 local function lookForLava()
-  if not hungry() then return end
+  if not MODE.nether or not hungry() then return end
   drinkHeld()
   if not findSlot(BUCKET) then return end
   local got = false
@@ -602,9 +724,66 @@ local function lookForLava()
   if got and hungry() then drinkPool() end
 end
 
+---------------------------------------------------------------------------
+-- Chests: empty them before digging (a dug chest spills its loot on the floor, and I'd walk on)
+---------------------------------------------------------------------------
+local SUCK = { f = turtle.suck, u = turtle.suckUp, d = turtle.suckDown }
+local function countsBySlot()
+  local c = {}
+  for s = 1, 16 do
+    local d = turtle.getItemDetail(s)
+    c[s] = d and { d.name, d.count } or false
+  end
+  return c
+end
+
+-- Take everything out of the container on that side. Everything taken that isn't on my junk list
+-- is marked as loot (always comes home, never thrown away). True when it's empty; false if I filled up first (after making
+-- room by throwing junk away).
+lootAt = function(kind)
+  local took, roomMade = 0, false
+  turtle.select(1)
+  while true do
+    local before = countsBySlot()
+    if SUCK[kind]() then
+      took = took + 1
+      S.loot = S.loot or {}
+      for s = 1, 16 do
+        local d = turtle.getItemDetail(s)
+        -- (junk out of a chest is still junk: netherrack in a fortress chest gets no free ride home)
+        if d and not JUNK[d.name] and (not before[s] or before[s][1] ~= d.name or before[s][2] < d.count) then
+          S.loot[d.name] = true
+        end
+      end
+      S.lootItems = (S.lootItems or 0) + 1
+      save()
+    elseif emptySlots() > 0 then
+      -- Room to spare and nothing came out: it's empty
+      if took > 0 then
+        S.chests = (S.chests or 0) + 1
+        setStatus(S.status or "mining", ("Emptied a chest (%d stack%s)"):format(took, took == 1 and "" or "s"))
+      end
+      return true
+    elseif not roomMade then
+      makeRoom(); roomMade = true
+    else
+      setStatus(S.status or "mining", "Full, with a chest still to empty")
+      return false
+    end
+  end
+end
+
+-- A chest just above or below my tunnel: empty it and leave it standing (only with room to spare)
+local function lootUpDown()
+  for _, k in ipairs({ "u", "d" }) do
+    if emptySlots() > 2 and isLootable(k, OPS[k].inspect()) then lootAt(k) end
+  end
+end
+
 local function checkUpDown()
   if isOre(turtle.inspectUp()) then turtle.digUp(); S.ores = (S.ores or 0) + 1 end
   if isOre(turtle.inspectDown()) then turtle.digDown(); S.ores = (S.ores or 0) + 1 end
+  lootUpDown()
   lookForLava()
 end
 
@@ -651,7 +830,7 @@ local function checkpoint()
   maybeReboot()
   if S.want ~= "run" then abort("stop", "Stop requested") end
   if S.regionChanged then S.regionChanged = nil; abort("region") end
-  dumpJunk(true)   -- the Nether Foreman's junk list: thrown away, never carried home
+  dumpJunk(MODE.nether == true)   -- Firecrest: the Nether Foreman's junk is thrown away, never carried home
   if emptySlots() <= 1 then
     makeRoom()
     if emptySlots() <= 1 then
@@ -682,7 +861,7 @@ local function layerList()
   local out = {}
   if not S.minY or not S.maxY then return out end
   local c = math.min(S.maxY - 1, S.dockY - 3)
-  while c + 1 >= S.minY and c - 1 >= NETHER_FLOOR do
+  while c + 1 >= S.minY and c - 1 >= MODE.floor do
     out[#out + 1] = c
     c = c - 3
   end
@@ -705,8 +884,8 @@ local function fuelToStart()
 end
 
 -- A fresh level: how far out is it already mined? From the shaft, walk each way (N, E, S, W)
--- through open space only (air: lava and anything else counts as unmined), stop at the first block
--- (or at the outer ring), walk back.
+-- through open space only (air: water, lava and anything else count as unmined), stop at the first
+-- block (or at the outer ring), walk back.
 -- After the first direction, the others only go as far as the shortest so far.
 -- Returns the shortest open run: rings 1..n are already open in every direction.
 local function probeMined(r2)
@@ -722,7 +901,7 @@ local function probeMined(r2)
     while n < best do
       checkpoint()
       local okI, dI = turtle.inspect()
-      if okI and dI.name ~= "minecraft:air" and dI.name ~= "minecraft:cave_air" then break end
+      if okI and dI.name ~= "minecraft:air" and dI.name ~= "minecraft:cave_air" and dI.name ~= "minecraft:void_air" then break end
       if turtle.detect() or not move("f") then break end
       n = n + 1
     end
@@ -757,9 +936,10 @@ local function mineRegion()
         checkpoint()
         local k = S.y > cy and "d" or "u"
         local ok, why = move(k)
-        if not ok and why == CABLE and math.abs(cy - S.y) > 1 then ok, why = climbCable(k) end
+        if not ok and why == CHEST_FULL and math.abs(cy - S.y) <= 1 then abort("full", "Full: a chest to finish emptying") end
+        if not ok and (why == CABLE or why == CHEST_FULL) and math.abs(cy - S.y) > 1 then ok, why = climbCable(k) end
         if not ok then error("Shaft blocked at Y " .. (S.dockY + S.y) .. ": " .. tostring(why), 0) end
-        lookForLava()   -- the shaft often goes through the lava sea
+        lookForLava()   -- the Nether's shaft often goes through the lava sea
       end
     end
     -- Expanding squares
@@ -790,6 +970,8 @@ local function mineRegion()
         S.step = i
         checkpoint()
         local ok, why = goToXZ(cells[i][1], cells[i][2], checkUpDown)
+        -- That cell is a chest and I'm full: home to unload, then back to this very cell for the rest
+        if not ok and why == CHEST_FULL then abort("full", "Full: a chest to finish emptying") end
         if not ok and why ~= CABLE then blocked = true; break end -- a cable cell is just skipped
       end
       if blocked then break end
@@ -804,8 +986,133 @@ local function mineRegion()
   save()
 end
 
+-- Tell storage which barrels are mine: with storage watching (sorting paused), take 1 item from
+-- my fuel barrel and drop it in my dump barrel. Storage registers whichever barrels changed.
+local function linkBarrels()
+  if not (S.fuelDir and S.dumpDir) then return false, "No barrels found at setup" end
+  if not rednet.isOpen() then
+    local m = peripheral.find("modem", function(_, x) return x.isWireless() end)
+    if not m then return false, "No ender modem" end
+    rednet.open(peripheral.getName(m))
+  end
+  local me = os.getComputerID()
+  local function waitFor(kind, seconds)
+    local deadline = os.clock() + seconds
+    while os.clock() < deadline do
+      local _, m = rednet.receive(PROTOCOL, math.max(0.1, deadline - os.clock()))
+      if type(m) == "table" and m.type == kind and m.id == me then return m end
+    end
+  end
+  setStatus("docked", "Showing storage my barrels")
+  rednet.broadcast({ type = "barrel_probe", step = "start", id = me }, PROTOCOL)
+  if not waitFor("probe_ready", 10) then
+    return false, "Storage didn't answer (needs a wireless/ender modem)"
+  end
+  for slot = 1, 16 do if turtle.getItemCount(slot) == 0 then turtle.select(slot); break end end
+  local item
+  if suckFrom(S.fuelDir, 1) then
+    local d = turtle.getItemDetail()
+    item = d and d.name
+    dropTo(S.dumpDir)
+  end
+  face(0)
+  rednet.broadcast({ type = "barrel_probe", step = "done", id = me, item = item }, PROTOCOL)
+  local r = waitFor("probe_result", 25)
+  turtle.select(1)
+  if not r then return false, "Storage didn't confirm" end
+  return r.ok == true, r.msg
+end
+
+local nextLinkTry = 0
+local function maybeLinkBarrels()
+  if S.barrelsLinked or os.clock() < nextLinkTry or not atDock() then return end
+  if MODE.isEnd then S.linkNote = "In the End: storage can't reach my barrels"; return end
+  local ok, msg = linkBarrels()
+  S.barrelsLinked, S.linkNote = ok or nil, msg
+  save()
+  print((ok and "Barrels linked: " or "Barrel link failed: ") .. tostring(msg))
+  if not ok then nextLinkTry = os.clock() + 120 end
+end
+
 ---------------------------------------------------------------------------
--- Dock: one barrel. He empties everything into it (except his bucket); the Nether Foreman takes it
+-- Dock: unload, refuel
+---------------------------------------------------------------------------
+local function gpsFixHome()
+  if not gpsSeen then return end
+  local x, y, z = locate()
+  local ex, ey, ez = absPos()
+  if x and ex and (x ~= ex or y ~= ey or z ~= ez) then
+    print(("GPS says %d %d %d, I counted %d %d %d. Trusting GPS."):format(x, y, z, ex, ey, ez))
+    S.home = { x = x - (ex - S.home.x), y = y - (ey - S.home.y), z = z - (ez - S.home.z) }
+    S.dockY = S.home.y
+  end
+end
+
+-- Canary / Starling: DUMP barrel (storage input) and FUEL barrel
+local function dockServiceCanary()
+  setStatus("docked", "Unloading")
+  gpsFixHome()
+  loadJunk()            -- pick up any edits to junk.txt
+  valuableCache = {}
+  local haul = {}
+  for s = 1, 16 do
+    local d = turtle.getItemDetail(s)
+    if d then
+      turtle.select(s)
+      if not JUNK[d.name] then haul[d.name] = (haul[d.name] or 0) + d.count end
+      local tries = 0
+      while turtle.getItemCount(s) > 0 do
+        if not dropTo(S.dumpDir) then
+          tries = tries + 1
+          setStatus("waiting", "Dump barrel full, waiting")
+          os.sleep(3)
+          if tries > 10 then break end -- give up for now; the main loop waits at the dock
+        end
+      end
+    end
+  end
+  if next(haul) then
+    S.lastHaul = haul
+    S.totals = S.totals or {}
+    for n, c in pairs(haul) do S.totals[n] = (S.totals[n] or 0) + c end
+  end
+  S.ores = 0
+  if emptySlots() < 16 then face(0); save(); return false end -- couldn't unload everything
+  S.loot = nil          -- the loot's in storage now
+  maybeLinkBarrels() -- before refuelling, while the fuel barrel still has something in it
+
+  -- Refuel from the fuel barrel, taking only what fits in the tank
+  local limit = fuelLimit()
+  if limit ~= math.huge then
+    setStatus("docked", "Refuelling")
+    turtle.select(1)
+    for _ = 1, 40 do
+      if fuel() >= limit - 80 then break end
+      if not suckFrom(S.fuelDir) then break end
+      local returned = false
+      if turtle.refuel(0) then
+        local before = fuel()
+        turtle.refuel(1)
+        local per = fuel() - before
+        if per > 0 then
+          local n = math.floor((limit - fuel()) / per)
+          if n > 0 then turtle.refuel(math.min(n, turtle.getItemCount(1))) end
+        end
+      end
+      if turtle.getItemCount(1) > 0 then
+        if turtle.refuel(0) then dropTo(S.fuelDir); returned = true -- leftover fuel goes back
+        else dropTo(S.dumpDir) end                                -- empty buckets etc. to storage
+      end
+      if returned then break end
+    end
+  end
+  face(0)
+  save()
+  return emptySlots() == 16 -- false if the dump barrel wouldn't take everything
+end
+
+---------------------------------------------------------------------------
+-- Firecrest's dock: one barrel. He empties everything into it (except his bucket); the Nether Foreman takes it
 -- away. If he needs a bucket or fuel he asks, the Foreman puts it in the barrel, he takes it.
 ---------------------------------------------------------------------------
 local dockReply = nil   -- latest dock_ready for me (set by the network loop)
@@ -897,22 +1204,15 @@ local function takeSupplies()
   return ok
 end
 
-local function dockService(needStart)
+local function dockServiceNether(needStart)
   setStatus("docked", "Unloading")
-  if gpsSeen then
-    local x, y, z = locate()
-    local ex, ey, ez = absPos()
-    if x and ex and (x ~= ex or y ~= ey or z ~= ez) then
-      print(("GPS says %d %d %d, I counted %d %d %d. Trusting GPS."):format(x, y, z, ex, ey, ez))
-      S.home = { x = x - (ex - S.home.x), y = y - (ey - S.home.y), z = z - (ez - S.home.z) }
-      S.dockY = S.home.y
-    end
-  end
+  gpsFixHome()
   valuableCache = {}
   drinkHeld()
   dumpJunk(true)   -- junk picked up on the way home goes down the shaft, not into the dock
   S.ores = 0
   if not unloadAll() then face(0); save(); return false end
+  S.loot = nil     -- the loot's with the Nether Foreman now
 
   local limit = fuelLimit()
   local needBucket = bucketState() == "none"
@@ -936,6 +1236,12 @@ local function dockService(needStart)
   face(0)
   save()
   return true
+end
+
+-- needStart: fuel needed to head out (Firecrest asks the dock for it; Canaries just refuel)
+local function dockService(needStart)
+  if MODE.nether then return dockServiceNether(needStart) end
+  return dockServiceCanary()
 end
 
 ---------------------------------------------------------------------------
@@ -993,14 +1299,25 @@ end
 
 local function setupDock()
   term.clear(); term.setCursorPos(1, 1)
-  title("FIRECREST SETUP")
-  print("I sit on top of my future shaft.")
-  print("I need ONE barrel next to me (a side")
-  print("or above): my dock, a Dock on the")
-  print("Nether Foreman's cable. And one empty")
-  print("bucket in my inventory, for lava.")
-  print()
+  title("MINER SETUP")
   S = { x = 0, y = 0, z = 0, h = 0, want = "dock", seq = nil }
+  print("Which dimension am I in?")
+  S.dim = askDimension()
+  setMode()
+  term.clear(); term.setCursorPos(1, 1)
+  title(("I'M A %s HERE"):format(MODE.name:upper()))
+  print("I'm sitting on top of my future shaft.")
+  if MODE.nether then
+    print("I need ONE barrel next to me (a side")
+    print("or above): my dock, a Dock on the")
+    print("Nether Foreman's cable. And one empty")
+    print("bucket in my inventory, for lava.")
+  else
+    print("I need two barrels next to me (sides or above):")
+    print(" - DUMP barrel (a storage input, empty)")
+    print(" - FUEL barrel (with some coal in it)")
+  end
+  print()
   local x, y, z = locate()
   if x then
     print(("GPS says I'm at %d %d %d."):format(x, y, z))
@@ -1010,7 +1327,7 @@ local function setupDock()
     if stuck then apply("f") end -- couldn't step back onto the dock; goHome fixes it later
     if S.facing then print("I'm facing " .. COMPASS[S.facing] .. ".") else S.facing = askFacing() end
   else
-    print("No GPS here. Type my position")
+    print("No GPS towers heard. Type my position")
     print("(F3, the block I'm in):")
     local hx = askNumber("X: ")
     local hy = askNumber("Y: ")
@@ -1019,7 +1336,6 @@ local function setupDock()
     S.facing = askFacing()
   end
   S.dockY = S.home.y
-  S.dim = "the_nether"
   save()
   while true do
     local found = {}
@@ -1028,23 +1344,45 @@ local function setupDock()
       turnRight()
     end
     if isContainer(turtle.inspectUp()) then found[#found + 1] = "up" end
-    face(0)
-    if #found == 1 then
-      S.dockDir = found[1]
-      print(("Dock barrel: %s."):format(sideName(S.dockDir)))
-      break
+    if MODE.nether then
+      face(0)
+      if #found == 1 then
+        S.dockDir = found[1]
+        print(("Dock barrel: %s."):format(sideName(S.dockDir)))
+        break
+      end
+      printError(#found == 0 and "No barrel next to me." or ("%d barrels here: I need just one."):format(#found))
+      print("Fix that, then press Enter.")
+    else
+      local fuelDir, others = nil, {}
+      turtle.select(1)
+      for _, dir in ipairs(found) do
+        if suckFrom(dir) then
+          local isFuel = turtle.refuel(0)
+          dropTo(dir)
+          if isFuel and not fuelDir then fuelDir = dir else others[#others + 1] = dir end
+        else
+          others[#others + 1] = dir
+        end
+      end
+      face(0)
+      if fuelDir and #others >= 1 then
+        S.fuelDir, S.dumpDir = fuelDir, others[1]
+        print(("Fuel barrel: %s. Dump barrel: %s."):format(sideName(S.fuelDir), sideName(S.dumpDir)))
+        break
+      end
+      printError(("Found %d barrel(s); fuel %s."):format(#found, fuelDir and "found" or "not found"))
+      print("Put coal in the FUEL barrel, keep the DUMP barrel empty, then press Enter.")
     end
-    printError(#found == 0 and "No barrel next to me." or ("%d barrels here: I need just one."):format(#found))
-    print("Fix that, then press Enter.")
     read()
   end
-  if bucketState() == "none" then
+  if MODE.nether and bucketState() == "none" then
     printError("No bucket on me: put an empty bucket")
     print("in me, or in a Nether stock barrel.")
   end
   save()
-  print("Setup done. The Nether Foreman gives")
-  print("me a number; pick my layers and press")
+  print(("Setup done. %s gives me a"):format((MODE.boss:gsub("^t", "T"))))
+  print("number; pick my layers and press")
   print("START there.")
 end
 
@@ -1065,12 +1403,53 @@ end
 local function lostFlow()
   setStatus("lost", "Carry me back to the dock")
   print("I lost track of which way I'm facing (unloaded mid-turn).")
-  print(("Put me back on the dock with the barrel %s,"):format(sideName(S.dockDir)))
+  if S.dockDir then
+    print(("Put me back on the dock with the barrel %s,"):format(sideName(S.dockDir)))
+  else
+    print(("Put me back on the dock with the dump barrel %s,"):format(sideName(S.dumpDir)))
+  end
   print("then press Enter here.")
   read()
   S.x, S.y, S.z, S.h, S.lost = 0, 0, 0, 0, nil
   S.k, S.step = S.r1 or 1, 1
   save()
+end
+
+-- Older Canaries only knew their dock's Y. Fill in X/Z, facing and dimension once.
+local function migrateHome()
+  if S.home and S.facing then return end
+  setStatus("waiting", "Working out where my dock is")
+  local x, y, z = locate()
+  if x and not S.lost then
+    local c, turns, stuck = compassByStep(S.y <= -2)
+    S.h = (S.h + turns) % 4
+    if stuck then apply("f") end
+    if c then
+      S.facing = (c - S.h) % 4
+      x, y, z = locate()
+      if x then
+        local ax, az = rot(S.x, S.z, S.facing)
+        S.home = { x = x - ax, y = y - S.y, z = z - az }
+        S.dockY = S.home.y
+        S.dim = S.dim or "overworld"
+        save()
+        return
+      end
+    end
+  end
+  setStatus("waiting", "Type my dock's position on my screen (one time)")
+  term.clear(); term.setCursorPos(1, 1)
+  title("ONE-TIME: WHERE IS MY DOCK?")
+  print(("My dock is at Y %d. I need its X and Z (F3 on the"):format(S.dockY))
+  print("block I sit in when docked), and which way I face there.")
+  local hx = askNumber("Dock X: ")
+  local hz = askNumber("Dock Z: ")
+  S.home = { x = hx, y = S.dockY, z = hz }
+  S.facing = askFacing()
+  print("Which dimension?")
+  S.dim = askDimension()
+  save()
+  print("Thanks! Carrying on.")
 end
 
 -- Check my counted position against GPS. If I've been carried off, re-learn where I am and
@@ -1110,17 +1489,19 @@ local function runOnce()
   if atDock() then
     local need = fuelToStart()
     if not dockService(need) then
-      setStatus("waiting", "Dock barrel full. Is the Nether Foreman running?")
+      setStatus("waiting", MODE.nether and "Dock barrel full. Is the Nether Foreman running?"
+        or "Dump barrel full. Is storage running?")
       waitCtrl(15)
       return
     end
-    if bucketState() == "none" then
+    if MODE.nether and bucketState() == "none" then
       setStatus("waiting", "No bucket: put an empty bucket in a Nether stock barrel")
       waitCtrl(15)
       return
     end
     if fuel() < need then
-      setStatus("waiting", ("Need %d fuel, have %d: lava buckets in a stock barrel"):format(need, fuel()))
+      setStatus("waiting", ("Need %d fuel, have %d%s"):format(need, fuel(),
+        MODE.nether and ": lava buckets in a stock barrel" or ""))
       waitCtrl(15)
       return
     end
@@ -1140,6 +1521,8 @@ local function runOnce()
 end
 
 local function mainLoop()
+  migrateHome()
+  setMode()
   checkPosition()
   while true do
     applyCtrl()
@@ -1161,12 +1544,12 @@ local function mainLoop()
       if not atDock() then waitCtrl(30) end
     elseif S.retired then
       if not atDock() then setStatus("returning", "Retiring: heading home"); safeHome() end
-      if atDock() then dockService(nil); setStatus("retired", "Retired. Thanks for your service") end
+      if atDock() then dockService(); setStatus("retired", "Retired. Thanks for your service") end
       waitCtrl(30)
     elseif S.want ~= "run" or S.done then
       if not atDock() then setStatus("returning", "Heading home"); safeHome() end
       if atDock() then
-        dockService(nil)
+        dockService()
         setStatus("docked", S.done and "Range finished. Pick a new one." or "Waiting for START")
       end
       waitCtrl(10)
@@ -1187,29 +1570,45 @@ local function statusMsg()
   while #haul > 8 do table.remove(haul) end
   local f, l = turtle.getFuelLevel(), turtle.getFuelLimit()
   local px, py, pz = absPos()
-  return {
+  local m = {
     type = "status", id = os.getComputerID(), label = os.getComputerLabel(), num = S.num,
     pos = px and { x = px, y = py, z = pz } or nil, dim = S.dim, home = S.home,
     facing = S.facing and COMPASS[(S.facing + (S.h or 0)) % 4], gps = gpsSeen,
-    offPath = S.offPath, retired = S.retired,
-    state = S.status, msg = S.msg, seq = S.seq, kind = "firecrest",
+    offPath = S.offPath, retired = S.retired, state = S.status, msg = S.msg, seq = S.seq,
+    kind = MODE_KEY, bird = MODE.name, chests = S.chests or 0,
     fuel = f, fuelLimit = l, slots = used,
-    hungry = S.hungry == true, hungryAt = S.hungryAt or HUNGRY_AT, fullAt = S.fullAt or FULL_AT,
-    bucket = bucketState(), lavaFuel = S.lavaFuel or 0, lavaScoops = S.lavaScoops or 0, dockNote = S.dockNote,
     y = S.dockY and (S.dockY + (S.y or 0)), x = S.x, z = S.z,
     layer = S.layerIdx, layers = S.layerCount, ring = S.k, minRing = S.r1 or 1, maxRing = S.r2 or DEFAULT_R2,
     minY = S.minY, maxY = S.maxY, want = S.want, rebootDone = S.rebootDone, done = S.done, ores = S.ores, haul = haul,
   }
+  if MODE.nether then
+    m.hungry, m.hungryAt, m.fullAt = S.hungry == true, S.hungryAt or HUNGRY_AT, S.fullAt or FULL_AT
+    m.bucket, m.lavaFuel, m.lavaScoops, m.dockNote = bucketState(), S.lavaFuel or 0, S.lavaScoops or 0, S.dockNote
+  else
+    m.barrelsLinked, m.linkNote = S.barrelsLinked, S.linkNote
+  end
+  return m
 end
 
+-- My number from a label like Canary-04 / Firecrest-01 (any bird: it's offered back after a reset)
 local function labelNum()
-  return tonumber(((os.getComputerLabel() or ""):match("^[Ff]irecrest%-(%d+)$")))
+  return tonumber(((os.getComputerLabel() or ""):match("^%a+%-(%d+)$")))
+end
+local function myLabel(num) return ("%s-%02d"):format(MODE.name, num) end
+
+-- Name follows the dimension: a numbered miner whose label names another bird gets his own
+local function fixLabel()
+  if not S.num then return end
+  local lbl = os.getComputerLabel()
+  local bird, n = (lbl or ""):match("^(%a+)%-(%d+)$")
+  if lbl and not bird then return end           -- a label Tanis typed himself: leave it
+  if bird ~= MODE.name or tonumber(n) ~= S.num then os.setComputerLabel(myLabel(S.num)) end
 end
 
 local function netLoop()
   local modem = peripheral.find("modem", function(_, m) return m.isWireless() end)
   if not modem then
-    print("No ender/wireless modem: no Nether Foreman, no orders.")
+    print(("No ender/wireless modem: no %s, no orders."):format((MODE.boss:gsub("^the ", ""))))
     return os.pullEvent("never")
   end
   rednet.open(peripheral.getName(modem))
@@ -1219,18 +1618,20 @@ local function netLoop()
     local _, msg = rednet.receive(PROTOCOL, 1)
     if type(msg) == "table" and msg.type == "assigned" and msg.id == me and not S.num and tonumber(msg.num) then
       S.num = tonumber(msg.num)
-      os.setComputerLabel(msg.label or ("Firecrest-%02d"):format(S.num))
-      print("The Nether Foreman named me " .. os.getComputerLabel() .. ".")
+      -- An older Foreman only knows Canary-NN: my name comes from my dimension either way
+      local lbl = type(msg.label) == "string" and msg.label or ""
+      os.setComputerLabel(lbl:sub(1, #MODE.name + 1) == MODE.name .. "-" and lbl or myLabel(S.num))
+      print(("%s named me %s."):format((MODE.boss:gsub("^t", "T")), os.getComputerLabel()))
       save()
     elseif type(msg) == "table" and msg.type == "dock_ready" and msg.id == me then
       dockReply = msg
     elseif type(msg) == "table" and msg.type == "cmd" and msg.to == me then
       ctrl = msg
-      if type(msg.junk) == "table" then
+      if MODE.nether and type(msg.junk) == "table" then
         S.junk = msg.junk; setJunk(S.junk); valuableCache = {}
       end
       local hA, fA = tonumber(msg.hungryAt), tonumber(msg.fullAt)
-      if hA and fA and hA >= 1 and fA <= 99 and hA < fA then S.hungryAt, S.fullAt = hA, fA end
+      if MODE.nether and hA and fA and hA >= 1 and fA <= 99 and hA < fA then S.hungryAt, S.fullAt = hA, fA end
       if type(msg.capped) == "table" then
         local set = {}
         for _, n in ipairs(msg.capped) do set[n] = true end
@@ -1240,7 +1641,8 @@ local function netLoop()
     if os.clock() - lastSend >= STATUS_EVERY then
       if not S.num then
         -- No number yet: ask the Foreman (a label like Canary-04 is offered back, e.g. after a reset)
-        rednet.broadcast({ type = "register", id = me, want = labelNum(), label = os.getComputerLabel() }, PROTOCOL)
+        rednet.broadcast({ type = "register", id = me, want = labelNum(), label = os.getComputerLabel(),
+          name = MODE.name }, PROTOCOL)
       end
       rednet.broadcast(statusMsg(), PROTOCOL)
       lastSend = os.clock()
@@ -1252,10 +1654,12 @@ end
 -- Start
 ---------------------------------------------------------------------------
 if not fs.exists("startup.lua") then -- auto-resume after chunk reloads and restarts
-  local f = fs.open("startup.lua", "w"); f.write('shell.run("firecrest")\n'); f.close()
+  local f = fs.open("startup.lua", "w"); f.write('shell.run("miner")\n'); f.close()
 end
 load()
-setJunk(S.junk)
 if not S.dockY then setupDock() else recover() end
+setMode()
+fixLabel()
+print(("I'm a %s (%s)."):format(MODE.name, tostring(S.dim or "overworld")))
 setStatus("docked", "Starting")
 parallel.waitForAny(mainLoop, netLoop)
