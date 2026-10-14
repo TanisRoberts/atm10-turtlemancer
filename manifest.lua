@@ -140,8 +140,8 @@ local M = {
     turtle = {
       name = "Turtle",
       about = "A turtle that goes out and works",
-      details = "Mining, building, lumberjacking, farming and map-making turtles.",
-      order = { "canary", "firecrest", "weaver", "woodpecker", "partridge", "seagull" },
+      details = "Mining, building, lumberjacking, farming, map-making and crafting turtles.",
+      order = { "canary", "firecrest", "weaver", "woodpecker", "partridge", "seagull", "bowerbird" },
       roles = {
         canary = { name = "Canary", about = "Miner: shaft + expanding squares", run = "miner",
                    details = "Digs a shaft at its dock and mines squares at the layers the Foreman "
@@ -172,6 +172,11 @@ local M = {
                      .. "the art wall. Geo Scanner + ender modem, no pickaxe. Needs GPS and a fuel dock "
                      .. "with open sky above it.",
                    files = { "turtle/seagull/cartographer.lua", "shared/mapchunk.lua" } },
+        bowerbird = { name = "Bowerbird", about = "Crafts matrices for the neural lab", run = "crafter",
+                   details = "Keeps storage stocked with prediction matrices (iron, gold, glass panes, "
+                     .. "clay). Crafty turtle + wireless or ender modem, parked at a dock barrel that "
+                     .. "keeps those topped up. Never moves, needs no fuel.",
+                   files = { "turtle/bowerbird/crafter.lua" } },
       },
     },
     glasses = {

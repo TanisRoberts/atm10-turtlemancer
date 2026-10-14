@@ -24,6 +24,11 @@
 --   * Lamps: steady = running, off = stopped (cap reached / switched off), blinking = needs you.
 --   * Power: solar etc. first. The Furnator only gets charcoal/coal from the dock while stored
 --     power is under FUEL_BELOW%. Under LOW_POWER% only the column furthest below its target runs.
+--   * Training mode (set in the chamber's screen) is spotted by itself: matrices get used and
+--     nothing comes out. A training column is fed regardless of targets, as long as more than
+--     TRAIN_KEEP matrices are spare, and needs no fab (build the chamber, set it to Training, add
+--     the fab later). When it stops taking matrices the model is probably Self Aware: switch the
+--     chamber back to Inference. A chamber with no fab is fed one matrix to find out its mode.
 --
 -- Needs a wireless/ender modem too: it gets item counts from storage's broadcast and reports to
 -- the mainframe (board row, alerts, "island neural"). Monitor touching the computer: tap a column
@@ -60,6 +65,7 @@ local DEFAULTS = {
   { "LOW_POWER", 10, "Stored power % under which only the column furthest below its target runs." },
   { "FUEL_BELOW", 30, "Feed the Furnator while the cells, or ANY one chamber, are under this %. Solar first." },
   { "FURNATOR_KEEP", 8, "Fuel items kept in each Furnator while it's being fed." },
+  { "TRAIN_KEEP", 64, "Columns on Training mode only take matrices while more than this many are spare (the rest are for the fabs)." },
   { "WITHOUT_STORAGE", "stop", "No item counts from storage (storage silent): stop = hold every column, run = keep making." },
   { "DOCK", "", "The dock barrel's name on this cable. Blank = find it: the one chest/barrel on the cable." },
   { "PAIRS", "", "Fix a pairing by hand: chamber:fab[:lamp] by their numbers, comma separated, e.g. 3:5:2, 4:7" },
@@ -203,14 +209,15 @@ end
 ---------------------------------------------------------------------------
 -- links[chamber] = { f = fab, l = lamp }; items[chamber] = what its fab makes; on[chamber] = running?
 -- force[chamber] = "on" | "off" (nil = auto); stats[chamber] = { runs, preds, made }
-local cfg = { paused = false, links = {}, items = {}, on = {}, force = {}, stats = {}, made = {} }
+-- train[chamber] = true while the chamber is on Training mode (spotted: matrices used, nothing made)
+local cfg = { paused = false, links = {}, items = {}, on = {}, force = {}, stats = {}, made = {}, train = {} }
 local function loadCfg()
   if not fs.exists(CFG_FILE) then return end
   local f = fs.open(CFG_FILE, "r")
   local t = textutils.unserialize(f.readAll() or "")
   f.close()
   if type(t) == "table" then for k, v in pairs(t) do cfg[k] = v end end
-  for _, k in ipairs({ "links", "items", "on", "force", "stats", "made" }) do
+  for _, k in ipairs({ "links", "items", "on", "force", "stats", "made", "train" }) do
     if type(cfg[k]) ~= "table" then cfg[k] = {} end
   end
 end
@@ -352,6 +359,7 @@ local function pairUp()
   end
   cfg.links = links
   for c in pairs(cfg.items) do if not present[c] then cfg.items[c] = nil end end
+  for c in pairs(cfg.train) do if not present[c] then cfg.train[c] = nil end end
 end
 
 -- Only a monitor touching the computer
@@ -427,6 +435,16 @@ local function readDock()
   end
 end
 
+-- Matrices we could hand out (nil = no idea: storage silent and nothing in a dock)
+local function matrixSpare()
+  local stored = countsFresh() and storageItems and (tonumber(storageItems[MATRIX]) or 0) or nil
+  if L.direct then return stored end
+  return dockMatrices + (stored or 0)
+end
+
+-- Bowerbird (the matrix-crafting turtle) reports what he's short of
+local bird, birdSeen = nil, nil
+
 local dockFull = false
 -- Push a slot of a machine into the dock. Returns how many moved.
 local function toDock(from, slot, count)
@@ -480,6 +498,7 @@ end
 ---------------------------------------------------------------------------
 local function column(c, lk, now)
   local p = P[c]
+  local first = not p
   if not p then
     p = { lastUse = now, lastFab = now, usedSinceOut = 0, lastProbe = now }
     P[c] = p
@@ -502,12 +521,29 @@ local function column(c, lk, now)
     dirty = true
   end
 
-  -- Generalized predictions go straight to the dock
-  if base and not paused then
-    local m = toDock(c, C_BASE, base.count)
-    if m > 0 then p.usedSinceOut = 0 end
+  -- Inference makes a base drop every run (and usually predictions); Training makes neither.
+  -- (First pass after a boot: what's sitting there may be old, so it proves nothing.)
+  if first then p.bankAfter, p.baseAfter = pred and pred.count or 0, base and base.count or 0 end
+  local made = not first and ((base ~= nil and base.count > (p.baseAfter or 0))
+    or (pred ~= nil and pred.count > (p.bankAfter or 0)))
+  if made then
+    p.usedSinceOut = 0
+    if cfg.train[c] then cfg.train[c] = nil; dirty = true end   -- back on Inference
+    if not lk.f then p.noFabInfer, p.noFabAt = true, now end    -- Inference with nowhere to send predictions
   end
-  if base then p.usedSinceOut = 0 end
+  if p.usedSinceOut >= 4 and not cfg.train[c] then
+    cfg.train[c] = true; dirty = true                           -- matrices going in, nothing coming out
+  end
+  if cfg.train[c] then p.noFabInfer = nil end
+  -- No fab and on Inference: try one matrix again now and then, in case it's been set to Training
+  if p.noFabInfer and lk.f then p.noFabInfer = nil end
+  if p.noFabInfer and (E.PROBE_EVERY or 0) > 0 and now - (p.noFabAt or now) > E.PROBE_EVERY * 60 then
+    p.noFabInfer = nil
+  end
+
+  -- Generalized predictions go straight to the dock
+  p.baseAfter = base and base.count or 0
+  if base and not paused then p.baseAfter = base.count - toDock(c, C_BASE, base.count) end
 
   -- The model: who lives here
   if model then
@@ -572,8 +608,6 @@ local function column(c, lk, now)
       if cfg.items[c] ~= outNow then cfg.items[c] = outNow; dirty = true end
     end
   end
-  if pred then p.usedSinceOut = 0 end
-
   local item = cfg.items[c]
   p.item = item
   p.cap = item and capFor(item) or nil
@@ -581,11 +615,20 @@ local function column(c, lk, now)
   p.force = cfg.force[c]
 
   -- Decide: does this column want to run?
+  local training = cfg.train[c] == true
+  p.training = training
   local want, why = false, nil
   if not model then why = "nomodel"
-  elseif not f then why = "nofab"
   elseif paused then why = "paused"
   elseif p.force == "off" then why = "off"
+  elseif training then
+    -- Makes nothing, so no target: runs while there are spare matrices (TRAIN_KEEP stay for the fabs)
+    local spare = matrixSpare()
+    if p.force == "on" or (spare and spare > math.max(0, E.TRAIN_KEEP or 64)) then want, why = true, "training"
+    else why = "trainwait" end
+  elseif not f then
+    -- No fab: one matrix tells us the mode (Training is fed, Inference just banks predictions)
+    if p.noFabInfer then why = "nofab" else want, why = true, "findmode" end
   elseif p.force == "on" then want = true
   elseif not item then want, why = true, "learning"
   elseif not countsFresh() then
@@ -598,10 +641,13 @@ local function column(c, lk, now)
     elseif p.stock < cap * math.max(0, math.min(100, E.RESTART_AT)) / 100 then want = true
     else want = cfg.on[c] == true end
   end
-  if model and f and not paused and p.force == nil and item and countsFresh() then
+  if model and f and not paused and not training and p.force == nil and item and countsFresh() then
     if cfg.on[c] ~= want then cfg.on[c] = want; dirty = true end
   end
-  if p.checkReq and model and f and not paused then p.probeWanted = true; p.checkReq = nil end
+  if p.checkReq and model and not paused then
+    if f then p.probeWanted = true else p.noFabInfer = nil end   -- no fab: try a matrix to see its mode
+    p.checkReq = nil
+  end
   p.want, p.why = want, why
   return p
 end
@@ -609,8 +655,8 @@ end
 -- Second half of a column, after power priority is known: feed matrices and predictions.
 local function act(p, allowed, now)
   local c, f = p.c, p.f
-  if not p.mob or not f or cfg.paused then
-    p.mAfter, p.running, p.needRuns = p.matrices, false, false
+  if not p.mob or cfg.paused or (not f and not p.training and p.why ~= "findmode") then
+    p.mAfter, p.running, p.needRuns, p.bankAfter = p.matrices, false, false, p.bank
     return
   end
   local run = p.want and allowed
@@ -620,7 +666,7 @@ local function act(p, allowed, now)
   if run then p.probeWanted = nil end   -- a running column checks its fab with every batch anyway
 
   -- Predictions into the fab: while running, while learning, or one for a check
-  if p.bank > 0 then
+  if f and p.bank > 0 then
     local room = math.max(0, math.floor(E.FAB_HOLD or 2) - p.fin)
     local probeDue = not run and p.item and (E.PROBE_EVERY or 0) > 0 and p.fin == 0
       and (now - (p.lastProbe or now)) > math.min(p.probeGap or E.PROBE_EVERY, math.max(E.PROBE_EVERY, E.PROBE_MAX or 240)) * 60
@@ -647,7 +693,7 @@ local function act(p, allowed, now)
   if p.probeWanted and p.bank == 0 and p.fin == 0 then needRuns = true end   -- CHECK with nothing banked
   -- A stopped column keeps one prediction banked, so its periodic check can spot a changed fab
   p.banking = false
-  if not run and not needRuns and p.item and p.why ~= "off" and p.why ~= "nocounts" and (E.PROBE_EVERY or 0) > 0
+  if not run and not needRuns and f and not p.training and p.item and p.why ~= "off" and p.why ~= "nocounts" and (E.PROBE_EVERY or 0) > 0
     and p.bank == 0 and p.fin == 0 and allowed then
     needRuns, p.banking = true, true
   end
@@ -658,6 +704,14 @@ local function act(p, allowed, now)
   if not needRuns then p.lastUse = now end
   p.mAfter = p.matrices
   p.needRuns = needRuns
+  p.bankAfter = p.bank
+end
+
+-- How far a column is from its target, for the low-power pick (lowest runs first)
+local function urgency(p)
+  if p.force == "on" then return -1 end
+  if p.training then return 2 end   -- levelling up can wait for the sun
+  return (p.cap and p.cap > 0 and p.stock) and p.stock / p.cap or 0
 end
 
 ---------------------------------------------------------------------------
@@ -667,11 +721,21 @@ end
 local function stateOf(p, now)
   if cfg.paused then return "PAUSED", false, false end
   if not p.mob then return "NO MODEL", true, false end
-  if not p.f then return "NO FAB", true, false end
   if p.outStuck then return p.outStuck, true, false end
   if p.fabStuck then return p.fabStuck, true, false end
   if p.stuck then return p.stuck, true, false end
   if p.needRuns and not p.banking and p.matrices == 0 and dockMatrices <= 0 then return "NO MATRICES", true, false end
+  if p.training then
+    if p.running then return "TRAINING", false, true end
+    if p.want then return "WAIT POWER", false, false end
+    if p.why == "off" then return "OFF", false, false end
+    return "TRAIN WAIT", false, false   -- saving the last TRAIN_KEEP matrices for the fabs
+  end
+  if not p.f then
+    if p.why == "findmode" then return "CHECKING", true, false end   -- one matrix to see its mode
+    if p.why == "off" then return "OFF", false, false end
+    return "NO FAB", true, false
+  end
   if p.why == "learning" or p.probing then return p.why == "learning" and "LEARNING" or "CHECKING", true, false end
   if p.running then return "RUNNING", false, true end
   if p.want and not p.running then return "WAIT POWER", false, false end
@@ -683,6 +747,7 @@ end
 local STATE_COL = {
   RUNNING = colours.lime, LEARNING = colours.cyan, CHECKING = colours.cyan, ["AT TARGET"] = colours.lightBlue,
   OFF = colours.lightGrey, PAUSED = colours.orange, ["WAIT POWER"] = colours.yellow,
+  TRAINING = colours.purple, ["TRAIN WAIT"] = colours.magenta,
 }
 
 ---------------------------------------------------------------------------
@@ -737,8 +802,7 @@ local function pass()
     local best, bestFrac = nil, nil
     for _, p in ipairs(cols) do
       if p.want then
-        local frac = (p.cap and p.cap > 0 and p.stock) and p.stock / p.cap or 0
-        if p.force == "on" then frac = -1 end
+        local frac = urgency(p)
         if not bestFrac or frac < bestFrac then best, bestFrac = p, frac end
       end
     end
@@ -749,15 +813,14 @@ local function pass()
   -- Stuck detection
   for _, p in ipairs(cols) do
     p.stuck, p.fabStuck = nil, nil
-    if p.mob and p.f and not cfg.paused then
+    if p.mob and not cfg.paused then
       local cNoPower = (p.cCap or 0) > 0 and (p.cEnergy or 0) < NO_POWER_FE
       local fNoPower = (p.fCap or 0) > 0 and (p.fEnergy or 0) < NO_POWER_FE
       if p.needRuns and p.matrices > 0 and now - p.lastUse > E.STALL_AFTER then
-        p.stuck = cNoPower and "NO POWER" or "STUCK"
-      elseif p.usedSinceOut >= 4 then
-        p.stuck = "TRAINING?"   -- using matrices, making nothing
+        -- Training stops taking matrices once the model is maxed (Self Aware)
+        p.stuck = cNoPower and "NO POWER" or (p.training and "TRAINED?" or "STUCK")
       end
-      if p.fin > 0 and now - p.lastFab > 30 then
+      if p.f and p.fin > 0 and now - p.lastFab > 30 then
         p.fabStuck = fNoPower and "FAB NO POWER" or (dockFull and "DOCK FULL" or "PICK A DROP")
       end
     end
@@ -804,7 +867,8 @@ local function pass()
     local key
     if s == "STUCK" then
       key = "stuck:" .. p.c
-      problems[key] = who .. ": the chamber has stopped. Check it's on Inference (not Training), redstone Ignored, and the model isn't Faulty."
+      problems[key] = who .. (p.f and ": the chamber has stopped. Check its redstone is Ignored, the model isn't Faulty and its output slots aren't full."
+        or ": the chamber has stopped. No fab yet: is its prediction slot full? Take them out, or set it to Training.")
     elseif s == "NO POWER" then
       key = "power:" .. p.c
       if power.cellPct and power.cellPct >= 20 then
@@ -812,9 +876,13 @@ local function pass()
       else
         problems[key] = who .. ": the chamber has no power."
       end
-    elseif s == "TRAINING?" then
-      key = "training:" .. p.c
-      problems[key] = who .. ": using matrices but making nothing. Is the chamber on Training mode? Switch it to Inference."
+    elseif s == "TRAINED?" then
+      key = "trained:" .. p.c
+      problems[key] = who .. ": Training has stopped taking matrices, so the model is probably Self Aware. Switch the chamber to Inference"
+        .. (p.f and "." or " once it has a fab.")
+    elseif s == "NO FAB" then
+      key = "nofab:" .. p.c
+      problems[key] = who .. ": no fab yet, and the chamber is on Inference so it only banks predictions. Set it to Training to level the model while you wait (I'll feed it), or add a fab."
     elseif s == "FAB NO POWER" then
       key = "fabpower:" .. p.c
       problems[key] = who .. ": the fabricator has no power."
@@ -833,15 +901,24 @@ local function pass()
     if p.needRuns then anyWantsMatrix = true end
   end
   for k in pairs(problems) do
-    if (k:match("^stuck:") or k:match("^power:") or k:match("^training:") or k:match("^fabpower:")
+    if (k:match("^stuck:") or k:match("^power:") or k:match("^training:") or k:match("^trained:")
+        or k:match("^nofab:") or k:match("^fabpower:")
         or k:match("^pick:") or k == "dockfull" or k == "dock") and not live[k] then
       problems[k] = nil
     end
   end
   local starving = false
   for _, p in ipairs(cols) do if p.state == "NO MATRICES" then starving = true end end
-  problem("matrices", starving, L.direct and "Neural lab: out of prediction matrices. Craft some and put them in storage."
-    or "Neural lab: out of prediction matrices. Craft some: storage keeps the dock topped up (/dock on storage, pick the dock, keep prediction_matrix 64).")
+  local birdNote = ""
+  if bird and birdSeen and os.clock() - birdSeen < 30 then
+    if type(bird.missing) == "table" and #bird.missing > 0 then
+      birdNote = " Bowerbird is short of " .. table.concat(bird.missing, ", ") .. "."
+    elseif bird.state then
+      birdNote = " Bowerbird: " .. tostring(bird.note or bird.state) .. "."
+    end
+  end
+  problem("matrices", starving, (L.direct and "Neural lab: out of prediction matrices. Craft some and put them in storage."
+    or "Neural lab: out of prediction matrices. Craft some: storage keeps the dock topped up (/dock on storage, pick the dock, keep prediction_matrix 64).") .. birdNote)
   if not live.dock then
     problem("dock", not L.out and #L.chambers > 0, L.dockNote and ("Neural lab: " .. L.dockNote)
       or "Neural lab: no dock barrel on the lab cable, so drops have nowhere to go.")
@@ -856,16 +933,18 @@ local function pass()
     "Neural lab: storage isn't answering my requests for matrices and fuel. Reboot the storage computer to update it.")
 
   -- Note
-  local running, atTarget, attention = 0, 0, 0
+  local running, atTarget, attention, trainingN = 0, 0, 0, 0
   for _, p in ipairs(cols) do
     if p.state == "RUNNING" then running = running + 1
     elseif p.state == "AT TARGET" then atTarget = atTarget + 1
-    elseif p.state ~= "OFF" and p.state ~= "WAIT POWER" then attention = attention + 1 end
+    elseif p.state == "TRAINING" or p.state == "TRAIN WAIT" then trainingN = trainingN + 1
+    elseif p.state ~= "OFF" and p.state ~= "WAIT POWER" and p.state ~= "CHECKING" then attention = attention + 1 end
   end
   if #L.chambers == 0 then note = "No Simulation Chambers on my cable yet"
   elseif cfg.paused then note = "Paused"
   else
-    note = ("%d running, %d at target%s"):format(running, atTarget, attention > 0 and (", " .. attention .. " need you") or "")
+    note = ("%d running, %s%d at target%s"):format(running, trainingN > 0 and (trainingN .. " training, ") or "",
+      atTarget, attention > 0 and (", " .. attention .. " need you") or "")
     if only then note = note .. ", low power" end
   end
   saveCfg()
@@ -880,6 +959,8 @@ local function accText(st)
 end
 
 local function stockText(p)
+  if p.training then return "training model" end
+  if not p.f then return "no fab yet" end
   if not p.item then return "item: learning" end
   local s = p.stock and tostring(p.stock) or "?"
   return ("%s %s/%s"):format(shortName(p.item), s, (p.cap or 0) == 0 and "off" or tostring(p.cap))
@@ -1057,9 +1138,10 @@ local function drawOverview(m, w, h)
     m.write(("#%d %s"):format(i, p.mob or "empty"):sub(1, cardW))
     m.setCursorPos(x, y + 1); m.setTextColour(col); m.write(s:sub(1, cardW))
     m.setCursorPos(x, y + 2); m.setTextColour(colours.lightGrey); m.write(stockText(p):sub(1, cardW))
-    m.setCursorPos(x, y + 3); m.setTextColour(colours.grey); m.write(accText(cfg.stats[c]):sub(1, cardW - 8))
+    local foot = p.training and ("runs %d"):format((cfg.stats[c] or {}).runs or 0) or accText(cfg.stats[c])
+    m.setCursorPos(x, y + 3); m.setTextColour(colours.grey); m.write(foot:sub(1, cardW - 8))
     hit(x, x + cardW - 1, y, y + 2, function() view.page = c end)
-    if p.mob and p.f then
+    if p.mob and (p.f or not p.training) then
       btn(m, x + cardW - 7, y + 3, " CHECK ", colours.cyan, function() check(c) end)
     end
   end
@@ -1084,15 +1166,27 @@ local function drawPage(m, w, h, c)
   end
   local s = p.state or "?"
   line(s, STATE_COL[s] or colours.red)
-  if p.item then
-    line("Fab makes: " .. shortName(p.item), colours.white)
-  else
-    line("Fab makes: not seen yet", colours.white)
+  if p.training then
+    line("Training: levels the model", colours.purple)
+    line("Then Inference (its screen)", colours.grey)
+    line("when it's Self Aware", colours.grey)
+    line(("Keeps %d matrices spare"):format(math.floor(E.TRAIN_KEEP or 64)), colours.grey)
+  elseif not p.f then
+    line("No fab yet", colours.white)
+    line("Set it to Training and", colours.grey)
+    line("I'll feed it to level up", colours.grey)
   end
-  if p.switched and os.clock() - p.switched.at < 120 then
-    line(("Switched from %s"):format(shortName(p.switched.from)), colours.cyan)
+  if p.f then
+    if p.item then
+      line("Fab makes: " .. shortName(p.item), colours.white)
+    else
+      line("Fab makes: not seen yet", colours.white)
+    end
+    if p.switched and os.clock() - p.switched.at < 120 then
+      line(("Switched from %s"):format(shortName(p.switched.from)), colours.cyan)
+    end
+    line("Pick it in the fab's screen", colours.grey)
   end
-  line("Pick it in the fab's screen", colours.grey)
   y = y + 1
   if p.item then
     local cap = p.cap or 0
@@ -1119,7 +1213,7 @@ local function drawPage(m, w, h, c)
     x = btn(m, x, y, " AUTO ", cur == nil and colours.lime or colours.lightGrey, function() setForce(c, nil) end)
     x = btn(m, x, y, " ON ", cur == "on" and colours.lime or colours.lightGrey, function() setForce(c, "on") end)
     x = btn(m, x, y, " OFF ", cur == "off" and colours.orange or colours.lightGrey, function() setForce(c, "off") end)
-    if p.mob and p.f then
+    if p.mob and (p.f or not p.training) then
       if x + 7 > w then y = y + 2; x = 7 end   -- narrow screen: CHECK on its own row
       btn(m, x, y, " CHECK ", colours.cyan, function() check(c) end)
     end
@@ -1193,7 +1287,7 @@ local function netLoop()
       local cols = {}
       for i, c in ipairs(L.chambers) do
         local p = P[c] or {}
-        cols[i] = { mob = p.mob, state = p.state, item = p.item, stock = p.stock, cap = p.cap }
+        cols[i] = { mob = p.mob, state = p.state, item = p.item, stock = p.stock, cap = p.cap, training = p.training }
       end
       rednet.broadcast({ type = "neural", id = os.getComputerID(), label = os.getComputerLabel() or "Neural lab",
         state = stateWord(), note = note, lines = statusLines(), problems = probs, columns = cols,
@@ -1229,6 +1323,8 @@ local function netLoop()
           storageSeen = os.clock()
           storageId = storageId or from
         end
+      elseif msg.type == "bowerbird" then
+        bird, birdSeen = msg, os.clock()
       elseif msg.type == "neural_cmd" and (msg.to == nil or msg.to == os.getComputerID()) then
         if msg.want == "pause" then setPaused(true) elseif msg.want == "go" then setPaused(false) end
       end
@@ -1241,6 +1337,7 @@ local function help()
   print("list            what I found on my cable")
   print("pairs           which fab and lamp go with each chamber")
   print("check <n>       send one prediction through column n's fab")
+  print("                (no fab: feed one matrix to see if it's on Training)")
   print("on|off|auto <n> force column n on / off, or back to its target")
   print("pause | resume")
   print("Settings: neural.env  Targets: neural.txt")
