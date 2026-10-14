@@ -27,7 +27,7 @@ ComputerCraft (CC:Tweaked + Advanced Peripherals) scripts for Tanis's ATM10 isla
 | Computer | Neural lab | `neural` | Hostile Neural Networks wall: runs each chamber + fab column until storage has enough of what it makes (`neural.txt`, `neural.env`) |
 | Computer | Art controller | `art` | Monitor wall: live turtle map coloured by height, GPS pylons, Seagull's world map, generative art you can poke (`art.env`) |
 | Turtle | Miner | `miner` | One miner, named by the dimension he's set up in. **Canary** (anywhere but the Nether/End): shaft + expanding squares, `junk.txt`, dump + fuel barrels, numbered Canary-01... by the Foreman. **Firecrest** (Nether): one dock barrel, drinks lava with his bucket (under 25% until 75%), numbered by the Nether Foreman. **Starling** (End): a Canary in the End. All of them empty chests before digging them and never dig turtles, cables, barrels or hoppers |
-| Turtle | Weaver | `weaver` | Builds from a plan file (`mossy.plan`, put on him by hand: it's big); run from the Architect or `island weaver ...` in chat. If storage runs out of a block he leaves a gap, builds everything else he can (never on top of a gap) and fills the gaps when the block turns up |
+| Turtle | Weaver | `weaver` | Builds from a plan file (`mossy.plan`, put on him by hand: it's big); run from the Architect or `island weaver ...` in chat. If storage runs out of a block he leaves a gap, builds everything else he can (never on top of a gap) and fills the gaps when the block turns up. A chunk controller in his bag keeps his own chunk loaded (same swap as the miners) |
 | Turtle | Woodpecker | `lumberjack` | Tree farm: maps a slab-ringed zone, plants a tree grid, chops and replants on a timer (`woodpecker.env`) |
 | Turtle | Partridge | `farmer` | Crop farm: harvests and replants any crop, hoes new soil, picks up what falls (`partridge.env`) |
 | Turtle | Seagull | `cartographer` | Flies over the island with a Geo Scanner and maps it for the art wall's World map (`seagull.env`) |
@@ -225,6 +225,8 @@ rings** round his dock's chunk, set on his Foreman page (and in presets): ring 0
   and digs it back up. He only comes home when the box is full too. At the dock he unpacks it into the barrel
   (it goes in the top of his shaft for that). Backpacks can't do this: turtles can't sneak to place them.
 - His gear (controller, modem, box, Firecrest's bucket) never gets unloaded, stashed or thrown away.
+- **Weaver** does the same swap with a chunk controller in his bag (he flies all over the build site), and
+  never throws it out as junk or hands it back to storage; his material batches are one slot smaller for it.
 - The Foreman page shows `Chunk 3 of 49, ring 1` and `Gear  loader + box` (or `box FULL`).
 
 ## Chests underground

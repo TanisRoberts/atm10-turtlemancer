@@ -258,11 +258,70 @@ local function canDig(name, x, z)
   return false
 end
 
+---------------------------------------------------------------------------
+-- Chunk controller (Advanced Peripherals' "Chunky Turtle" upgrade), same trick as the miners:
+-- carried in my bag, swapped onto my modem's side for a moment whenever I cross into a new chunk
+-- and every REFRESH_EVERY seconds. That force-loads the chunk I'm in (only that one: the last one is
+-- released) and it stays loaded after I swap back (the mod's timeout, 600 s by default, >= 60 s).
+-- Gear (the controller, modems) is never dropped as junk or handed back to storage.
+---------------------------------------------------------------------------
+local CHUNKY_ITEM = "advancedperipherals:chunk_controller"
+local REFRESH_EVERY = 45
+local function isModemItem(name)
+  return name == "computercraft:wireless_modem_advanced" or name == "computercraft:wireless_modem_normal"
+end
+local function isGear(name) return name == CHUNKY_ITEM or isModemItem(name) end
+local EQUIP = { left = turtle.equipLeft, right = turtle.equipRight }
+local function sideOfType(t)
+  for _, sd in ipairs({ "left", "right" }) do
+    for _, x in ipairs({ peripheral.getType(sd) }) do if x == t then return sd end end
+  end
+end
+local function chunkySlot()
+  for s = 1, 16 do local d = turtle.getItemDetail(s); if d and d.name == CHUNKY_ITEM then return s end end
+end
+local chunkyAt, chunkyKey = -1e9, nil
+local function refreshChunk(force)
+  if not (chunkySlot() or sideOfType("chunky")) or not S.x then return end
+  local key = math.floor(S.x / 16) .. "," .. math.floor(S.z / 16)
+  if not force and key == chunkyKey and os.clock() - chunkyAt < REFRESH_EVERY then return end
+  if sideOfType("chunky") then
+    os.sleep(0.1)                         -- worn all the time: it reloads my chunk every tick
+  else
+    local slot, side = chunkySlot(), sideOfType("modem")
+    if not side then S.chunkyNote = "No modem to swap with"; return end
+    local prev = turtle.getSelectedSlot()
+    turtle.select(slot)
+    S.swapSide = side; save()             -- unloaded mid-swap: boot puts the modem back
+    if EQUIP[side]() then
+      os.sleep(0.15)                      -- at least one server tick with it on: loads + touches this chunk
+      turtle.select(slot)
+      EQUIP[side]()                       -- modem back on; the controller back in that slot
+    end
+    S.swapSide = nil; save()
+    turtle.select(prev)
+    pcall(rednet.open, side)
+    S.swaps = (S.swaps or 0) + 1
+  end
+  S.chunkyNote = nil
+  chunkyAt, chunkyKey = os.clock(), key
+end
+-- A swap that was cut short leaves the modem in my bag: put it back before anything looks for it
+do
+  if not sideOfType("modem") then
+    local ms
+    for s = 1, 16 do local d = turtle.getItemDetail(s); if d and isModemItem(d.name) then ms = s end end
+    local side = sideOfType("chunky") or S.swapSide
+    if ms and side then turtle.select(ms); EQUIP[side](); turtle.select(1); print("Put my modem back on.") end
+  end
+  S.swapSide = nil
+end
+
 local JUNK_KEEP = {} -- filled with palette item names: never dropped
 local function dropJunk()
   for s = 1, 16 do
     local d = turtle.getItemDetail(s)
-    if d and not JUNK_KEEP[d.name] then
+    if d and not JUNK_KEEP[d.name] and not isGear(d.name) then
       turtle.select(s)
       if not turtle.refuel(0) then turtle.dropUp() end
     end
@@ -280,6 +339,7 @@ local function waitForChunk(kind, op)
   local was, wasMsg = S.status, S.msg
   setStatus("waiting", ("Chunk at X %d Z %d isn't loaded: waiting for it"):format(tx, tz))
   while true do
+    refreshChunk()
     os.sleep(5)
     if orderWaiting and orderWaiting() then setStatus(was, wasMsg); return false end
     S.pending = { kind = kind, fuel = turtle.getFuelLevel() }
@@ -288,6 +348,7 @@ local function waitForChunk(kind, op)
     if ok then
       apply(kind); S.pending = nil; save()
       setStatus(was, wasMsg)
+      refreshChunk()
       return true
     end
     S.pending = nil
@@ -306,6 +367,7 @@ local function move(kind)
     local moved, why = op.move()
     if moved then
       apply(kind); S.pending = nil; save()
+      refreshChunk()   -- a new chunk (or time's up): keep the one I'm in loaded
       return true
     end
     S.pending = nil
@@ -452,6 +514,10 @@ end
 -- amount, so the batch isn't wasted on it; if storage has it again, the next visit asks for more.
 local function upcomingNeeds()
   local need, order = {}, {}
+  -- gear (a chunk controller) takes a slot of its own: one block slot less per batch
+  local gear = 0
+  for sl = 1, 16 do local d = turtle.getItemDetail(sl); if d and isGear(d.name) then gear = gear + 1 end end
+  local maxSlots = SLOTS_FOR_BLOCKS - gear
   local function slots()
     local s = 0
     for _, v in pairs(need) do s = s + math.ceil(v / 64) end
@@ -469,7 +535,7 @@ local function upcomingNeeds()
     if stillShort(name) then n = math.min(n, GAP_PROBE - have) end
     if n <= 0 then return true end
     need[name] = have + n
-    if slots() > (limit or SLOTS_FOR_BLOCKS) then need[name] = have; return false end
+    if slots() > (limit or maxSlots) then need[name] = have; return false end
     if have == 0 then order[#order + 1] = name end
     return true
   end
@@ -562,6 +628,7 @@ local function statusMsg()
     skipped = S.skipped, skips = S.skips,
     gaps = G.n, gapsVer = G.ver, gapItems = { table.unpack(gapItems(true), 1, 8) },
     gapsAbove = select(2, gapItems()),
+    chunky = (chunkySlot() or sideOfType("chunky")) ~= nil, chunkyNote = S.chunkyNote, swaps = S.swaps,
   }
 end
 
@@ -577,7 +644,8 @@ end
 local function depositAll()
   faceSupply()
   for s = 1, 16 do
-    if turtle.getItemCount(s) > 0 then turtle.select(s); dropSupply() end
+    local d = turtle.getItemDetail(s)
+    if d and not isGear(d.name) then turtle.select(s); dropSupply() end
   end
   turtle.select(1)
 end
@@ -608,7 +676,7 @@ local function restock(req, fuelUnits)
   -- Burn fuel items that aren't building blocks
   for s = 1, 16 do
     local d = turtle.getItemDetail(s)
-    if d and not JUNK_KEEP[d.name] then
+    if d and not JUNK_KEEP[d.name] and not isGear(d.name) then
       turtle.select(s)
       if turtle.refuel(0) then turtle.refuel() end
     end
@@ -1068,7 +1136,7 @@ orderWaiting = newOrder
 -- Sleep, but wake up for a new order or a reboot request
 local function waitFor(sec)
   local t = os.clock() + sec
-  while os.clock() < t and not newOrder() and not rebootWanted() do os.sleep(0.5) end
+  while os.clock() < t and not newOrder() and not rebootWanted() do refreshChunk(); os.sleep(0.5) end
 end
 
 -- Wait at the dock until storage has any of these blocks again (seen in its broadcast), a new
@@ -1076,6 +1144,7 @@ end
 local function waitForStock(names, sec)
   local t = os.clock() + sec
   while os.clock() < t and not newOrder() and not rebootWanted() do
+    refreshChunk()
     os.sleep(1)
     if stock and stockAt and os.clock() - stockAt < 20 then
       for _, n in ipairs(names) do
@@ -1367,6 +1436,10 @@ do
   print(("Box X %d..%d Z %d..%d"):format(b.x1, b.x2, b.z1, b.z2))
   print(("    Y %d (bottom) .. %d (top)"):format(b.y1, b.y2))
   print(("Chunks X %d..%d Z %d..%d (%d)"):format(c1, c2, d1, d2, (c2 - c1 + 1) * (d2 - d1 + 1)))
+end
+if chunkySlot() or sideOfType("chunky") then
+  print("Chunk controller on board: I keep my own chunk loaded.")
+  refreshChunk(true)
 end
 setStatus("docked", "Starting")
 parallel.waitForAny(mainLoop, netLoop, gpsLoop)
