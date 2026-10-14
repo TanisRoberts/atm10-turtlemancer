@@ -129,6 +129,13 @@ local function dirOf(dx, dz)
   if dz < 0 then return 0 elseif dx > 0 then return 1 elseif dz > 0 then return 2 elseif dx < 0 then return 3 end
 end
 
+-- Is this block a turtle or computer? ComputerCraft lets a turtle mine another turtle (it ends up
+-- as an item in the digger's bag), so another Digger crossing my tunnel or shaft is never dug:
+-- I wait for it to move on instead.
+local function isMachine(ok, d)
+  return ok == true and type(d) == "table" and type(d.name) == "string" and d.name:find("^computercraft:") ~= nil
+end
+
 -- Which way am I facing? Step one block (turning to find a free side), ask GPS, step back.
 -- allowDig: may dig the block in front (only underground).
 -- Returns the compass direction it now faces (or nil), how many right turns it made looking, and
@@ -139,14 +146,14 @@ local function compassByStep(allowDig)
   for turns = 0, 3 do
     local moved = false
     if not turtle.detect() then moved = turtle.forward()
-    elseif allowDig and turtle.dig() then moved = turtle.forward() end
+    elseif allowDig and not isMachine(turtle.inspect()) and turtle.dig() then moved = turtle.forward() end
     if moved then
       local x1, _, z1 = locate()
       local stuck = not turtle.back()
       if stuck and allowDig then
         -- Something fell in behind: turn round, clear it, step back, turn round again
         turtle.turnRight(); turtle.turnRight()
-        turtle.dig()
+        if not isMachine(turtle.inspect()) then turtle.dig() end
         stuck = not turtle.forward()
         turtle.turnRight(); turtle.turnRight()
       end
@@ -171,37 +178,54 @@ local function apply(kind)
 end
 
 local OPS = {
-  f = { move = turtle.forward, dig = turtle.dig,     detect = turtle.detect,     attack = turtle.attack },
-  u = { move = turtle.up,      dig = turtle.digUp,   detect = turtle.detectUp,   attack = turtle.attackUp },
-  d = { move = turtle.down,    dig = turtle.digDown, detect = turtle.detectDown, attack = turtle.attackDown },
+  f = { move = turtle.forward, dig = turtle.dig,     detect = turtle.detect,     inspect = turtle.inspect,     attack = turtle.attack },
+  u = { move = turtle.up,      dig = turtle.digUp,   detect = turtle.detectUp,   inspect = turtle.inspectUp,   attack = turtle.attackUp },
+  d = { move = turtle.down,    dig = turtle.digDown, detect = turtle.detectDown, inspect = turtle.inspectDown, attack = turtle.attackDown },
 }
 
--- Move one block, digging/attacking whatever is in the way.
+local TURTLE_WAIT = 120 -- seconds to wait for another turtle to get out of my way before giving up
+
+-- Move one block, digging/attacking whatever is in the way (never another turtle: see isMachine).
 -- The fuel level before the move is saved, so after a crash we can tell if the move happened.
 local function move(kind)
   local op = OPS[kind]
-  for _ = 1, 60 do
-    if turtle.getFuelLevel() == 0 then return false, "Out of fuel" end
+  local tries, waitUntil, was, wasMsg = 0, nil, nil, nil
+  local function unwait() if was then setStatus(was, wasMsg); was = nil end end
+  while tries < 60 do
+    tries = tries + 1
+    if turtle.getFuelLevel() == 0 then unwait(); return false, "Out of fuel" end
     S.pending = { kind = kind, fuel = turtle.getFuelLevel() }
     save()
     if op.move() then
       apply(kind)
       S.pending = nil
       save()
+      unwait()
       return true
     end
     S.pending = nil
-    if op.detect() then
+    if op.detect() and isMachine(op.inspect()) then
+      -- Another turtle (or a computer) is in the way: let it pass, don't dig it
+      if not waitUntil then
+        waitUntil = os.clock() + TURTLE_WAIT
+        was, wasMsg = S.status, S.msg
+        setStatus("waiting", "Another turtle in my way, letting it pass")
+      end
+      if os.clock() >= waitUntil then unwait(); save(); return false, "Another turtle in the way" end
+      tries = tries - 1 -- waiting doesn't use up the dig attempts
+      os.sleep(1)
+    elseif op.detect() then
       local ok, why = op.dig()
       if not ok then
         why = tostring(why)
-        if why:find("nbreakable") or why:find("ermission") or why:find("rotect") then save(); return false, why end
-        if why:lower():find("tool") then save(); return false, "No pickaxe equipped" end
+        if why:find("nbreakable") or why:find("ermission") or why:find("rotect") then unwait(); save(); return false, why end
+        if why:lower():find("tool") then unwait(); save(); return false, "No pickaxe equipped" end
       end
     else
       op.attack() -- a mob, or falling sand/gravel mid-air
     end
   end
+  unwait()
   save()
   return false, "Stuck"
 end
@@ -313,7 +337,8 @@ end
 -- Valuable = an ore product worth a trip home. Everything else can be dumped to make room.
 local VALUE_TAGS = { "c:ores", "c:raw_materials", "c:gems", "c:dusts", "c:nuggets", "c:ingots",
   "minecraft:coals", "c:coal" }
-local VALUE_NAMES = { "raw_", "_ore", "diamond", "emerald", "lapis", "redstone", "coal", "quartz",
+-- "computercraft:" = a turtle/computer picked up by an older Digger: always brought home, never dumped
+local VALUE_NAMES = { "computercraft:", "raw_", "_ore", "diamond", "emerald", "lapis", "redstone", "coal", "quartz",
   "amethyst_shard", "ancient_debris", "netherite", "nugget", "ingot", "gem", "crystal", "dust", "gilded",
   "glowstone", "shroomlight" }
 local valuableCache = {}
