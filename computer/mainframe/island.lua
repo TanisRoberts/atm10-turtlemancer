@@ -177,9 +177,10 @@ local function weaverLine(r)
   local where = r.phase == "ext" and ("edge wall %s/%s"):format(tostring(r.ext), tostring(r.extTotal))
     or r.phase == "layer" and ("layer %s/%s"):format(tostring(r.layer), tostring(r.layers))
     or tostring(r.phase or "not started")
-  return ("%s: %s%s. %s, %d/%d blocks (%d%%). Fuel %s. Seen %ds ago."):format(
+  local gaps = (tonumber(r.gaps) or 0) > 0 and (" %d gaps waiting for blocks storage hasn't got."):format(r.gaps) or ""
+  return ("%s: %s%s. %s, %d/%d blocks (%d%%).%s Fuel %s. Seen %ds ago."):format(
     r.label or "Weaver", tostring(r.state or "?"):upper(), (r.msg and r.msg ~= "") and (" (" .. r.msg .. ")") or "",
-    where, r.placed or 0, r.total or 0, pct, tostring(r.fuel), ago)
+    where, r.placed or 0, r.total or 0, pct, gaps, tostring(r.fuel), ago)
 end
 
 local function farmLine(st)

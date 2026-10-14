@@ -15,13 +15,25 @@
 --      Cells that are already solid (your seabed, or blocks he placed before a restart) are skipped.
 --   3. Whenever he's missing the next block or getting low on fuel, he flies home, asks storage
 --      for the next batch, and carries on exactly where he stopped.
+--   4. If storage has run out of a block, he leaves a GAP there and builds everything else he
+--      can. Nothing is ever built straight on top of a gap (the column above it waits too), so
+--      he can always drop down to it later. At each dock visit he asks for the gaps' blocks and
+--      fills whatever has turned up, bottom up, before carrying on. When everything else is
+--      built he waits at the dock until storage has the rest.
 
 local PROTOCOL   = "tanis-rigger"
 local STATE_FILE = "weaver.state"
 local CFG_FILE   = "weaver.cfg"
+local GAPS_FILE  = "weaver.gaps"    -- the gaps, as a log of "+ x y z block [wall]" / "- x y z" lines
 local MARKER     = "minecraft:dirt" -- block used by "test" to mark the corners
 local FUEL_TOPUP = 20000            -- fuel to top up to at every dock visit
 local SLOTS_FOR_BLOCKS = 15         -- one slot kept free for junk/fuel
+local GAP_SLOTS  = 8                -- at most this many slots of a batch go to filling gaps
+local GAP_PROBE  = 64               -- while storage is out of a block, ask for at most this many
+local DRY_MAX    = 5000             -- blocks in a row he can't place before he gives up and waits
+local GAP_MAX    = 4000             -- most gaps he'll leave before waiting for storage (disk space)
+local DISK_MIN   = 120000           -- bytes of turtle disk he keeps free (the plan file is big)
+local STOCK_WAIT = 300              -- longest wait at the dock before asking storage again (s)
 
 local args = { ... }
 
@@ -39,7 +51,126 @@ end
 
 local C = readT(CFG_FILE)   -- dock, build site, plan file
 local S = readT(STATE_FILE) or {}
-local function save() writeT(STATE_FILE, S) end
+
+---------------------------------------------------------------------------
+-- Gaps: blocks left out because storage had none of that block
+---------------------------------------------------------------------------
+-- G.list[key] = { x, y, z, name, ext = edge wall number or nil, above = true if it only waits for a
+-- gap lower down (storage has the block) }; G.cols["x,z"] = { x, z, ys, low }
+-- New lines are buffered and written by save() BEFORE the state file, so a gap is always on disk
+-- by the time his progress counter has moved past it.
+local G = { list = {}, cols = {}, n = 0, ver = 0, buf = {} }
+local function gkey(x, y, z) return x .. "," .. y .. "," .. z end
+local function ckey(x, z) return x .. "," .. z end
+
+local PCH = {}   -- block name -> its one-letter plan code (filled once the plan is loaded): short lines
+local function gapLine(g)
+  return ("+ %d %d %d %s %s%s"):format(g.x, g.y, g.z, PCH[g.name] or g.name, g.ext and tostring(g.ext) or "-",
+    g.above and " a" or "")
+end
+
+local function addGap(x, y, z, name, ext, above)
+  local k = gkey(x, y, z)
+  if G.list[k] then return end
+  local g = { x = x, y = y, z = z, name = name, ext = ext, above = above or nil }
+  G.list[k] = g
+  local c = G.cols[ckey(x, z)]
+  if not c then c = { x = x, z = z, ys = {} }; G.cols[ckey(x, z)] = c end
+  c.ys[y] = true
+  if not c.low or y < c.low then c.low = y end
+  G.n, G.ver = G.n + 1, G.ver + 1
+  G.buf[#G.buf + 1] = gapLine(g)
+end
+
+local function delGap(x, y, z)
+  local k = gkey(x, y, z)
+  if not G.list[k] then return end
+  G.list[k] = nil
+  local c = G.cols[ckey(x, z)]
+  if c then
+    c.ys[y] = nil
+    if c.low == y then
+      c.low = nil
+      for yy in pairs(c.ys) do if not c.low or yy < c.low then c.low = yy end end
+      if not c.low then G.cols[ckey(x, z)] = nil end
+    end
+  end
+  G.n, G.ver = G.n - 1, G.ver + 1
+  G.buf[#G.buf + 1] = ("- %d %d %d"):format(x, y, z)
+end
+
+-- Is there a gap lower down in this column? Then nothing above it may be built yet.
+local function gapBelow(x, y, z)
+  local c = G.cols[ckey(x, z)]
+  return c ~= nil and c.low < y
+end
+
+local function flushGaps()
+  if #G.buf == 0 then return end
+  local f = fs.open(GAPS_FILE, "a")
+  for _, l in ipairs(G.buf) do f.writeLine(l) end
+  f.close()
+  G.buf = {}
+end
+
+-- Rewrite the log with just the gaps still open (keeps it short)
+local function compactGaps()
+  G.buf = {}
+  local f = fs.open(GAPS_FILE .. ".new", "w")
+  for _, g in pairs(G.list) do f.writeLine(gapLine(g)) end
+  f.close()
+  if fs.exists(GAPS_FILE) then fs.delete(GAPS_FILE) end
+  fs.move(GAPS_FILE .. ".new", GAPS_FILE)
+end
+
+local function loadGaps(palette)
+  if fs.exists(GAPS_FILE .. ".new") and not fs.exists(GAPS_FILE) then fs.move(GAPS_FILE .. ".new", GAPS_FILE) end
+  if not fs.exists(GAPS_FILE) then return end
+  local f = fs.open(GAPS_FILE, "r")
+  while true do
+    local l = f.readLine()
+    if not l then break end
+    local op, x, y, z, rest = l:match("^([%+%-]) (%-?%d+) (%-?%d+) (%-?%d+)%s*(.*)$")
+    if op == "+" then
+      local name, ext, above = rest:match("^(%S+)%s*(%S*)%s*(%S*)")
+      if name and palette and palette[name] then name = palette[name] end   -- one-letter plan code
+      if name then addGap(tonumber(x), tonumber(y), tonumber(z), name, tonumber(ext), above == "a") end
+    elseif op == "-" then
+      delGap(tonumber(x), tonumber(y), tonumber(z))
+    end
+  end
+  f.close()
+  compactGaps()
+end
+
+local function clearGaps()
+  G.list, G.cols, G.n, G.ver, G.buf = {}, {}, 0, G.ver + 1, {}
+  if fs.exists(GAPS_FILE) then fs.delete(GAPS_FILE) end
+end
+
+-- { {block, count}, ... } biggest first, and the same for just the gaps storage is out of
+-- (not counting those that only wait for a gap below). Cached until the gaps change.
+local gapItemsCache
+local function gapItems(onlyShort)
+  if not (gapItemsCache and gapItemsCache.ver == G.ver) then
+    local c, s, above = {}, {}, 0
+    for _, g in pairs(G.list) do
+      c[g.name] = (c[g.name] or 0) + 1
+      if g.above then above = above + 1 else s[g.name] = (s[g.name] or 0) + 1 end
+    end
+    local function list(m)
+      local t = {}
+      for n, v in pairs(m) do t[#t + 1] = { n, v } end
+      table.sort(t, function(a, b) return a[2] > b[2] end)
+      return t
+    end
+    gapItemsCache = { ver = G.ver, all = list(c), short = list(s), above = above }
+  end
+  return onlyShort and gapItemsCache.short or gapItemsCache.all, gapItemsCache.above
+end
+
+local function save() flushGaps(); writeT(STATE_FILE, S) end
+local function isShort(name) return S.short ~= nil and S.short[name] == true end
 
 ---------------------------------------------------------------------------
 -- Plan
@@ -49,6 +180,17 @@ local P -- { info, ext = {{x,z,ch}}, layers = { [n] = {{z,x0,rle}} } }
 
 local function loadPlan(path) return RP.load(path) end
 local function toWorld(px, py, pz) return RP.toWorld(C, px, py, pz) end
+local function pal(ch) return P.info.palette[ch] end
+local function layer1Y() return C.sea + P.info.ybase end
+
+-- The highest Y he may have built at so far. Flying above it never runs into his own work
+-- (which matters when he drops down into an old gap far below the layer he's on).
+local function builtTop()
+  if not P or not S.phase then return -math.huge end
+  if S.phase == "ext" then return layer1Y() - 1 end
+  if S.phase == "layer" then return layer1Y() + (S.layer or 1) - 1 end
+  return layer1Y() + P.info.layers - 1
+end
 
 -- Ordered cell list for layer n: { px, pz, ch, wx, wy, wz }
 local cellCache = {}
@@ -230,7 +372,7 @@ local function goXZ(tx, tz)
 end
 
 local function travelAlt(extraY)
-  return math.max(C.cruise, S.y, extraY or -math.huge)
+  return math.max(C.cruise, S.y, extraY or -math.huge, builtTop() + 1)
 end
 
 -- Safe trip to a point: up to cruise height, across, then straight down.
@@ -305,27 +447,54 @@ end
 ---------------------------------------------------------------------------
 -- Work list helpers
 ---------------------------------------------------------------------------
-local function pal(ch) return P.info.palette[ch] end
-
-local function layer1Y() return C.sea + P.info.ybase end
-
--- Estimate the next batch of materials needed from the current work position.
+-- Estimate the next batch of materials: first the gaps' blocks (up to GAP_SLOTS), then what the
+-- build needs next. A block storage was out of last time is only asked for in a GAP_PROBE-sized
+-- amount, so the batch isn't wasted on it; if storage has it again, the next visit asks for more.
 local function upcomingNeeds()
   local need, order = {}, {}
-  local function add(name, n)
-    if not need[name] then need[name] = 0; order[#order + 1] = name end
-    need[name] = need[name] + n
-  end
   local function slots()
     local s = 0
     for _, v in pairs(need) do s = s + math.ceil(v / 64) end
     return s
   end
+  -- storage was out of it last visit, and its broadcast doesn't show any back in yet
+  local function stillShort(name)
+    if not isShort(name) then return false end
+    if stock and stockAt and os.clock() - stockAt < 20 then return (tonumber(stock[name]) or 0) == 0 end
+    return true
+  end
+  -- add n of a block; false = the batch is full (nothing was added)
+  local function add(name, n, limit)
+    local have = need[name] or 0
+    if stillShort(name) then n = math.min(n, GAP_PROBE - have) end
+    if n <= 0 then return true end
+    need[name] = have + n
+    if slots() > (limit or SLOTS_FOR_BLOCKS) then need[name] = have; return false end
+    if have == 0 then order[#order + 1] = name end
+    return true
+  end
+  -- the gaps' blocks (an edge-wall gap is a whole wall: up to depth + 2 blocks)
+  local depth = math.max(0, layer1Y() - (C.seabed or (C.sea - 20)) - 1)
+  local gneed, glist = {}, {}
+  for _, g in pairs(G.list) do
+    if not gneed[g.name] then gneed[g.name] = 0; glist[#glist + 1] = g.name end
+    gneed[g.name] = gneed[g.name] + (g.ext and (depth + 2) or 1)
+  end
+  table.sort(glist, function(a, b) return gneed[a] > gneed[b] end)
+  local full = false
+  for _, name in ipairs(glist) do
+    local left = gneed[name]
+    while left > 0 do
+      local k = math.min(left, 64)
+      if not add(name, k, GAP_SLOTS) then full = true; break end
+      left = left - k
+      if stillShort(name) and (need[name] or 0) >= GAP_PROBE then break end
+    end
+    if full then break end
+  end
   if S.phase == "ext" then
-    local depth = math.max(0, layer1Y() - (C.seabed or (C.sea - 20)) - 1)
     for i = S.ext or 1, #P.ext do
-      add(pal(P.ext[i][3]), depth + 2)
-      if slots() > SLOTS_FOR_BLOCKS then need[pal(P.ext[i][3])] = need[pal(P.ext[i][3])] - depth - 2; break end
+      if not add(pal(P.ext[i][3]), depth + 2) then break end
     end
   end
   if S.phase == "ext" or S.phase == "layer" then
@@ -335,9 +504,10 @@ local function upcomingNeeds()
     for n = startL, P.info.layers do
       local cells = layerCells(n)
       for i = (n == startL and startC or 1), #cells do
-        local name = pal(cells[i][3])
-        add(name, 1)
-        if slots() > SLOTS_FOR_BLOCKS then need[name] = need[name] - 1; done = true; break end
+        local c = cells[i]
+        if not gapBelow(c[4], c[5], c[6]) then          -- those wait for the gap under them
+          if not add(pal(c[3]), 1) then done = true; break end
+        end
       end
       if done then break end
     end
@@ -357,6 +527,7 @@ local modem = peripheral.find("modem", function(_, m) return m.isWireless() end)
 local inbox = {}   -- supply replies
 local ctrl = nil   -- latest command
 local rebootToken = nil   -- the Architect asked for a reboot (done at the dock, so he updates)
+local stock, stockAt = nil, nil   -- storage's item counts, from its broadcast on tanis-base
 
 local function send(msg)
   if modem then rednet.broadcast(msg, PROTOCOL) end
@@ -387,8 +558,10 @@ local function statusMsg()
     markers = S.markers and #S.markers or 0, cell = S.cell,
     at = S.x and { x = S.x, y = S.y, z = S.z, h = S.h } or nil,
     pos = gpsNow() or (S.x and { x = S.x, y = S.y, z = S.z }) or nil, gps = gpsNow() ~= nil,
-    corners = S.corners, rebootDone = S.rebootDone, want = S.want, v = 2,
+    corners = S.corners, rebootDone = S.rebootDone, want = S.want, v = 3,
     skipped = S.skipped, skips = S.skips,
+    gaps = G.n, gapsVer = G.ver, gapItems = { table.unpack(gapItems(true), 1, 8) },
+    gapsAbove = select(2, gapItems()),
   }
 end
 
@@ -617,7 +790,9 @@ local function skipBlock(x, y, z, why)
   end
 end
 
-local function buildPillar(i)
+-- Edge wall i: from the seabed up to just under layer 1. Returns "short" if he ran out of a
+-- block storage hasn't got (or, while patching, of any block): the caller leaves it as a gap.
+local function buildPillar(i, patching)
   local col = P.ext[i]
   local name = pal(col[3])
   local wx, _, wz = toWorld(col[1], 0, col[2])
@@ -636,12 +811,41 @@ local function buildPillar(i)
   while S.y <= topY + 1 do
     checkpoint()
     local r = placeHere(name)
-    if r == "missing" then abortWith("restock") end
+    if r == "missing" then
+      if patching or isShort(name) then return "short" end
+      abortWith("restock")
+    end
     if r == "placed" then S.placed = (S.placed or 0) + 1 end
     local ok, why = move("u")
     if not ok then skipBlock(S.x, S.y + 1, S.z, why); return end
   end
   S.skipRun = 0
+end
+
+-- Does he carry any building block at all?
+local function bagHasBlocks()
+  for s = 1, 16 do
+    local d = turtle.getItemDetail(s)
+    if d and JUNK_KEEP[d.name] and d.name ~= MARKER then return true end
+  end
+  return false
+end
+
+-- One more block he couldn't place (no stock, or waiting on a gap below). These cost no
+-- moves, so a long run of them is fast; he saves now and then, lets the radio talk, and gives
+-- up (goes home to wait) if his bag is empty or nothing has fitted for DRY_MAX blocks.
+local function diskLow()
+  local ok, free = pcall(fs.getFreeSpace, "/")
+  return ok and type(free) == "number" and free < DISK_MIN
+end
+local function dryStep()
+  S.dry = (S.dry or 0) + 1
+  if S.dry == 1 or S.dry % 100 == 0 then
+    save()
+    os.sleep(0)
+    if not bagHasBlocks() or S.dry >= DRY_MAX then abortWith("short") end
+    if G.n >= GAP_MAX or diskLow() then abortWith("gapcap") end
+  end
 end
 
 local function buildLayer(n)
@@ -652,38 +856,126 @@ local function buildLayer(n)
     local name = pal(c[3])
     checkpoint()
     local wx, wy, wz = c[4], c[5], c[6]
-    local nearPlane = inSite(S.x, S.z) and math.abs(S.y - (wy + 1)) <= 1
-    local ok, why
-    if not nearPlane then
-      ok, why = travel(wx, wy + 1, wz)
+    if gapBelow(wx, wy, wz) then
+      addGap(wx, wy, wz, name, nil, true)          -- a gap lower down keeps this column open
+      dryStep()
+    elseif isShort(name) and not slotOf(name) then
+      addGap(wx, wy, wz, name)                     -- storage has none of this block: leave a gap
+      dryStep()
     else
-      ok, why = goY(wy + 1)                       -- step up to the next layer's flying height
-      if ok then ok, why = goXZ(wx, wz) end
-      if ok and S.y ~= wy + 1 then ok, why = travel(wx, wy + 1, wz) end
-      if not ok then ok, why = travel(wx, wy + 1, wz) end   -- try the long way round, over the top
+      local nearPlane = inSite(S.x, S.z) and math.abs(S.y - (wy + 1)) <= 1
+      local ok, why
+      if not nearPlane then
+        ok, why = travel(wx, wy + 1, wz)
+      else
+        ok, why = goY(wy + 1)                       -- step up to the next layer's flying height
+        if ok then ok, why = goXZ(wx, wz) end
+        if ok and S.y ~= wy + 1 then ok, why = travel(wx, wy + 1, wz) end
+        if not ok then ok, why = travel(wx, wy + 1, wz) end   -- try the long way round, over the top
+      end
+      local r = "skip"
+      if ok then r = placeHere(name) else skipBlock(wx, wy, wz, why) end
+      if r ~= "skip" then S.skipRun = 0 end
+      if r == "missing" then
+        if not isShort(name) then abortWith("restock") end
+        addGap(wx, wy, wz, name)                     -- ran out, and storage has none either
+      elseif r == "placed" or r == "skipped" then
+        if r == "placed" then
+          S.placed = (S.placed or 0) + 1
+          S.billLeft[name] = math.max(0, (S.billLeft[name] or 1) - 1)
+        end
+        delGap(wx, wy, wz)                           -- (only there after a crash mid-block)
+        S.dry = 0
+      end
+      save()
     end
-    local r = "skip"
-    if ok then r = placeHere(name) else skipBlock(wx, wy, wz, why) end
-    if r ~= "skip" then S.skipRun = 0 end
-    if r == "missing" then abortWith("restock") end
-    if r == "placed" then
-      S.placed = (S.placed or 0) + 1
-      S.billLeft[name] = math.max(0, (S.billLeft[name] or 1) - 1)
-    end
-    save()
   end
   S.cell = 1
 end
 
+-- Fill the gaps whose blocks he now carries: column by column, bottom up, dropping in from
+-- above (the column over a gap is always left open). Returns how many blocks went in.
+local stuckCols = {}   -- ["x,z"] = os.clock() until which a column he couldn't reach is left alone
+local function canTry(c) return not stuckCols[ckey(c.x, c.z)] or os.clock() > stuckCols[ckey(c.x, c.z)] end
+
+local function patchGaps()
+  local have = counts()
+  local todo = {}
+  for _, c in pairs(G.cols) do
+    local g = G.list[gkey(c.x, c.low, c.z)]
+    if g and (have[g.name] or 0) > 0 and canTry(c) then todo[#todo + 1] = c end
+  end
+  if #todo == 0 then return 0 end
+  -- strips 8 wide, back and forth: short hops between columns
+  table.sort(todo, function(a, b)
+    local sa, sb = math.floor(a.x / 8), math.floor(b.x / 8)
+    if sa ~= sb then return sa < sb end
+    if sa % 2 == 0 then return a.z < b.z end
+    return a.z > b.z
+  end)
+  local filled = 0
+  for ci, c in ipairs(todo) do
+    checkpoint()
+    if G.cols[ckey(c.x, c.z)] == c then
+      setStatus("building", ("Filling gaps: column %d/%d"):format(ci, #todo))
+      local ys = {}
+      for y in pairs(c.ys) do ys[#ys + 1] = y end
+      table.sort(ys)
+      local ok, why = goY(travelAlt())
+      if ok then ok, why = goXZ(c.x, c.z) end
+      if not ok then
+        skipBlock(c.x, c.low, c.z, why)
+        stuckCols[ckey(c.x, c.z)] = os.clock() + 600   -- don't keep flying at it: try again later
+      else
+        for _, y in ipairs(ys) do
+          checkpoint()
+          local g = G.list[gkey(c.x, y, c.z)]
+          if g then
+            if not slotOf(g.name) then break end
+            if g.ext then
+              local before = S.placed or 0
+              if buildPillar(g.ext, true) == "short" then break end
+              filled = filled + (S.placed or 0) - before
+            else
+              local ok2, why2 = goY(y + 1)
+              if not ok2 then skipBlock(c.x, y, c.z, why2); stuckCols[ckey(c.x, c.z)] = os.clock() + 600; break end
+              local r = placeHere(g.name)
+              if r == "missing" then break end
+              if r == "placed" then
+                S.placed = (S.placed or 0) + 1
+                S.billLeft[g.name] = math.max(0, (S.billLeft[g.name] or 1) - 1)
+                filled = filled + 1
+              end
+            end
+            delGap(c.x, y, c.z)
+            save()
+          end
+        end
+      end
+      goY(travelAlt())                               -- back up his own (open) column
+    end
+  end
+  return filled
+end
+
 local function runBuild()
   if S.markers and #S.markers > 0 then clearMarkers("build") end
-  if not S.phase then S.phase, S.ext, S.layer, S.cell = "ext", 1, 1, 1 end
+  if not S.phase then S.phase, S.ext, S.layer, S.cell = "ext", 1, 1, 1; clearGaps(); save() end
   if S.phase == "ext" then
     setStatus("building", "Edge walls down to the seabed")
     for i = S.ext or 1, #P.ext do
       S.ext = i
-      setStatus("building", ("Edge wall %d/%d"):format(i, #P.ext))
-      buildPillar(i)
+      local col = P.ext[i]
+      local name = pal(col[3])
+      local wx, _, wz = toWorld(col[1], 0, col[2])
+      if isShort(name) and not slotOf(name) then
+        addGap(wx, layer1Y() - 1, wz, name, i)
+        dryStep()
+      else
+        setStatus("building", ("Edge wall %d/%d"):format(i, #P.ext))
+        if buildPillar(i) == "short" then addGap(wx, layer1Y() - 1, wz, name, i)
+        else delGap(wx, layer1Y() - 1, wz); S.dry = 0 end
+      end
       S.ext = i + 1; save()
     end
     S.phase, S.layer, S.cell = "layer", 1, 1; save()
@@ -711,13 +1003,57 @@ local function dockVisit()
   local req = upcomingNeeds()
   local reply = restock(req, 0)
   S.missing = reply and reply.missing or nil
+  if reply then
+    -- whatever storage couldn't give in full is "short" until a later visit gets it
+    S.short = {}
+    for _, e in ipairs(reply.missing or {}) do
+      if e[1] ~= "fuel" then S.short[e[1]] = true end
+    end
+  end
   save()
+  compactGaps()                                      -- keep the gap log short
+end
+
+-- Columns whose lowest gap he could fill with what he's carrying
+local function patchable()
+  local have, n = counts(), 0
+  for _, c in pairs(G.cols) do
+    local g = G.list[gkey(c.x, c.low, c.z)]
+    if g and (have[g.name] or 0) > 0 and canTry(c) then n = n + 1 end
+  end
+  return n
+end
+
+-- Blocks he's waiting for: what storage was short of, plus the gaps' blocks
+local function wantedNames()
+  local seen, out = {}, {}
+  for _, e in ipairs(S.missing or {}) do
+    if e[1] ~= "fuel" and not seen[e[1]] then seen[e[1]] = true; out[#out + 1] = e[1] end
+  end
+  for _, e in ipairs(gapItems(true)) do
+    if not seen[e[1]] then seen[e[1]] = true; out[#out + 1] = e[1] end
+  end
+  return out
+end
+
+local function shortList(list, max)
+  local m = {}
+  for i = 1, math.min(#list, max or 4) do
+    m[#m + 1] = (list[i][2] and (tostring(list[i][2]) .. " ") or "") .. tostring(list[i][1]):gsub("^.-:", "")
+  end
+  if #list > (max or 4) then m[#m + 1] = "..." end
+  return table.concat(m, ", ")
 end
 
 local function nextNeededItem()
   if S.phase == "ext" then return pal(P.ext[S.ext or 1][3]) end
   if S.phase == "layer" then
+    -- the next block he'd actually place (blocks waiting on a gap below need nothing yet)
     local cells = layerCells(S.layer)
+    for i = S.cell or 1, math.min(#cells, (S.cell or 1) + 500) do
+      local c = cells[i]
+      if not gapBelow(c[4], c[5], c[6]) then return pal(c[3]) end
+    end
     local c = cells[S.cell or 1]
     return c and pal(c[3])
   end
@@ -733,6 +1069,22 @@ orderWaiting = newOrder
 local function waitFor(sec)
   local t = os.clock() + sec
   while os.clock() < t and not newOrder() and not rebootWanted() do os.sleep(0.5) end
+end
+
+-- Wait at the dock until storage has any of these blocks again (seen in its broadcast), a new
+-- order or reboot comes in, or `sec` runs out. Without storage's broadcast, just waits a minute.
+local function waitForStock(names, sec)
+  local t = os.clock() + sec
+  while os.clock() < t and not newOrder() and not rebootWanted() do
+    os.sleep(1)
+    if stock and stockAt and os.clock() - stockAt < 20 then
+      for _, n in ipairs(names) do
+        if (tonumber(stock[n]) or 0) > 0 then return true end
+      end
+    elseif os.clock() > t - sec + 60 then
+      return false
+    end
+  end
 end
 
 local function doReboot()
@@ -773,28 +1125,54 @@ local function mainLoop()
         local ok, err = pcall(clearMarkers)
         if not ok then setStatus("error", "Clearing markers: " .. tostring(err)); safeHome() end
       end
-    elseif S.want == "build" and S.phase ~= "done" then
+    elseif S.want == "build" and (S.phase ~= "done" or G.n > 0) then
       if not atDock() and S.phase == nil then safeHome() end
       if atDock() then
         dockVisit()
         local need = nextNeededItem()
-        if need and not slotOf(need) then
+        local canPatch = patchable() > 0
+        -- Go on building if he has the next block, or storage is out of it but he carries other
+        -- blocks to get on with (unless the last trip already found nothing he could place)
+        local canBuild = S.phase ~= "done" and (need == nil or slotOf(need) ~= nil
+          or (isShort(need) and not S.dryOut and bagHasBlocks()))
+        if not canPatch and not canBuild then
           local m = {}
-          for _, e in ipairs(S.missing or {}) do m[#m + 1] = e[2] .. " " .. e[1]:gsub("^.-:", "") end
-          setStatus("waiting", "Need " .. (#m > 0 and table.concat(m, ", ") or need:gsub("^.-:", "")))
-          waitFor(30)
+          for _, e in ipairs(S.missing or {}) do
+            if e[1] ~= "fuel" then m[#m + 1] = { e[1], e[2] } end
+          end
+          if S.phase == "done" then
+            setStatus("waiting", ("Built all I can. %d gaps left, waiting for %s"):format(G.n, shortList(gapItems(true))))
+          else
+            for i, e in ipairs(m) do m[i] = { e[1] } end   -- names only: the counts were just this batch
+            setStatus("waiting", (#m > 0 and ("Storage is out of " .. shortList(m)) or ("Need " .. tostring(need):gsub("^.-:", "")))
+              .. (G.n > 0 and (" (" .. G.n .. " gaps left)") or ""))
+          end
+          waitForStock(wantedNames(), STOCK_WAIT)
         elseif fuel() < fuelHome() * 2 + 500 then
           setStatus("waiting", "Need fuel (have " .. fuel() .. ")")
           waitFor(30)
         else
-          S.missing = nil
-          local ok, err = pcall(runBuild)
+          S.dryOut, S.dry = nil, 0
+          save()
+          local ok, err = pcall(function()
+            if canPatch then patchGaps() end
+            if S.phase ~= "done" then runBuild() end
+          end)
           if ok then
             safeHome()
-            setStatus("done", "Build finished! " .. (S.placed or 0) .. " blocks placed.")
+            if G.n == 0 then
+              compactGaps()
+              setStatus("done", "Build finished! " .. (S.placed or 0) .. " blocks placed.")
+            else
+              setStatus("docked", ("Built all I can. %d gaps left"):format(G.n))
+            end
           elseif type(err) == "table" and err.abort then
+            if err.abort == "short" or err.abort == "gapcap" then S.dryOut = true; save() end
             setStatus("returning", err.abort == "restock" and "Out of the next block"
-              or err.abort == "fuel" and "Low on fuel" or "Stop requested")
+              or err.abort == "fuel" and "Low on fuel"
+              or err.abort == "short" and "Nothing left I can place: going home to wait for blocks"
+              or err.abort == "gapcap" and ("%d gaps is my limit: going home to wait for blocks"):format(G.n)
+              or "Stop requested")
             safeHome()
           else
             setStatus("error", tostring(err))
@@ -808,7 +1186,9 @@ local function mainLoop()
       end
     else
       if not atDock() then setStatus("returning", "Heading home"); safeHome() end
-      if S.phase == "done" then setStatus("done", "Build finished. " .. (S.placed or 0) .. " blocks placed.")
+      if S.phase == "done" and G.n == 0 then setStatus("done", "Build finished. " .. (S.placed or 0) .. " blocks placed.")
+      elseif S.phase == "done" then
+        setStatus("docked", ("Stopped with %d gaps left: say build to fill them"):format(G.n))
       elseif S.status ~= "docked" or not ((S.msg or ""):find("^Marker") or (S.msg or ""):find("stopped")) then
         setStatus("docked", "Waiting. Say: island weaver build | test | clear")
       end
@@ -840,6 +1220,14 @@ local function answer(msg)
     return infoCache
   elseif msg.what == "layer" and tonumber(msg.n) and P.layers[tonumber(msg.n)] then
     return { type = "layer", id = os.getComputerID(), n = tonumber(msg.n), rows = P.layers[tonumber(msg.n)] }
+  elseif msg.what == "gaps" then
+    -- the gaps on one layer ({x, z} each), or the edge walls' (n = "ext")
+    local cells = {}
+    local y = msg.n ~= "ext" and tonumber(msg.n) and (layer1Y() + tonumber(msg.n) - 1)
+    for _, g in pairs(G.list) do
+      if (msg.n == "ext" and g.ext) or (y and g.y == y and not g.ext) then cells[#cells + 1] = { g.x, g.z } end
+    end
+    return { type = "gaps", id = os.getComputerID(), n = msg.n, ver = G.ver, cells = cells }
   end
 end
 
@@ -848,8 +1236,10 @@ local function netLoop()
   rednet.open(peripheral.getName(modem))
   local lastSend = -100
   while true do
-    local from, msg = rednet.receive(PROTOCOL, 1)
-    if type(msg) == "table" then
+    local from, msg, proto = rednet.receive(nil, 1)
+    if proto == "tanis-base" and type(msg) == "table" and msg.type == "storage" and type(msg.items) == "table" then
+      stock, stockAt = msg.items, os.clock()      -- so he knows when a block he's waiting for turns up
+    elseif proto == PROTOCOL and type(msg) == "table" then
       if msg.type == "cmd" then
         if type(msg.seq) == "number" and (not ctrl or type(ctrl.seq) ~= "number" or msg.seq > ctrl.seq) then ctrl = msg end
       elseif msg.type == "supplied" then inbox[#inbox + 1] = msg
@@ -921,6 +1311,7 @@ local function setup()
   if not found then error("No supply barrel next to me. Place one and run weaver again.", 0) end
   C.supplyDir = found
   writeT(CFG_FILE, C)
+  clearGaps()
   save()
   print("Setup saved. Supply barrel found.")
   print("Next: island weaver test   (puts markers on the 8 corners)")
@@ -938,6 +1329,8 @@ if not fs.exists("startup.lua") then
 end
 
 P = loadPlan(C.plan)
+for ch, name in pairs(P.info.palette) do PCH[name] = ch end
+loadGaps(P.info.palette)
 for _, name in pairs(P.info.palette) do JUNK_KEEP[name] = true end
 JUNK_KEEP[MARKER] = true
 if not S.billLeft then

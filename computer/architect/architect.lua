@@ -5,8 +5,9 @@
 --
 -- Tabs (click them, or press Tab):
 --   Status   what he's doing, where he is, fuel, what he's missing, buttons for every order
---   Map      the build seen from above: the layer he's on (done / to do), him, his next block, the
---            dock and the corner markers. Scroll or [-] [+] to zoom, arrows to pan, PgUp/PgDn to
+--   Map      the build seen from above: the layer he's on (done / to do / gaps), him, his next
+--            block, the dock and the corner markers. Gaps (magenta) are blocks he left out because
+--            storage had none: he fills them in when it does. Scroll or [-] [+] to zoom, arrows to pan, PgUp/PgDn to
 --            look at other layers, [Follow] to go back to him
 --   Side     the whole island from the side: layers done, the one he's on, him, sea level
 --   Bill     materials still needed vs what storage has
@@ -41,6 +42,7 @@ local st = {
   id = nil, status = nil, seen = nil,        -- Weaver's latest status
   info = nil, infoAsked = -100,               -- plan + site (from Weaver)
   layers = {}, layerAsked = {},               -- [n] = ordered cells { px, pz, ch, wx, wz }
+  gaps = {}, gapsAsked = {}, gapsVer = nil,   -- ["n" or "ext"] = { {x, z}, ... } of the gaps there
   items = nil, itemsSeen = nil,               -- storage's stock (by item name)
   lastLine = nil,
 }
@@ -147,6 +149,25 @@ local function askLayer(n)
   toWeaver({ type = "ask", what = "layer", n = n, to = st.id })
 end
 
+-- The gaps on layer n (or "ext"), asked again whenever his gap list changes
+local function askGaps(n)
+  local s = st.status
+  if not s or (tonumber(s.gaps) or 0) == 0 then return end
+  local key = tostring(n)
+  if st.gaps[key] or (st.gapsAsked[key] and now() - st.gapsAsked[key] < 5) then return end
+  st.gapsAsked[key] = now()
+  toWeaver({ type = "ask", what = "gaps", n = n, to = st.id })
+end
+
+local function gapText(s, max)
+  local m = {}
+  for i, e in ipairs(s.gapItems or {}) do
+    if i > (max or 3) then m[#m + 1] = "..."; break end
+    m[#m + 1] = comma(e[2]) .. " " .. short(e[1])
+  end
+  return table.concat(m, ", ")
+end
+
 local function sendOrder(word)
   local want = WANTS[word]
   order = { want = want, word = word, seq = os.epoch("utc"), firstAt = now(), sentAt = -100 }
@@ -213,6 +234,14 @@ local function onStatus(from, msg)
     end
   end
   st.lastSkipped = sk
+  -- Gaps: blocks left out until storage has them
+  local gaps = tonumber(msg.gaps) or 0
+  if msg.gapsVer ~= st.gapsVer then st.gapsVer, st.gaps = msg.gapsVer, {} end
+  if st.lastGaps and (st.lastGaps == 0) ~= (gaps == 0) then
+    addLog(gaps > 0 and ("Gaps: leaving out what storage hasn't got (" .. gapText(msg) .. ")")
+      or "All gaps filled")
+  end
+  st.lastGaps = gaps
   if first and (msg.v or 0) < 2 then
     notice("Weaver is on old software: reboot him once by hand (hold Ctrl+R) to update.")
   end
@@ -230,6 +259,8 @@ local function onMessage(from, msg, proto)
     elseif msg.type == "info" then
       st.info = msg; st.layers = {}; st.layerAsked = {}
       addLog("Plan from Weaver: " .. tostring(msg.plan) .. ", " .. comma(msg.blocks) .. " blocks")
+    elseif msg.type == "gaps" and msg.n ~= nil then
+      if msg.ver == st.gapsVer then st.gaps[tostring(msg.n)] = msg.cells or {} end
     elseif msg.type == "layer" and tonumber(msg.n) and st.info then
       local py = st.info.ybase + msg.n - 1
       local cells = RP.orderRows(msg.rows)
@@ -339,6 +370,8 @@ local function phaseText(s, info)
     local t = ("Layer %d of %d%s, block %s"):format(n, s.layers or 0, y and (" (Y " .. y .. ")") or "",
       comma(math.max(0, (s.cell or 1) - 1)) .. (total and (" of " .. comma(total)) or ""))
     return t, math.max(0, (s.cell or 1) - 1), total
+  elseif s.phase == "done" and (tonumber(s.gaps) or 0) > 0 then
+    return "Built all he could: " .. comma(s.gaps) .. " gaps left", 1, 1
   elseif s.phase == "done" then
     return "Finished!", 1, 1
   end
@@ -426,11 +459,20 @@ local function drawStatus()
   put(W - 13, y, comma(f), colors.lightGray)
   y = y + 1
   local m = {}
-  for _, e in ipairs(s.missing or {}) do m[#m + 1] = comma(e[2]) .. " " .. short(e[1]) end
+  for _, e in ipairs(s.missing or {}) do m[#m + 1] = e[1] == "fuel" and (comma(e[2]) .. " fuel") or short(e[1]) end
   if #m > 0 then
-    put(1, y, "Needs  ", colors.gray)
+    put(1, y, "Out of ", colors.gray)
     local lines = wrap(table.concat(m, ", "), W - 8)
     for i = 1, math.min(2, #lines) do put(8, y, lines[i], colors.red); y = y + 1 end
+  end
+  if (tonumber(s.gaps) or 0) > 0 then
+    put(1, y, "Gaps   ", colors.gray)
+    put(8, y, fit(comma(s.gaps) .. " left out, waiting for " .. gapText(s), W - 8), colors.magenta)
+    y = y + 1
+    if (tonumber(s.gapsAbove) or 0) > 0 then
+      put(8, y, fit("(" .. comma(s.gapsAbove) .. " of them sit on top of those, so they wait too)", W - 8), colors.gray)
+      y = y + 1
+    end
   end
   if (tonumber(s.skipped) or 0) > 0 then
     put(1, y, "Skips  ", colors.gray)
@@ -476,6 +518,7 @@ local C_DONE, C_TODO, C_BOX, C_RIG, C_NEXT, C_DOCK, C_MARK, C_BG, C_SEA, C_GROUN
   cidx(colors.lime), cidx(colors.lightGray), cidx(colors.gray), cidx(colors.red), cidx(colors.yellow),
   cidx(colors.orange), cidx(colors.brown), cidx(colors.black), cidx(colors.blue), cidx(colors.brown),
   cidx(colors.yellow)
+local C_GAP = cidx(colors.magenta)
 
 local function viewLayer()
   local s = st.status
@@ -570,6 +613,17 @@ local function drawMap()
   for i, t in pairs(tally) do
     local x = (i - 1) % PW + 1
     gfx.rawPixel(x, (i - x) / PW + 1, t[1] >= t[2] and C_DONE or C_TODO)
+  end
+  -- Gaps on this layer (or in the edge walls): left out until storage has the block
+  if s and (tonumber(s.gaps) or 0) > 0 then
+    local key = showingExt() and "ext" or n
+    local gl = st.gaps[tostring(key)]
+    if gl then
+      for _, g in ipairs(gl) do ov(g[1], g[2], C_GAP) end
+      if #gl > 0 then label = (label or "") .. "  gaps " .. comma(#gl) end
+    else
+      askGaps(key)
+    end
   end
   -- Corner markers, dock, Weaver
   for _, c in ipairs((s and s.corners) or {}) do if c.my then ov(c.x, c.z, C_MARK) end end
