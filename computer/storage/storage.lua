@@ -36,8 +36,9 @@
 -- from the island, or after /lock. The computer's own screen always works. /unlock lifts a /lock.
 --
 -- Drawers (Functional Storage / Storage Drawers) come first: a drawer already holding the item
--- (with room), then an empty drawer, then barrels. /tidy hands the drawers to the items with the
--- most STACKS (100 lava buckets beat 101 cobble) and sends the small fry to the barrels.
+-- (with room), then an empty drawer (smallest that fits the pile), then barrels. /tidy reshuffles
+-- the drawers so the biggest piles (in STACKS: 100 lava buckets beat 101 cobble) get the biggest
+-- drawers, and sends the small fry to the barrels when drawers run out.
 -- Claim a drawer by putting one of the item in it (and lock it). Taking items out empties
 -- barrels before drawers, so loose stock drains away over time.
 
@@ -506,16 +507,24 @@ local function refusedNow(n, s)
   return t and os.clock() - t < REFUSE_FOR
 end
 
--- A drawer inventory's empty slots, biggest first
-local function emptyDrawerSlots(n)
+-- A drawer inventory's empty slots for an item that will need about `want` stacks: the smallest
+-- drawers big enough for it first (smallest first), then the bigger-is-better rest. Big drawers
+-- stay free for big piles; one ring never lands in a 16k drawer.
+local function emptyDrawerSlots(n, want)
   readSizes(n)
+  want = want or 0
   local c, out = cache[n] or {}, {}
   for s = 1, sizes[n] or 0 do
     if not c[s] and slotStacks(n, s) > 0 and not refusedNow(n, s) then out[#out + 1] = s end
   end
   table.sort(out, function(a, b)
     local la, lb = slotStacks(n, a), slotStacks(n, b)
-    if la ~= lb then return la > lb end
+    local fa, fb = la >= want, lb >= want
+    if fa ~= fb then return fa end
+    if la ~= lb then
+      if fa then return la < lb end   -- big enough: smallest first
+      return la > lb                  -- too small: biggest first
+    end
     return a < b
   end)
   return out
@@ -535,7 +544,7 @@ local function holds(n, key)
 end
 
 -- Where an item should go, best first (Tanis's order, Oct 14 2026):
---   1. drawers already holding it, with room     2. empty drawers (biggest first)
+--   1. drawers already holding it, with room     2. empty drawers (smallest that fits the pile)
 --   3. barrels/chests already holding it         4. barrels/chests with a free slot
 -- /tidy later hands the drawers to the items with the most stacks (see planDrawers).
 -- Each target is { n = inventory, mode = "held" | "empty" | "barrel" }.
@@ -574,7 +583,8 @@ end
 -- always aimed at an exact slot: a drawer controller left to choose drops items into any empty
 -- drawer it likes (duplicate drawers).
 --   held:  the drawer slots already holding the item, biggest first, skipping full ones
---   empty: empty drawer slots, biggest first (gives up after a few refusals: locked drawers)
+--   empty: empty drawer slots, the smallest that fits the item's whole pile first (see emptyDrawerSlots;
+--          gives up after a few refusals: locked drawers)
 local function moveInto(from, slot, count, t, key)
   local n = t.n
   if t.mode == "held" then
@@ -589,7 +599,9 @@ local function moveInto(from, slot, count, t, key)
     return moved
   elseif t.mode == "empty" then
     local moved, misses = 0, 0
-    for _, s in ipairs(emptyDrawerSlots(n)) do
+    local name = key:gsub("#.*$", "")
+    local want = ((byName[name] or 0) + count) / maxOf(key, from, slot)
+    for _, s in ipairs(emptyDrawerSlots(n, want)) do
       if moved >= count or misses >= 3 then break end
       local m = call(from, "pushItems", n, slot, count - moved, s) or 0
       if m > 0 then
@@ -639,9 +651,7 @@ local function depositFrom(input, skip, leave)
   return movedTotal, leftTotal
 end
 
--- One item spread over several drawers: fill its biggest drawer first, then the next biggest,
--- taking from the smallest. Moves go one stack at a time through an empty barrel slot.
--- Returns { [item id] = moved }.
+-- An empty barrel slot to stage a move through
 local function emptyBarrelSlot()
   for _, b in ipairs(storage) do
     if not isDrawer(b) and freeSlots(b) > 0 then
@@ -656,54 +666,16 @@ local function breathe()
   os.pullEvent("storage_breathe")
 end
 
-local function mergeDrawers(progress)
-  local merged = {}
-  for _, n in ipairs(storage) do
-    if isDrawer(n) then
-      local count = {}
-      for _, it in pairs(cache[n] or {}) do local k = keyOf(it); count[k] = (count[k] or 0) + 1 end
-      local done = 0
-      for key, c in pairs(count) do
-        done = done + 1
-        if done % 200 == 0 then breathe() end
-        local slots = c > 1 and drawerSlotsFor(n, key) or {}   -- biggest first
-        if #slots > 1 then
-          local name = cache[n][slots[1]].name
-          if progress then progress(name) end
-          local dst, src = 1, #slots
-          while dst < src do
-            local d, sl = slots[dst], slots[src]
-            local room = slotLimit(n, d, key) - ((cache[n][d] or {}).count or 0)
-            local have = (cache[n][sl] or {}).count or 0
-            if room <= 0 then dst = dst + 1
-            elseif have <= 0 then src = src - 1
-            else
-              local b, bslot = emptyBarrelSlot()
-              if not b then break end
-              local out = call(b, "pullItems", n, sl, math.min(64, have, room), bslot) or 0
-              if out <= 0 then break end
-              local back = call(b, "pushItems", n, bslot, out, d) or 0
-              merged[name] = (merged[name] or 0) + back
-              scanInv(b); scanInv(n)
-              if back < out then break end -- couldn't go back in: it stays safely in the barrel
-            end
-          end
-        end
-      end
-    end
-  end
-  return merged
-end
-
 ---------------------------------------------------------------------------
 -- /tidy: who gets the drawers
 ---------------------------------------------------------------------------
 -- Items are ranked by STACKS, not count: 100 lava buckets = 100 stacks beats 101 cobble (< 2).
--- In that order each item keeps the drawers it's in, then takes empty drawers (biggest first),
--- then takes drawers from items further down the list (the lowest first), until its whole amount
--- fits. So one item never spreads over more drawers than it needs while others sit in barrels,
--- and when drawers run out it's the small fry that goes to the barrels.
--- Returns the plan in rank order: { { key, name, stacks, slots = { {n, s, cap} ... } } ... }.
+-- The biggest drawers go to the biggest piles: walking the items from most stacks to fewest, each
+-- takes the biggest drawers still free until its whole pile fits (where two drawers are the same
+-- size it keeps the one it's already in, so nothing moves for nothing). When the drawers run out,
+-- the smallest piles go to the barrels.
+-- Returns the plan in rank order: { { key, name, stacks, slots = { {n, s, cap, key} ... } } ... }
+-- and every usable drawer slot.
 local function planDrawers()
   local slots, totals, keys, names, where = {}, {}, {}, {}, {}
   for _, n in ipairs(storage) do
@@ -715,8 +687,9 @@ local function planDrawers()
     if isDrawer(n) then
       for s = 1, sizes[n] or 0 do
         local cap = slotStacks(n, s)
-        if cap > 0 then
-          local it = cache[n][s]
+        local it = cache[n][s]
+        -- an empty drawer that turned something away is locked to another item: leave it out
+        if cap > 0 and (it or not refusedNow(n, s)) then
           slots[#slots + 1] = { n = n, s = s, cap = cap, key = it and keyOf(it) }
         end
       end
@@ -730,146 +703,274 @@ local function planDrawers()
   end)
   local rank = {}
   for i, k in ipairs(keys) do rank[k] = i end
-  table.sort(slots, function(a, b)
-    if a.cap ~= b.cap then return a.cap > b.cap end
-    if a.n ~= b.n then return a.n < b.n end
-    return a.s < b.s
-  end)
-  -- Lists walked once with cursors (900 kinds x thousands of slots is too slow to rescan per item)
-  local mineOf, free, held = {}, {}, {}
-  for _, sl in ipairs(slots) do                -- slots are biggest first, so each list is too
+  -- Size classes, biggest first. In each: slots by holder, empty slots, other items' slots
+  -- (lowest-ranked holder first)
+  local byCap, caps = {}, {}
+  for _, sl in ipairs(slots) do
+    local c = byCap[sl.cap]
+    if not c then c = { own = {}, empty = {}, other = {}, left = 0 }; byCap[sl.cap] = c; caps[#caps + 1] = sl.cap end
+    c.left = c.left + 1
     if sl.key then
-      mineOf[sl.key] = mineOf[sl.key] or {}
-      table.insert(mineOf[sl.key], sl)
-      held[#held + 1] = sl
+      c.own[sl.key] = c.own[sl.key] or {}
+      table.insert(c.own[sl.key], sl)
+      table.insert(c.other, sl)
     else
-      free[#free + 1] = sl
+      table.insert(c.empty, sl)
     end
   end
-  -- Victims: the lowest-ranked item's drawers first (biggest first within one item)
-  table.sort(held, function(a, b)
-    if rank[a.key] ~= rank[b.key] then return rank[a.key] > rank[b.key] end
-    if a.cap ~= b.cap then return a.cap > b.cap end
-    if a.n ~= b.n then return a.n < b.n end
-    return a.s < b.s
-  end)
-  local claimed, plan = {}, {}
-  local fi, vi = 1, 1
+  table.sort(caps, function(a, b) return a > b end)
+  for _, cap in ipairs(caps) do
+    table.sort(byCap[cap].other, function(a, b) return rank[a.key] > rank[b.key] end)
+  end
+  local claimed = {}
+  local function pop(list)
+    while list and #list > 0 do
+      local sl = table.remove(list)
+      if not claimed[sl] then return sl end
+    end
+  end
+  -- `other` is popped from the end, so reverse it: lowest rank at the end
+  for _, cap in ipairs(caps) do
+    local o, r = byCap[cap].other, {}
+    for i = #o, 1, -1 do r[#r + 1] = o[i] end
+    byCap[cap].other = r
+  end
+  local plan, ci = {}, 1
   for i, k in ipairs(keys) do
     if i % 100 == 0 then breathe() end
     local need, mine = stacks[k], {}
-    local function take(sl) claimed[sl] = true; mine[#mine + 1] = sl; need = need - sl.cap end
-    for _, sl in ipairs(mineOf[k] or {}) do
-      if need <= 0 then break end
-      if not claimed[sl] then take(sl) end
-    end
-    while need > 0 and fi <= #free do
-      take(free[fi]); fi = fi + 1
-    end
-    while need > 0 and vi <= #held do
-      local sl = held[vi]
-      if rank[sl.key] <= i then vi = #held + 1   -- only better-ranked items left: none to take
-      else
-        if not claimed[sl] then take(sl) end
-        vi = vi + 1
+    while need > 0 do
+      while ci <= #caps and byCap[caps[ci]].left <= 0 do ci = ci + 1 end
+      if ci > #caps then break end
+      local c = byCap[caps[ci]]
+      local sl = pop(c.own[k]) or pop(c.empty) or pop(c.other)
+      if not sl then c.left = 0 else
+        claimed[sl] = true
+        c.left = c.left - 1
+        mine[#mine + 1] = sl
+        need = need - sl.cap
       end
     end
     plan[#plan + 1] = { key = k, name = names[k], stacks = stacks[k], slots = mine }
   end
-  return plan
+  return plan, slots
 end
 
--- Everything in drawer slot (n, s) out to the barrels. Returns how many moved.
-local function drawerToBarrels(n, s, count, key)
-  local moved = 0
-  for _, b in ipairs(barrelTargets(key)) do
-    while moved < count do
-      local m = call(n, "pushItems", b, s, count - moved) or 0
-      if m <= 0 then break end
-      moved = moved + m
-    end
-    scanInv(b)
-    if moved >= count then break end
+-- Keep the cache in step with our own moves (re-listing a big controller after every move is slow)
+local function bump(n, s, tmpl, delta)
+  local c = cache[n][s]
+  if c then
+    c.count = c.count + delta
+    if c.count <= 0 then cache[n][s] = nil end
+  elseif delta > 0 then
+    cache[n][s] = { name = tmpl.name, nbt = tmpl.nbt, count = delta }
   end
+end
+
+-- Move up to `count` from (fromN, fromS) to (toN, toS); toS nil = anywhere in toN (a barrel).
+-- One stack per call. Drawer to drawer on the same controller goes direct; if that's refused,
+-- it goes through an empty barrel slot instead.
+local noSelfMove = false
+local function transfer(fromN, fromS, toN, toS, count)
+  local it = cache[fromN][fromS]
+  if not it then return 0 end
+  local tmpl = { name = it.name, nbt = it.nbt }
+  local moved = 0
+  while moved < count and cache[fromN][fromS] do
+    if fromN == toN and noSelfMove then
+      local b, bs = emptyBarrelSlot()
+      if not b then break end
+      local out = call(b, "pullItems", fromN, fromS, count - moved, bs) or 0
+      if out <= 0 then break end
+      bump(fromN, fromS, tmpl, -out)
+      bump(b, bs, tmpl, out)
+      local back = call(b, "pushItems", toN, bs, out, toS) or 0
+      bump(b, bs, tmpl, -back)
+      bump(toN, toS, tmpl, back)
+      moved = moved + back
+      if back < out then break end      -- the rest stays safely in the barrel
+    else
+      local m, err = call(fromN, "pushItems", toN, fromS, count - moved, toS)
+      if m == nil and fromN == toN then
+        noSelfMove = true               -- this server won't move within one inventory: stage it
+      else
+        m = m or 0
+        if m <= 0 then break end
+        bump(fromN, fromS, tmpl, -m)
+        if toS then bump(toN, toS, tmpl, m) end
+        moved = moved + m
+      end
+    end
+  end
+  if not toS and moved > 0 then scanInv(toN) end
   return moved
 end
 
--- Fill drawer slot (n, s) with `key` from the barrels, up to what it holds.
--- Returns how many moved, and true if the drawer turned the item away.
-local function barrelsToDrawer(n, s, key)
-  local moved = 0
-  for _, b in ipairs(storage) do
-    if not isDrawer(b) and holds(b, key) then
-      local touched = false
-      for bslot, it in pairs(cache[b] or {}) do
-        if keyOf(it) == key then
-          local cur = cache[n][s]
-          local room = slotLimit(n, s, key) - (cur and cur.count or 0)
-          if room <= 0 then break end
-          local m = call(b, "pushItems", n, bslot, math.min(it.count, room), s) or 0
-          if m <= 0 then
-            if touched then scanInv(b) end
-            return moved, (cur == nil)
+-- Carry out planDrawers. progress(text) now and then. Returns
+-- { moved = stacks moved, evicted = {id=n}, blocked = drawers left holding the wrong item,
+--   locked = drawers that turned their new item away, waiting = kinds still in barrels }
+local function rebalanceDrawers(progress)
+  local plan, all = planDrawers()
+  local res = { moved = 0, evicted = {}, blocked = 0, locked = 0, waiting = 0 }
+  local function id(sl) return sl.n .. "#" .. sl.s end
+  local target, slotsOf, locked = {}, {}, {}
+  for _, p in ipairs(plan) do
+    if #p.slots > 0 then slotsOf[p.key] = p.slots end
+    for _, sl in ipairs(p.slots) do target[id(sl)] = p.key end
+  end
+  local function cur(sl) return cache[sl.n][sl.s] end
+  local function room(sl, key)
+    local c = cur(sl)
+    if c and keyOf(c) ~= key then return 0 end
+    if not c and locked[id(sl)] then return 0 end
+    return slotLimit(sl.n, sl.s, key) - (c and c.count or 0)
+  end
+  local function count(sl) local c = cur(sl); return c and c.count or 0 end
+  local function tally(sl, key, m)
+    res.moved = res.moved + math.ceil(m / maxOf(key))
+  end
+  -- Into one of key's own drawers (sl); marks it locked if it turns the item away while empty
+  local function into(fromN, fromS, sl, key, n)
+    local wasEmpty = cur(sl) == nil
+    local m = transfer(fromN, fromS, sl.n, sl.s, n)
+    if m == 0 and wasEmpty then
+      locked[id(sl)] = true
+      refused[id(sl)] = os.clock()
+      res.locked = res.locked + 1
+    end
+    if m > 0 then tally(sl, key, m) end
+    return m
+  end
+  -- Contents of sl (not its own item) into their item's drawers that have room
+  local function relocate(sl)
+    local c = cur(sl); if not c then return 0 end
+    local key, moved = keyOf(c), 0
+    for _, t in ipairs(slotsOf[key] or {}) do
+      if not cur(sl) then break end
+      if t ~= sl then
+        local r = room(t, key)
+        if r > 0 then moved = moved + into(sl.n, sl.s, t, key, math.min(r, count(sl))) end
+      end
+    end
+    return moved
+  end
+  local function hasRoom(key)
+    for _, t in ipairs(slotsOf[key] or {}) do if room(t, key) > 0 then return true end end
+    return false
+  end
+  local function toBarrels(sl)
+    local c = cur(sl); if not c then return 0 end
+    local key, name, moved = keyOf(c), c.name, 0
+    for _, b in ipairs(barrelTargets(key)) do
+      if not cur(sl) then break end
+      moved = moved + transfer(sl.n, sl.s, b, nil, count(sl))
+    end
+    if moved > 0 then
+      res.evicted[name] = (res.evicted[name] or 0) + moved
+      tally(sl, key, moved)
+    end
+    return moved
+  end
+  -- Where each item sits, rebuilt every pass (entries are re-checked before use)
+  local inDrawers, inBarrels = {}, {}
+  local function index()
+    inDrawers, inBarrels = {}, {}
+    for _, sl in ipairs(all) do
+      local c = cur(sl)
+      if c then
+        local k = keyOf(c)
+        inDrawers[k] = inDrawers[k] or {}
+        table.insert(inDrawers[k], sl)
+      end
+    end
+    for _, b in ipairs(storage) do
+      if not isDrawer(b) then
+        local seen = {}
+        for _, it in pairs(cache[b] or {}) do
+          local k = keyOf(it)
+          if not seen[k] then
+            seen[k] = true
+            inBarrels[k] = inBarrels[k] or {}
+            table.insert(inBarrels[k], b)
           end
-          moved, touched = moved + m, true
-          cache[n][s] = { name = it.name, nbt = it.nbt, count = (cur and cur.count or 0) + m }
         end
       end
-      if touched then scanInv(b) end
     end
   end
-  return moved, false
-end
-
--- Carry out planDrawers. progress(i, n) per item. Returns
--- { moved = {id=n}, evicted = {id=n}, waiting = kinds with barrel stock and no drawer left,
---   blocked = drawers that couldn't be emptied (barrels full) }
-local function rebalanceDrawers(progress)
-  local plan = planDrawers()
-  local res = { moved = {}, evicted = {}, waiting = 0, blocked = 0 }
-  local inBarrels = {}                 -- item keys with stock in barrels (grows as items get evicted)
-  for _, b in ipairs(storage) do
-    if not isDrawer(b) then
-      for _, it in pairs(cache[b] or {}) do inBarrels[keyOf(it)] = true end
+  -- Fill sl with its item from wherever it sits outside its own drawers
+  local function gather(sl, key)
+    local moved = 0
+    for _, o in ipairs(inDrawers[key] or {}) do
+      if room(sl, key) <= 0 then return moved end
+      local c = cur(o)
+      if o ~= sl and c and keyOf(c) == key and target[id(o)] ~= key then
+        moved = moved + into(o.n, o.s, sl, key, math.min(room(sl, key), c.count))
+        if locked[id(sl)] then return moved end
+      end
     end
-  end
-  for pi, p in ipairs(plan) do
-    if progress and (pi % 10 == 0 or pi == #plan) then progress(pi, #plan) end
-    if pi % 50 == 0 then breathe() end
-    for _, sl in ipairs(p.slots) do
-      local n, s = sl.n, sl.s
-      local cur = cache[n][s]
-      -- Nothing of it in barrels: nothing to fill this drawer with, so don't evict anything for it
-      if inBarrels[p.key] and not (cur and keyOf(cur) == p.key and cur.count >= slotLimit(n, s, p.key)) then
-        local ok, victim = true, nil
-        if cur and keyOf(cur) ~= p.key then
-          victim = { key = keyOf(cur), name = cur.name }
-          local out = drawerToBarrels(n, s, cur.count, victim.key)
-          res.evicted[cur.name] = (res.evicted[cur.name] or 0) + out
-          if out > 0 then inBarrels[victim.key] = true end
-          scanInv(n)
-          if cache[n][s] then ok = false; res.blocked = res.blocked + 1 end
+    for _, b in ipairs(inBarrels[key] or {}) do
+      if holds(b, key) then
+        for bs, it in pairs(cache[b]) do
+          local r = room(sl, key)
+          if r <= 0 then return moved end
+          if keyOf(it) == key then
+            moved = moved + into(b, bs, sl, key, math.min(r, it.count))
+            if locked[id(sl)] then return moved end
+          end
         end
-        if ok then
-          local m, turnedAway = barrelsToDrawer(n, s, p.key)
-          if m > 0 then res.moved[p.name] = (res.moved[p.name] or 0) + m end
-          if turnedAway then
-            refused[n .. "#" .. s] = os.clock()
-            if victim then          -- a drawer locked to its old item: put that back
-              local back = barrelsToDrawer(n, s, victim.key)
-              res.evicted[victim.name] = res.evicted[victim.name] - back
-              if res.evicted[victim.name] <= 0 then res.evicted[victim.name] = nil end
+      end
+    end
+    return moved
+  end
+
+  for pass = 1, 60 do
+    local before = res.moved
+    index()
+    for i, sl in ipairs(all) do
+      if i % 50 == 0 then
+        breathe()
+        if progress then progress(("Pass %d: drawer %d/%d, %d stacks moved"):format(pass, i, #all, res.moved)) end
+      end
+      local want, c = target[id(sl)], cur(sl)
+      if c and keyOf(c) ~= want then
+        local key = keyOf(c)
+        relocate(sl)
+        -- Its own drawers are all full (or it got none): the rest goes to the barrels,
+        -- but only when this drawer belongs to another item
+        if cur(sl) and want and not hasRoom(key) then toBarrels(sl) end
+      end
+      if want and room(sl, want) > 0 then gather(sl, want) end
+    end
+    if res.moved == before then
+      -- Stuck: two items each waiting for the other's drawer. Park one drawer's contents in a
+      -- spare empty drawer or the barrels, and go round again.
+      local parked = false
+      for _, sl in ipairs(all) do
+        local want, c = target[id(sl)], cur(sl)
+        if want and c and keyOf(c) ~= want then
+          local key = keyOf(c)
+          for _, sp in ipairs(all) do
+            if not cur(sl) then break end
+            if not target[id(sp)] and not cur(sp) and not locked[id(sp)] then
+              if into(sl.n, sl.s, sp, key, count(sl)) > 0 then parked = true end
             end
           end
-          if m > 0 or turnedAway then scanInv(n) end
+          if cur(sl) and toBarrels(sl) > 0 then parked = true end
+          if parked then break end
         end
       end
+      if not parked then break end
     end
+  end
+  for _, sl in ipairs(all) do
+    local want, c = target[id(sl)], cur(sl)
+    if want and c and keyOf(c) ~= want then res.blocked = res.blocked + 1 end
   end
   -- What's still loose in barrels for want of a drawer
   local loose = {}
   for _, b in ipairs(storage) do
     if not isDrawer(b) then
+      scanInv(b)
       for _, it in pairs(cache[b] or {}) do loose[keyOf(it)] = true end
     end
   end
@@ -1188,7 +1289,7 @@ local COMMANDS = {
   { "/setup",    "assign chests with marker items" },
   { "/rescan",   "re-read every chest now" },
   { "/drawers",  "what storage sees in the drawers" },
-  { "/tidy",     "drawers go to the biggest piles" },
+  { "/tidy",     "biggest piles into biggest drawers" },
   { "/fuelinfo", "Canary fuel barrels and fuel stock" },
   { "/lock",     "lock the monitor (padlock screen)" },
   { "/unlock",   "lift a /lock" },
@@ -1859,33 +1960,32 @@ function runCommand(cmd)
       scanAll()
       for _, n in ipairs(storage) do if isDrawer(n) then readSizes(n) end end
       buildItems()
-      local merged = mergeDrawers(function(name) print("Merging duplicate drawers: " .. name) end)
-      local mtotal = 0
-      for _, c in pairs(merged) do mtotal = mtotal + c end
-      if mtotal > 0 then print(("Moved %d items into bigger drawers."):format(mtotal)) end
+      print("Biggest piles into the biggest drawers. This can take a")
+      print("few minutes the first time; sorting waits until it's done.")
       local _, py = term.getCursorPos()
-      local res = rebalanceDrawers(function(i, n)
-        term.setCursorPos(1, py); term.clearLine(); write(("Sorting drawers: item %d/%d"):format(i, n))
+      local res = rebalanceDrawers(function(text)
+        term.setCursorPos(1, py); term.clearLine(); write(text)
       end)
       print()
       picking = false
-      os.queueEvent("storage_work")
+      scanAll()
       buildItems()
-      local function top(t, title)
-        local order, total = {}, 0
-        for name, c in pairs(t) do order[#order + 1] = name; total = total + c end
-        if total == 0 then return 0 end
-        table.sort(order, function(x, y) return t[x] > t[y] end)
-        print((title):format(total))
-        for i = 1, math.min(5, #order) do print(("  %6d %s"):format(t[order[i]], order[i])) end
+      os.queueEvent("storage_work")
+      print(("Moved %d stacks."):format(res.moved))
+      local order, total = {}, 0
+      for name, c in pairs(res.evicted) do order[#order + 1] = name; total = total + c end
+      if total > 0 then
+        table.sort(order, function(x, y) return res.evicted[x] > res.evicted[y] end)
+        print(("Moved %d items out to barrels (smallest piles):"):format(total))
+        for i = 1, math.min(5, #order) do print(("  %6d %s"):format(res.evicted[order[i]], order[i])) end
         if #order > 5 then print(("  ...and %d more kinds"):format(#order - 5)) end
-        return total
       end
-      local into = top(res.moved, "Moved %d items into drawers:")
-      local out = top(res.evicted, "Moved %d items out to barrels (fewer stacks):")
-      if into + out + mtotal == 0 then print("Nothing to move: the drawers already hold the biggest piles.") end
+      if res.moved == 0 then print("Nothing to move: the drawers already hold the biggest piles.") end
+      if res.locked > 0 then
+        printError(("%d drawer(s) are locked to another item: unlock them and /tidy again."):format(res.locked))
+      end
       if res.blocked > 0 then
-        printError(("%d drawer(s) couldn't be emptied: barrels are full."):format(res.blocked))
+        printError(("%d drawer(s) still hold the wrong item: barrels too full to swap. /tidy again after freeing space."):format(res.blocked))
       end
       if res.waiting > 0 then
         print(("%d kinds still in barrels (no drawer left for them)."):format(res.waiting))
