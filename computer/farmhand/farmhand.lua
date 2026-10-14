@@ -82,6 +82,7 @@ local SETTINGS = {
     { "EVERY", "Rounds every", "min", 5, 1, 240 },
     { "KEEP_SAPLINGS", "Keep saplings", "", 8, 0, 512 },
     { "RESURVEY_EVERY", "Re-map every", "rounds", 1, 0, 100 },
+    { "SWEEPS", "Sapling sweeps", "", 1, 0, 5 },
   },
 }
 local ROLE_NAME = { farmer = "crops", lumberjack = "trees" }
@@ -152,7 +153,10 @@ end
 local function lastRoundText(s)
   local r = s and s.lastRound
   if not r then return "no round yet" end
-  if s.role == "lumberjack" then return ("chopped %d, planted %d"):format(r.chopped or 0, r.planted or 0) end
+  if s.role == "lumberjack" then
+    return ("chopped %d, planted %d"):format(r.chopped or 0, r.planted or 0)
+      .. (r.picked and (", %d saplings found"):format(r.picked) or "")
+  end
   return ("harvested %d, planted %d"):format(r.harvested or 0, r.planted or 0)
 end
 local function nextText(s)
@@ -718,10 +722,11 @@ local function drawSettings(id, x, y, w, maxY)
     local v, pending = settingValue(id, k)
     local val = (v == nil) and "?" or (tostring(v) .. (unit ~= "" and (" " .. unit) or ""))
     if k == "RESURVEY_EVERY" and v == 0 then val = "never" end
+    if k == "SWEEPS" and v == 0 then val = "off" end
     local bx = x + w - 3
     local vx = bx - 1 - #val
     local mxL = vx - 4 - x - 1
-    if #label > mxL then label = label:gsub("^Rounds every", "Every"):gsub("^Re%-map every", "Re-map"):gsub("^Keep ", "") end
+    if #label > mxL then label = label:gsub("^Rounds every", "Every"):gsub("^Re%-map every", "Re-map"):gsub("^Keep ", ""):gsub("^Sapling sweeps", "Sweeps") end
     at(x, y, pad(label:sub(1, math.max(0, mxL)), w), K.lightGrey)
     at(math.max(x, vx - 4), y, " - ", K.black, (v and v > mn) and K.cyan or K.grey)
     hit(math.max(x, vx - 4), y, math.max(x, vx - 4) + 2, y, function()

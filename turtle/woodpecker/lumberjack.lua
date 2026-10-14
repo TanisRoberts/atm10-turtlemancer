@@ -14,6 +14,10 @@
 --     with walking lanes between them (a tree every SPACING blocks). Re-maps keep the same grid.
 --   * every EVERY minutes: walks the lanes, chops every grown tree (and the leaves next to the trunk,
 --     which drops saplings), plants saplings where trees should be, picks up drops
+--   * the leaves he doesn't cut rot over the next few minutes and scatter saplings round the stump;
+--     dropped items vanish after 5 minutes, so he sweeps round every stump SWEEPS times, SWEEP_GAP
+--     seconds apart, sucking up every block near it (lanes, tree spots, the border). Spots left bare
+--     for want of a sapling get planted as soon as a sweep turns some up.
 --   * unloads at the dock (keeps KEEP_SAPLINGS saplings), refuels, tops his saplings up from the dock;
 --     unloads mid-round if full; runs home once a round to restock if he runs out of saplings
 -- Control: the Farmhand computer, chat (island woodpecker rounds|survey|stop|go|found), or here:
@@ -35,6 +39,9 @@ local DEFAULTS = {
   { "FUEL_LOW", 200, "Below this he won't start a round until he's refuelled.", min = 50 },
   { "MAX_REACH", 32, "How far the zone may reach from his start; further means the slab border has a gap.", min = 4 },
   { "SURVEY_RETRY", 5, "Minutes between tries when mapping the zone fails.", min = 1 },
+  { "SWEEPS", 2, "Times he sweeps round each chopped tree for the saplings its rotting leaves drop (0 = never).", remote = true, min = 0, max = 5 },
+  { "SWEEP_GAP", 100, "Seconds between those sweeps. Leaves rot within a few minutes; drops vanish after 5.", min = 30, max = 150 },
+  { "SWEEP_REACH", 2, "How far round a stump he sweeps, in blocks (2 for oak/birch; 3 for spruce, jungle, dark oak).", min = 1, max = 5 },
 }
 
 ---------------------------------------------------------------------------
@@ -88,7 +95,17 @@ end
 local function walkableKind(c) return c == "lane" or c == "offtree" end
 local function walkable(k) return walkableKind(B.Z.cells[k]) or k == B.Z.home end
 
-local function suckAhead() for _ = 1, 4 do if not turtle.suck() then break end end end
+-- Every drop in the block ahead (each suck takes one dropped item stack). Counts saplings found.
+local picked = 0
+local function suckAll()
+  local before = B.countWhere(isSapling)
+  local any = false
+  for _ = 1, 16 do if turtle.suck() then any = true else break end end
+  if any then picked = picked + math.max(0, B.countWhere(isSapling) - before) end
+  return any
+end
+
+local dirty   -- while sweeping: cells still to suck up ["x,z"] = true
 
 local chop   -- defined below
 local function clearStray()
@@ -100,8 +117,9 @@ local function clearStray()
 end
 
 local function goTo(goalPred)
-  return B.goTo(goalPred, walkable, function()
-    suckAhead()
+  return B.goTo(goalPred, walkable, function(k)
+    suckAll()
+    if dirty then dirty[k] = nil end
     local here = key(S.x, S.z)
     clearStray()
     if key(S.x, S.z) ~= here then return false end     -- chopping moved him: plan again
@@ -317,10 +335,58 @@ local function dock()
   })
 end
 
+---------------------------------------------------------------------------
+-- Sweeping: suck up every block within SWEEP_REACH of the given stumps. Lanes get sucked as he
+-- walks into them; tree spots, wild trees and the border get sucked by turning to face them from a
+-- lane next door. Never faces the dock (suck would empty it) or blocked cells.
+---------------------------------------------------------------------------
+local function sweepable(k)
+  local c = B.Z.cells[k]
+  return c ~= nil and c ~= "dock" and c ~= "blocked"
+end
+local function sweep(stumps)
+  local reach = B.E.SWEEP_REACH or 2
+  dirty = {}
+  for _, k in ipairs(stumps) do
+    local cx, cz = unkey(k)
+    for dx = -reach, reach do
+      for dz = -reach, reach do
+        local nk = key(cx + dx, cz + dz)
+        if sweepable(nk) then dirty[nk] = true end
+      end
+    end
+  end
+  local function touches(k)
+    local x, z = unkey(k)
+    for h = 0, 3 do if dirty[key(x + DX[h], z + DZ[h])] then return true end end
+    return false
+  end
+  local ok, err = pcall(function()
+    while next(dirty) do
+      B.abortIfNeeded()
+      if B.fuel() < 100 then return end
+      if B.freeSlots() < 2 then goHome(); dock(); B.setStatus("working", "Picking up saplings") end
+      dirty[key(S.x, S.z)] = nil         -- can't suck the block he's in (he sucked it walking in)
+      if next(dirty) == nil then return end
+      if not goTo(touches) then return end   -- the rest is out of reach
+      dirty[key(S.x, S.z)] = nil
+      local h0 = S.h
+      for _, d in ipairs({ 0, 1, 3, 2 }) do  -- ahead, right, left, behind: fewest turns
+        local h = (h0 + d) % 4
+        local nk = key(S.x + DX[h], S.z + DZ[h])
+        if dirty[nk] then B.face(h); suckAll(); dirty[nk] = nil end
+      end
+    end
+  end)
+  dirty = nil
+  if not ok then error(err, 0) end
+end
+
 local function rounds()
   local Z = B.Z
   B.setStatus("working", "Doing my rounds")
-  local chopped, planted, noSapling, restocked = 0, 0, false, false
+  picked = 0
+  local chopped, planted, restocked, lowFuel = 0, 0, false, false
   local todo, total = {}, 0
   for _, k in ipairs(Z.spots) do todo[k] = true; total = total + 1 end
   for k, c in pairs(Z.cells) do if c == "tree" then todo[k] = "off"; total = total + 1 end end
@@ -329,67 +395,130 @@ local function rounds()
   Z.seen = Z.seen or {}
   local seen = Z.seen
   local function mark(k, st) if seen[k] ~= st then seen[k] = st; B.touchMap() end end
+  local unplanted = {}   -- spots left bare for want of a sapling: planted once a sweep turns some up
+  local gap = (B.E.SWEEP_GAP or 100) * 1000
+  -- Chopped trees still to sweep round: { k, left (sweeps), at (epoch ms) }. Kept in the state file,
+  -- so a restart mid-round (world closed, reboot) still sweeps round the trees it had just chopped.
+  local stumps = {}
+  for _, s in ipairs(S.stumps or {}) do
+    if type(s) == "table" and s.k and B.now() - (s.at or 0) < gap then stumps[#stumps + 1] = s end
+  end
+  S.stumps = stumps
   -- Out of saplings mid-round: one trip home to top up from the dock, then carry on
   local function outOfSaplings(target)
-    if restocked then noSapling = true; return false end
+    if restocked then unplanted[target] = true; return false end
     restocked = true
     B.setStatus("working", "Out of saplings: fetching more from the dock")
     goHome(); dock()
     B.setStatus("working", "Doing my rounds")
-    if B.countWhere(isSapling) == 0 then noSapling = true; return false end   -- the dock had none either
+    if B.countWhere(isSapling) == 0 then unplanted[target] = true; return false end   -- the dock had none either
     todo[target] = true                -- come back and plant it
     return true
   end
-  while next(todo) do
-    B.abortIfNeeded()
-    if B.freeSlots() < 2 then goHome(); dock(); B.setStatus("working", "Doing my rounds") end
-    local target
-    local p = B.path(key(S.x, S.z), function(k)
-      local x, z = unkey(k)
-      for h = 0, 3 do
-        local nk = key(x + DX[h], z + DZ[h])
-        if todo[nk] then target = nk; return true end
+  -- Sweep round every stump whose next sweep is due
+  local function sweepDue()
+    local t, due = B.now(), {}
+    for i = #stumps, 1, -1 do
+      local s = stumps[i]
+      if t >= s.at then
+        due[#due + 1] = s.k
+        s.left, s.swept = s.left - 1, true
+        if s.left <= 0 then table.remove(stumps, i) end
       end
-      return false
-    end, walkable)
-    if not p then break end
-    local stand = p[#p] or key(S.x, S.z)
-    if not goTo(function(k) return k == stand end) then
-      todo[target] = nil
-    else
-      local tx, tz = unkey(target)
-      local h = B.dirTo(tx, tz)
-      if h then B.face(h) end
-      local ok, d = turtle.inspect()
-      local kind = todo[target]
-      todo[target] = nil
-      if h and ok and isLog(d.name) then
-        local logName = chop()
-        chopped = chopped + 1
-        if kind == "off" then
-          Z.cells[target] = "offtree"; seen[target] = nil; B.saveZone()  -- becomes a lane
-        else
-          local r = plant(saplingFor(logName))
-          mark(target, r == "planted" and "h" or (r == "growing" and "g") or "e")
-          if r == "planted" then planted = planted + 1 elseif r == "nosapling" and outOfSaplings(target) then done = done - 1 end
-        end
-      elseif h and kind ~= "off" and not (ok and isSapling(d.name)) then
-        local r = plant()
-        mark(target, (r == "planted" or r == "growing") and "g" or "e")
-        if r == "planted" then planted = planted + 1 elseif r == "nosapling" and outOfSaplings(target) then done = done - 1 end
-      elseif h and kind ~= "off" then
-        mark(target, "g")                -- a sapling already growing there
-      end
-      if B.fuel() < 100 then break end
     end
-    done = done + 1
-    S.progress = ("%d/%d"):format(done, total)
+    if #due == 0 then return end
+    B.setStatus("working", ("Picking up saplings round %d stump%s"):format(#due, #due == 1 and "" or "s"))
+    sweep(due)
+    local after = B.now()
+    for _, s in ipairs(stumps) do if s.swept then s.at, s.swept = after + gap, nil end end   -- next one a gap from now
+    B.save()
+    if B.fuel() < 100 then lowFuel = true end
+    B.setStatus("working", "Doing my rounds")
+    -- Saplings turned up: the bare spots get planted now
+    if next(unplanted) and B.countWhere(isSapling) > 0 then
+      for k in pairs(unplanted) do if not todo[k] then todo[k] = true; total = total + 1 end end
+      unplanted = {}
+    end
   end
-  S.progress = nil
-  S.lastRound = { chopped = chopped, planted = planted, at = B.now() }
+  local function plantedOrBare(target, r)
+    if r == "planted" then planted = planted + 1
+    elseif r == "nosapling" and outOfSaplings(target) then done = done - 1 end
+  end
+
+  while not lowFuel do
+    B.abortIfNeeded()
+    sweepDue()
+    if lowFuel then break end
+    if next(todo) then
+      if B.freeSlots() < 2 then goHome(); dock(); B.setStatus("working", "Doing my rounds") end
+      local target
+      local p = B.path(key(S.x, S.z), function(k)
+        local x, z = unkey(k)
+        for h = 0, 3 do
+          local nk = key(x + DX[h], z + DZ[h])
+          if todo[nk] then target = nk; return true end
+        end
+        return false
+      end, walkable)
+      if not p then
+        for k in pairs(todo) do todo[k] = nil end     -- none of the rest can be reached
+      else
+        local stand = p[#p] or key(S.x, S.z)
+        if not goTo(function(k) return k == stand end) then
+          todo[target] = nil
+        else
+          local tx, tz = unkey(target)
+          local h = B.dirTo(tx, tz)
+          if h then B.face(h) end
+          local ok, d = turtle.inspect()
+          local kind = todo[target]
+          todo[target] = nil
+          if h and ok and isLog(d.name) then
+            local logName = chop()
+            chopped = chopped + 1
+            if (B.E.SWEEPS or 0) > 0 then
+              stumps[#stumps + 1] = { k = target, left = B.E.SWEEPS, at = B.now() + gap }
+              B.save()
+            end
+            if kind == "off" then
+              Z.cells[target] = "offtree"; seen[target] = nil; B.saveZone()  -- becomes a lane
+            else
+              local r = plant(saplingFor(logName))
+              mark(target, r == "planted" and "h" or (r == "growing" and "g") or "e")
+              plantedOrBare(target, r)
+            end
+          elseif h and kind ~= "off" and not (ok and isSapling(d.name)) then
+            local r = plant()
+            mark(target, (r == "planted" or r == "growing") and "g" or "e")
+            plantedOrBare(target, r)
+          elseif h and kind ~= "off" then
+            mark(target, "g")                -- a sapling already growing there
+          end
+          if B.fuel() < 100 then lowFuel = true end
+        end
+        done = done + 1
+        S.progress = ("%d/%d"):format(done, total)
+      end
+    elseif #stumps > 0 then
+      -- Every tree seen to: wait (where he is) for the next sweep to come due
+      local nextAt = math.huge
+      for _, s in ipairs(stumps) do nextAt = math.min(nextAt, s.at) end
+      local wait = math.ceil((nextAt - B.now()) / 1000)
+      if wait > 0 then
+        B.setStatus("working", ("Waiting %d s for the leaves to drop their saplings"):format(wait))
+        for _ = 1, wait do B.abortIfNeeded(); os.sleep(1) end
+      end
+    else
+      break
+    end
+  end
+  S.progress, S.stumps = nil, nil
+  S.lastRound = { chopped = chopped, planted = planted, picked = picked, at = B.now() }
   B.saveZone()
-  local summary = ("Round done: chopped %d, planted %d"):format(chopped, planted)
-  return summary, noSapling and ("Out of saplings. Chopped %d, planted %d"):format(chopped, planted) or nil
+  local summary = ("Round done: chopped %d, planted %d, picked up %d saplings"):format(chopped, planted, picked)
+  local bare = 0
+  for _ in pairs(unplanted) do bare = bare + 1 end
+  return summary, bare > 0 and ("Out of saplings (%d spots bare). Chopped %d, planted %d"):format(bare, chopped, planted) or nil
 end
 
 ---------------------------------------------------------------------------
@@ -405,7 +534,9 @@ local function fits(kind, seen)
   if kind == "dock" then return box end
   if slab or box then return false end
   if kind == "blocked" then return ok and not isSoft(n) and not isLeaves(n) and not isLog(n) and not isSapling(n) end
-  return true                                                           -- lane / spot / tree / offtree
+  local treeish = ok and (isLog(n) or isSapling(n))
+  if kind == "lane" or kind == "offtree" then return not treeish end   -- lanes are kept clear of trees
+  return not ok or treeish or isSoft(n) or isLeaves(n)                  -- spot / tree: a tree, a sapling or nothing
 end
 
 local function recoverNoGps(why)
