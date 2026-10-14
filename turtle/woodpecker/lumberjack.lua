@@ -257,7 +257,7 @@ local function survey(fresh)
   table.sort(spots)
   for _, k in ipairs(spots) do cells[k] = "spot" end
   B.Z = { cells = cells, spots = spots, dockDir = dockDir, count = count, home = home, anchor = anchor,
-          ox = bestOx, oz = bestOz, spacing = spacing, v = ZONE_VERSION }
+          ox = bestOx, oz = bestOz, spacing = spacing, v = ZONE_VERSION, seen = old and old.seen or nil }
   B.saveZone()
   B.setStatus("docked", ("Zone mapped: %d blocks, room for %d trees"):format(count, #spots))
 end
@@ -325,6 +325,10 @@ local function rounds()
   for _, k in ipairs(Z.spots) do todo[k] = true; total = total + 1 end
   for k, c in pairs(Z.cells) do if c == "tree" then todo[k] = "off"; total = total + 1 end end
   local done = 0
+  -- What's on each tree spot, for the Farmhand's map (h chopped + replanted, g sapling, e empty)
+  Z.seen = Z.seen or {}
+  local seen = Z.seen
+  local function mark(k, st) if seen[k] ~= st then seen[k] = st; B.touchMap() end end
   -- Out of saplings mid-round: one trip home to top up from the dock, then carry on
   local function outOfSaplings(target)
     if restocked then noSapling = true; return false end
@@ -363,14 +367,18 @@ local function rounds()
         local logName = chop()
         chopped = chopped + 1
         if kind == "off" then
-          Z.cells[target] = "offtree"; B.saveZone()  -- becomes a lane
+          Z.cells[target] = "offtree"; seen[target] = nil; B.saveZone()  -- becomes a lane
         else
           local r = plant(saplingFor(logName))
+          mark(target, r == "planted" and "h" or (r == "growing" and "g") or "e")
           if r == "planted" then planted = planted + 1 elseif r == "nosapling" and outOfSaplings(target) then done = done - 1 end
         end
       elseif h and kind ~= "off" and not (ok and isSapling(d.name)) then
         local r = plant()
+        mark(target, (r == "planted" or r == "growing") and "g" or "e")
         if r == "planted" then planted = planted + 1 elseif r == "nosapling" and outOfSaplings(target) then done = done - 1 end
+      elseif h and kind ~= "off" then
+        mark(target, "g")                -- a sapling already growing there
       end
       if B.fuel() < 100 then break end
     end
@@ -379,6 +387,7 @@ local function rounds()
   end
   S.progress = nil
   S.lastRound = { chopped = chopped, planted = planted, at = B.now() }
+  B.saveZone()
   local summary = ("Round done: chopped %d, planted %d"):format(chopped, planted)
   return summary, noSapling and ("Out of saplings. Chopped %d, planted %d"):format(chopped, planted) or nil
 end
@@ -426,6 +435,13 @@ B.extraStatus = function()
   local Z = B.Z
   return { spots = Z and #Z.spots or 0, cells = Z and Z.count or 0, progress = S.progress,
            saplings = B.countWhere(isSapling) }
+end
+
+-- Map page: lanes, tree spots (with what's on them) and wild trees still to be chopped
+B.mapCell = function(k, kind)
+  if kind == "lane" or kind == "offtree" then return "." end
+  if kind == "spot" then return "+", B.Z.seen and B.Z.seen[k] end
+  if kind == "tree" then return "!" end
 end
 
 local R = {

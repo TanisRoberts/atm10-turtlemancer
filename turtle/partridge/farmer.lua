@@ -291,7 +291,7 @@ local function survey(fresh)
     if az % 2 == 0 then return ax < bx else return ax > bx end
   end)
   B.Z = { cells = cells, crop = crop, plots = plots, dockDir = dockDir, main = main, home = home,
-          anchor = anchor, v = ZONE_VERSION }
+          anchor = anchor, v = ZONE_VERSION, seen = old and old.seen or nil }
   B.saveZone()
   B.setStatus("docked", ("Farm mapped: %d plots%s"):format(#plots, main and (", mostly " .. main:gsub("^.-:", "")) or ""))
 end
@@ -332,6 +332,10 @@ local function rounds()
   topsCut = 0
   local harvested, planted, tilled, noSeed, changed = 0, 0, 0, false, false
   local done = 0
+  -- What each plot did this round, for the Farmhand's map (h harvested + replanted, g growing, e empty)
+  Z.seen = Z.seen or {}
+  local seen = Z.seen
+  local function mark(k, st) if seen[k] ~= st then seen[k] = st; B.touchMap() end end
   for _, k in ipairs(Z.plots) do
     B.abortIfNeeded()
     if B.freeSlots() < 2 then             -- full: unload, then carry on where he was
@@ -353,17 +357,21 @@ local function rounds()
         local okA, dA = turtle.inspectDown()
         if okA and isCrop(dA) then
           planted = planted + 1         -- right-click harvest already replanted it
+          mark(k, "h")
         else
           local r = plantHere(k)
           if r == "planted" then planted = planted + 1 elseif r == "noseed" then noSeed = true end
+          mark(k, r == "planted" and "h" or "e")
         end
+      elseif ok and isCrop(d) then
+        mark(k, "g")
       elseif ok and isGourd(d.name) then
         turtle.digDown(); harvested = harvested + 1
         pickUp()
       elseif not ok then
         local r = plantHere(k)
-        if r == "planted" then planted = planted + 1
-        elseif r == "noseed" then noSeed = true
+        if r == "planted" then planted = planted + 1; mark(k, "g")
+        elseif r == "noseed" then noSeed = true; mark(k, "e")
         else
           -- No farmland: drop in, hoe the dirt, plant, come back up
           if B.move("d") then
@@ -373,6 +381,7 @@ local function rounds()
               r = plantHere(k)
               if r == "planted" then planted = planted + 1 end
             end
+            mark(k, r == "planted" and "g" or "e")
             if r ~= "planted" then
               local okB, dB = turtle.inspectDown()
               if not (okB and isCrop(dB)) then Z.cells[k] = "skip"; changed = true end
@@ -390,7 +399,7 @@ local function rounds()
     S.progress = ("%d/%d"):format(done, #Z.plots)
   end
   S.progress = nil
-  if changed then B.saveZone() end
+  B.saveZone()                          -- also keeps the map's last-round marks
   harvested = harvested + topsCut
   S.lastRound = { harvested = harvested, planted = planted, tilled = tilled, at = B.now() }
   local summary = ("Round done: harvested %d, planted %d"):format(harvested, planted)
@@ -444,6 +453,14 @@ end
 ---------------------------------------------------------------------------
 -- Start
 ---------------------------------------------------------------------------
+-- Map page: plots by crop (with what happened there last round), water/paths, pumpkin/melon spots
+B.mapCell = function(k, kind, cropCode)
+  local seen = B.Z.seen and B.Z.seen[k]
+  if kind == "plot" then return cropCode(B.Z.crop[k] or B.Z.main), seen end
+  if kind == "gourd" then return "&" end
+  if kind == "skip" then return "," end
+end
+
 B.extraStatus = function()
   local Z = B.Z
   return { plots = Z and #Z.plots or 0, crop = Z and Z.main, progress = S.progress,

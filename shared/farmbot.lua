@@ -126,7 +126,9 @@ B.Z = nil              -- the farm map (the turtle program fills it in)
 local S
 local stateFile, zoneFile
 function B.save() B.writeT(stateFile, S) end
-function B.saveZone() if B.Z then B.writeT(zoneFile, B.Z) end end
+B.mapStamp = 0          -- changes whenever the map (or what's growing on it) changes: the Farmhand re-asks
+function B.touchMap() B.mapStamp = os.epoch("utc") end
+function B.saveZone() if B.Z then B.writeT(zoneFile, B.Z); B.touchMap() end end
 
 local lastShown = ""
 function B.setStatus(st, msg)
@@ -555,6 +557,71 @@ local function topTotals(n)
   return out
 end
 
+---------------------------------------------------------------------------
+-- Map for the Farmhand's map page. Turned so north is up when the farm is pinned to GPS.
+-- One character per cell (rows of text) + one per cell for what's growing there:
+--   cells:  # border  @ dock  % blocked  . lane  , skip (water/path)  & pumpkin/melon spot
+--           + tree spot  ! wild tree  * plot (crop unknown)  a-z plot growing crops[n]
+--   states: h harvested/chopped last round (replanted)  g growing/sapling  e empty  (space) unknown
+-- The role sets B.mapCell(k, kind, cropCode) -> cellChar, stateChar for its own kinds.
+---------------------------------------------------------------------------
+local GENERIC_CELL = { border = "#", dock = "@", blocked = "%" }
+B.mapCell = nil
+local function mapTurn() return B.Z and B.Z.anchor and B.Z.anchor.f or 0 end
+function B.mapPos()
+  if not (B.Z and S.x) then return nil end
+  local f = mapTurn()
+  local x, z = rot(S.x, S.z, f)
+  return { x = x, z = z, y = S.y, h = ((S.h or 0) + f) % 4 }
+end
+function B.mapMsg()
+  local Z = B.Z
+  local m = { type = "map", id = os.getComputerID(), label = B.NAME, role = B.ROLE, stamp = B.mapStamp }
+  if not (Z and Z.cells) then m.none = true; return m end
+  local f = mapTurn()
+  local pts, minx, maxx, minz, maxz = {}, math.huge, -math.huge, math.huge, -math.huge
+  for k, kind in pairs(Z.cells) do
+    local x, z = unkey(k)
+    local mx, mz = rot(x, z, f)
+    pts[#pts + 1] = { mx, mz, k, kind }
+    if mx < minx then minx = mx end; if mx > maxx then maxx = mx end
+    if mz < minz then minz = mz end; if mz > maxz then maxz = mz end
+  end
+  if #pts == 0 then m.none = true; return m end
+  local crops, cropIx = {}, {}
+  local function cropCode(name)
+    if not name then return "*" end
+    local i = cropIx[name]
+    if not i then
+      if #crops >= 26 then return "*" end
+      crops[#crops + 1] = name; i = #crops; cropIx[name] = i
+    end
+    return string.char(96 + i)
+  end
+  local W, H = maxx - minx + 1, maxz - minz + 1
+  local grid, st = {}, {}
+  for r = 1, H do
+    grid[r], st[r] = {}, {}
+    for c = 1, W do grid[r][c], st[r][c] = " ", " " end
+  end
+  for _, p in ipairs(pts) do
+    local c, sc
+    if B.mapCell then c, sc = B.mapCell(p[3], p[4], cropCode) end
+    c = c or GENERIC_CELL[p[4]] or "."
+    grid[p[2] - minz + 1][p[1] - minx + 1] = c
+    st[p[2] - minz + 1][p[1] - minx + 1] = sc or " "
+  end
+  local rows, states = {}, {}
+  for r = 1, H do rows[r] = table.concat(grid[r]); states[r] = table.concat(st[r]) end
+  local hx, hz = unkey(Z.home or "0,0")
+  local mhx, mhz = rot(hx, hz, f)
+  m.w, m.h, m.x0, m.z0, m.rows, m.states, m.crops = W, H, minx, minz, rows, states, crops
+  m.north = Z.anchor ~= nil
+  m.home = { x = mhx, z = mhz }
+  m.roundAt = S.lastRound and S.lastRound.at
+  return m
+end
+
 function B.statusMsg()
   local home
   if B.Z and B.Z.anchor then
@@ -569,7 +636,7 @@ function B.statusMsg()
     paused = S.paused, seq = S.seq, setSeq = S.setSeq, rebootDone = S.rebootDone,
     nextRound = S.nextAt and math.max(0, math.floor((S.nextAt - now()) / 1000)) or nil,
     every = (B.E.EVERY or 10) * 60, rounds = S.rounds or 0, lastRound = S.lastRound, lastHaul = S.lastHaul,
-    totals = topTotals(8), settings = {}, v = 2,
+    totals = topTotals(8), settings = {}, v = 2, mapStamp = B.mapStamp, mp = B.mapPos(),
   }
   for _, d in ipairs(envDefaults) do if d.remote then m.settings[d[1]] = B.E[d[1]] end end
   if B.extraStatus then
@@ -591,7 +658,11 @@ function B.netLoop()
   if opened == 0 then return os.pullEvent("never") end
   local last = -100
   while true do
-    local _, msg = rednet.receive(PROTOCOL, 1)
+    local from, msg = rednet.receive(PROTOCOL, 1)
+    if type(msg) == "table" and msg.type == "mapreq" and tonumber(msg.to) == os.getComputerID() then
+      local ok, m = pcall(B.mapMsg)
+      if ok then rednet.send(from, m, PROTOCOL) end
+    end
     if forMe(msg) then
       local seq = tonumber(msg.seq)
       -- Orders carry a time-stamp seq: only ever act on a newer one, so the mainframe and the Farmhand
@@ -797,6 +868,7 @@ function B.run(cfg, R, args)
   S = B.S
   if cfg.onLoad then cfg.onLoad(S) end
   B.Z = B.readT(zoneFile)
+  B.touchMap()
   if not fs.exists("startup.lua") then      -- the self-updater normally starts us
     local f = fs.open("startup.lua", "w"); f.write('shell.run("' .. cfg.prog .. '")\n'); f.close()
   end

@@ -10,6 +10,10 @@
 --   Settings, changed live: how often it does rounds, how many seeds/saplings it keeps, how often it
 --   re-maps. They're written into the turtle's own .env file.
 --   Its exact position (with GPS), last haul and everything it has brought in since it started.
+--   MAP: the farm from above (north up once it's pinned to GPS): border, dock, every plot by crop
+--   (capital letter = harvested last round, small = growing, red dot = empty) or every tree spot
+--   (sapling / just replanted / empty), and an arrow where the turtle is right now, live. Big farms
+--   follow the turtle; the arrow buttons (or the mouse wheel) pan. Tap a block to see what's there.
 -- Orders repeat every few seconds until the turtle confirms them, so it picks them up whenever it's
 -- in range. The mainframe board shows every farm turtle and a Farmhand row; chat commands
 -- (island partridge rounds...) keep working alongside this screen.
@@ -41,6 +45,8 @@ local function saveCfg()
 end
 
 local live = {}         -- id -> { s = status, seen = os.clock() }
+local maps = {}         -- id -> the turtle's last map message (see farmbot.lua B.mapMsg)
+local mapAskedAt = {}   -- id -> os.clock() of the last map request
 local sendNow = {}
 local radioOK = nil
 
@@ -183,7 +189,7 @@ end
 ---------------------------------------------------------------------------
 -- Screens: monitor + the computer's own screen, each with its own page
 ---------------------------------------------------------------------------
-local function newUi() return { page = "overview", id = nil, scroll = 1, notice = nil, confirm = nil } end
+local function newUi() return { page = "overview", id = nil, scroll = 1, notice = nil, confirm = nil, follow = true } end
 local function findMonitor()
   for _, side in ipairs(rs.getSides()) do
     if peripheral.hasType(side, "monitor") then return peripheral.wrap(side), side end
@@ -484,7 +490,256 @@ local function drawTurtle(w, h)
       x = smallButton(x, h, "Forget", K.grey, function() ui.confirm = "forget" end, K.white)
     end
   end
+  smallButton(w - 15, h, "Map", K.cyan, function() ui.page, ui.confirm, ui.follow = "map", nil, true; mapAskedAt[id] = nil end)
   smallButton(w - 7, h, "Back", K.grey, function() ui.page, ui.confirm = "overview", nil end, K.white)
+end
+
+---------------------------------------------------------------------------
+-- Map page: the farm from above, what's planted where, and where the turtle is right now
+---------------------------------------------------------------------------
+local HEX = "0123456789abcdef"
+local BLIT = {}
+for i = 0, 15 do BLIT[2 ^ i] = HEX:sub(i + 1, i + 1) end
+local ARROW = { [0] = "\30", "\16", "\31", "\17" }      -- facing north / east / south / west
+local SPADE = "\6"                                        -- looks like a little tree
+
+-- Crop colours (by the seed/crop id); anything else gets one from the spare list
+local CROP_COLOURS = {
+  { "wheat", K.yellow }, { "carrot", K.orange }, { "potato", K.white }, { "beetroot", K.red },
+  { "nether_wart", K.red }, { "melon", K.lime }, { "pumpkin", K.orange }, { "hemp", K.lime },
+  { "immersiveengineering", K.lime }, { "mysticalagriculture", K.magenta }, { "berr", K.pink },
+  { "sugar_cane", K.lime }, { "cotton", K.white }, { "flax", K.lightBlue },
+}
+local SPARE = { K.cyan, K.pink, K.lightBlue, K.purple, K.white, K.lime, K.yellow }
+local function cropColour(name, i)
+  name = tostring(name)
+  for _, c in ipairs(CROP_COLOURS) do if name:find(c[1], 1, true) then return c[2] end end
+  return SPARE[((i or 1) - 1) % #SPARE + 1]
+end
+local function cropName(id)
+  local n = tostring(id):gsub("^.-:", ""):gsub("_seeds?$", ""):gsub("_crop$", ""):gsub("_", " ")
+  if n == "seed" then n = "hemp" end
+  return (n:gsub("^%l", string.upper))
+end
+
+-- One cell -> character, text colour, background
+local function cellLook(m, c, st)
+  if c == " " then return " ", K.black, K.black end
+  if c == "#" then return " ", K.grey, K.grey end                          -- slab border
+  if c == "@" then return "D", K.black, K.yellow end                       -- dock barrel
+  if c == "%" then return "\127", K.grey, K.black end                      -- something solid
+  if c == "," then return "~", K.lightBlue, K.blue end                     -- water / path
+  if c == "&" then return "o", K.orange, K.brown end                       -- pumpkin/melon spot
+  if m.role == "lumberjack" then
+    if c == "." then return " ", K.green, K.green end                      -- lane
+    if c == "!" then return SPADE, K.lime, K.brown end                     -- wild tree, gets chopped
+    if c == "+" then
+      if st == "h" then return SPADE, K.yellow, K.green end                -- chopped + replanted
+      if st == "g" then return SPADE, K.lime, K.green end                  -- sapling growing
+      if st == "e" then return "+", K.red, K.green end                     -- nothing planted
+      return "+", K.lightGrey, K.green                                     -- not visited yet
+    end
+  end
+  if c == "." then return " ", K.grey, K.black end
+  if c == "*" then return ".", K.lightGrey, K.brown end
+  local i = c:byte() - 96
+  if i >= 1 and i <= 26 then
+    local name = m.crops and m.crops[i]
+    local letter = cropName(name or "?"):sub(1, 1)
+    if st == "e" then return ".", K.red, K.brown end                       -- empty: no seed
+    local col = cropColour(name, i)
+    if st == "h" then return letter:upper(), col, K.brown end              -- harvested last round
+    return letter:lower(), col, K.brown                                    -- growing
+  end
+  return "?", K.white, K.black
+end
+
+local function mapStats(m)
+  local n = { cells = 0 }
+  local perCrop = {}
+  for r = 1, m.h do
+    local row, srow = m.rows[r], m.states[r] or ""
+    for c = 1, m.w do
+      local ch, st = row:sub(c, c), srow:sub(c, c)
+      if ch ~= " " and ch ~= "#" and ch ~= "%" then n.cells = n.cells + 1 end
+      n[ch] = (n[ch] or 0) + 1
+      local key = ch .. st
+      n[key] = (n[key] or 0) + 1
+      local i = ch:byte() - 96
+      if i >= 1 and i <= 26 then
+        perCrop[i] = perCrop[i] or { all = 0, h = 0, g = 0, e = 0 }
+        perCrop[i].all = perCrop[i].all + 1
+        if st ~= " " then perCrop[i][st] = (perCrop[i][st] or 0) + 1 end
+      end
+    end
+  end
+  return n, perCrop
+end
+
+local function drawMap(w, h)
+  local id = ui.id
+  if not cfg.turtles[id] then ui.page = "overview"; return drawOverview(w, h) end
+  local m = maps[id]
+  local l = live[id]
+  local s = l and l.s
+  local stale = not l or os.clock() - l.seen > STALE
+  local sub = m and not m.none and (m.north and "north is up" or "up = way it faced when mapped") or ""
+  header(w, "< " .. nameOf(id) .. " - map", sub)
+  hit(1, 1, math.min(w, 24), 1, function() ui.page = "turtle" end)
+  local function footer()
+    at(1, h, (" "):rep(w))
+    smallButton(w - 7, h, "Back", K.grey, function() ui.page = "turtle" end, K.white)
+  end
+  if not m or m.none then
+    at(2, 4, pad(not m and "Asking " .. nameOf(id) .. " for its map..." or "It hasn't mapped its farm yet.", w - 2), K.lightGrey)
+    if not m and s and s.mapStamp == nil then
+      at(2, 6, pad("No map from it yet: reboot it once so it gets the new program.", w - 2), K.orange)
+    end
+    footer()
+    return
+  end
+
+  -- Layout: map on the left, key on the right if there's room for both, else the key goes below
+  local side = 22
+  local top, bottom = 3, h - 2
+  local cw = 2
+  local useSide = w - 2 >= m.w * 2 + side or (w - 2 >= m.w + side and w >= 60)
+  local areaW = useSide and (w - side - 2) or (w - 2)
+  if m.w * 2 > areaW then cw = 1 end
+  local keyRows = useSide and 0 or 2
+  local areaH = bottom - top + 1 - keyRows
+  local cols, rows = math.floor(areaW / cw), areaH
+  local fitsX, fitsY = m.w <= cols, m.h <= rows
+
+  -- Where the turtle is on the map (it reports its spot in the map's own frame)
+  local tc, tr
+  if s and s.mp and s.mapStamp then
+    tc, tr = s.mp.x - m.x0 + 1, s.mp.z - m.z0 + 1
+  end
+  -- Scroll: centre on the turtle while following, otherwise where the arrows left it
+  if ui.follow or ui.mapC == nil then
+    ui.mapC = tc and (tc - math.floor(cols / 2)) or 1
+    ui.mapR = tr and (tr - math.floor(rows / 2)) or 1
+  end
+  ui.mapC = fitsX and 1 or math.max(1, math.min(ui.mapC, m.w - cols + 1))
+  ui.mapR = fitsY and 1 or math.max(1, math.min(ui.mapR, m.h - rows + 1))
+  local ox = 2 + (fitsX and math.floor((cols - m.w) / 2) * cw or 0)
+  local oy = top + (fitsY and math.floor((rows - m.h) / 2) or 0)
+
+  for r = 0, math.min(rows, m.h) - 1 do
+    local mr = ui.mapR + r
+    local row, srow = m.rows[mr] or "", m.states[mr] or ""
+    local txt, fg, bg = {}, {}, {}
+    for c = 0, math.min(cols, m.w) - 1 do
+      local mc = ui.mapC + c
+      local ch, f, b = cellLook(m, row:sub(mc, mc), srow:sub(mc, mc))
+      if tc and mc == tc and mr == tr then
+        ch, f, b = ARROW[s.mp.h or 0] or "@", K.white, stale and K.grey or K.magenta
+      end
+      for _ = 1, cw do
+        txt[#txt + 1] = ch; fg[#fg + 1] = BLIT[f]; bg[#bg + 1] = BLIT[b]
+        if ch ~= "\127" then ch = " " end    -- 2-wide cells: the symbol once, then a blank
+      end
+    end
+    d.setCursorPos(ox, oy + r)
+    d.blit(table.concat(txt), table.concat(fg), table.concat(bg))
+  end
+  -- Tap a cell: say what's there
+  local shownW, shownH = math.min(cols, m.w) * cw, math.min(rows, m.h)
+  hit(ox, oy, ox + shownW - 1, oy + shownH - 1, function(x, y)
+    local mc, mr = ui.mapC + math.floor((x - ox) / cw), ui.mapR + (y - oy)
+    local ch = (m.rows[mr] or ""):sub(mc, mc)
+    local st = (m.states[mr] or ""):sub(mc, mc)
+    local what = ({ ["#"] = "the slab border", ["@"] = "the dock barrel", ["%"] = "something solid",
+      [","] = "water or a path (skipped)", ["&"] = "pumpkin/melon spot", ["."] = "lane",
+      ["!"] = "a wild tree (gets chopped, then it's a lane)", ["*"] = "a plot (crop not known yet)", [" "] = "outside the farm" })[ch]
+    if ch == "+" then what = "tree spot: " .. (({ h = "chopped last round, replanted", g = "sapling growing", e = "nothing planted (no sapling)" })[st] or "not visited yet") end
+    local i = ch ~= "" and ch:byte() - 96 or 0
+    if i >= 1 and i <= 26 then
+      what = cropName(m.crops[i] or "?") .. ": " .. (({ h = "harvested last round, replanted", g = "growing", e = "empty (no seeds)" })[st] or "not visited yet")
+    end
+    if tc and mc == tc and mr == tr then what = nameOf(id) .. " is here" end
+    local wx, wz
+    if tc and s.pos and m.north then                   -- world coords from its own position
+      wx, wz = s.pos.x + (mc - tc), s.pos.z + (mr - tr)
+    end
+    say((wx and ("%d, %d: "):format(wx, wz) or "") .. (what or "?"), K.white)
+  end)
+
+  -- Key
+  local n, perCrop = mapStats(m)
+  local lines = {}
+  local function add(ch, f, b, text, colour, short) lines[#lines + 1] = { ch, f, b, text, colour, short } end
+  add(ARROW[s and s.mp and s.mp.h or 0], K.white, stale and K.grey or K.magenta,
+    nameOf(id) .. (stale and " (not heard)" or (tc and "" or " (off the map)")), stale and K.grey or K.white)
+  if m.role == "lumberjack" then
+    add(SPADE, K.yellow, K.green, ("chopped+replanted %d"):format(n["+h"] or 0), nil, ("replanted %d"):format(n["+h"] or 0))
+    add(SPADE, K.lime, K.green, ("saplings %d"):format(n["+g"] or 0))
+    add("+", K.red, K.green, ("empty spots %d"):format(n["+e"] or 0), (n["+e"] or 0) > 0 and K.orange or nil,
+      ("empty %d"):format(n["+e"] or 0))
+    if (n["+ "] or 0) > 0 then add("+", K.lightGrey, K.green, ("not visited %d"):format(n["+ "]), nil, "unvisited") end
+    if (n["!"] or 0) > 0 then add(SPADE, K.lime, K.brown, ("wild trees %d"):format(n["!"]), nil, "wild") end
+    add(" ", K.green, K.green, "lane")
+  else
+    for i, name in ipairs(m.crops or {}) do
+      local pc = perCrop[i] or { all = 0, h = 0, g = 0, e = 0 }
+      add(cropName(name):sub(1, 1):upper(), cropColour(name, i), K.brown,
+        ("%s %d"):format(cropName(name), pc.all) .. ((pc.e or 0) > 0 and (" (" .. pc.e .. " empty)") or ""),
+        (pc.e or 0) > 0 and K.orange or nil, cropName(name))
+    end
+    add("A", K.white, K.brown, "capital = harvested", nil, "harvested")
+    add("a", K.white, K.brown, "small = growing", nil, "growing")
+    add(".", K.red, K.brown, "empty (no seeds)", nil, "empty")
+    if (n[","] or 0) > 0 then add("~", K.lightBlue, K.blue, "water / path", nil, "water") end
+    if (n["&"] or 0) > 0 then add("o", K.orange, K.brown, "pumpkin/melon spot", nil, "gourd") end
+  end
+  add("D", K.black, K.yellow, "dock")
+  add(" ", K.grey, K.grey, "slab border", nil, "border")
+  if (n["%"] or 0) > 0 then add("\127", K.grey, K.black, "blocked") end
+  local ago = m.roundAt and fmtAgo(math.max(0, math.floor((os.epoch("utc") - m.roundAt) / 1000))) or nil
+  if useSide then
+    local kx, y = w - side + 1, top
+    for _, e in ipairs(lines) do
+      if y > bottom then break end
+      at(kx, y, e[1], e[2], e[3]); at(kx + 1, y, " " .. pad(e[4], side - 3), e[5] or K.lightGrey)
+      y = y + 1
+    end
+    y = y + 1
+    if y <= bottom then at(kx, y, pad(("%dx%d, %d blocks"):format(m.w, m.h, n.cells), side - 1), K.grey); y = y + 1 end
+    if y <= bottom then at(kx, y, pad(ago and ("last round " .. ago .. " ago") or "no round yet", side - 1), K.grey); y = y + 1 end
+    if y <= bottom and s and s.progress then at(kx, y, pad("round " .. s.progress .. " (live)", side - 1), K.lime) end
+  else
+    -- Compact: the most useful entries across two rows
+    local y, x = bottom - 1, 2
+    for i, e in ipairs(lines) do
+      local text = i == 1 and (stale and "(not heard)" or "here") or (e[6] or e[4])
+      local len = #text + 3
+      if x + len > w then y = y + 1; x = 2 end
+      if y > bottom then break end
+      at(x, y, e[1], e[2], e[3]); at(x + 1, y, " " .. text, e[5] or K.lightGrey)
+      x = x + len
+    end
+  end
+
+  -- Footer: panning when the map is bigger than the screen
+  at(1, h, (" "):rep(w))
+  local x = 2
+  if not (fitsX and fitsY) then
+    local step = math.max(2, math.floor(math.min(cols, rows) / 3))
+    local function pan(dc, dr) return function()
+      ui.follow = false
+      ui.mapC, ui.mapR = ui.mapC + dc, ui.mapR + dr
+    end end
+    x = smallButton(x, h, "\17", K.cyan, pan(-step, 0))
+    x = smallButton(x, h, "\30", K.cyan, pan(0, -step))
+    x = smallButton(x, h, "\31", K.cyan, pan(0, step))
+    x = smallButton(x, h, "\16", K.cyan, pan(step, 0))
+    x = smallButton(x, h, ui.follow and "Following" or "Follow", ui.follow and K.lime or K.grey,
+      function() ui.follow = true end, ui.follow and K.black or K.white)
+  elseif w >= 40 then
+    at(x, h, "Tap a block to see what's there", K.grey)
+  end
+  smallButton(w - 7, h, "Back", K.grey, function() ui.page = "turtle" end, K.white)
 end
 
 local function draw()
@@ -498,7 +753,9 @@ local function draw()
         local w, h = d.getSize()
         if not w then return end
         d.setBackgroundColour(K.black); d.clear()
-        if ui.page == "turtle" then drawTurtle(w, h) else drawOverview(w, h) end
+        if ui.page == "turtle" then drawTurtle(w, h)
+        elseif ui.page == "map" then drawMap(w, h)
+        else drawOverview(w, h) end
       end)
       v.hits = hits
       if not ok and v.kind == "monitor" then mon, monSide = findMonitor() end
@@ -564,6 +821,21 @@ local function netLoop()
         say(nameOf(id) .. " is back up.", K.lime)
       end
     end
+    if type(msg) == "table" and msg.type == "map" and cfg.turtles[tonumber(msg.id) or from] then
+      maps[tonumber(msg.id) or from] = msg
+    end
+    -- Maps: only fetched while someone's looking at one, and again whenever the turtle says it changed
+    for _, v in ipairs(views) do
+      local mid = v.ui.page == "map" and v.ui.id
+      if mid then
+        local l, m = live[mid], maps[mid]
+        local changed = not m or (l and l.s.mapStamp and l.s.mapStamp ~= m.stamp)
+        if changed and os.clock() - (mapAskedAt[mid] or -100) >= 5 then
+          rednet.send(mid, { type = "mapreq", to = mid }, PROTOCOL)
+          mapAskedAt[mid] = os.clock()
+        end
+      end
+    end
     local all = os.clock() - lastSend >= SEND_EVERY
     for id in pairs(cfg.turtles) do if all or sendNow[id] then sendOrder(id) end end
     sendNow = {}
@@ -581,7 +853,8 @@ local function inputLoop()
     elseif e == "mouse_click" then v, x, y = views[2], b, c
     elseif e == "mouse_scroll" then
       local u = views[2].ui
-      if u.page == "overview" then u.scroll = u.scroll + a end
+      if u.page == "overview" then u.scroll = u.scroll + a
+      elseif u.page == "map" then u.follow = false; u.mapR = (u.mapR or 1) + a * 3 end
       draw()
     elseif e == "peripheral" or e == "peripheral_detach" or e == "monitor_resize" then
       mon, monSide = findMonitor(); draw()
@@ -589,7 +862,7 @@ local function inputLoop()
     if v then
       ui = v.ui
       for _, r in ipairs(v.hits) do
-        if x >= r.x1 and x <= r.x2 and y >= r.y1 and y <= r.y2 then r.fn(); break end
+        if x >= r.x1 and x <= r.x2 and y >= r.y1 and y <= r.y2 then r.fn(x, y); break end
       end
       draw()
     end
