@@ -650,14 +650,23 @@ local function emptyBarrelSlot()
   end
 end
 
+-- Long pure-Lua loops must yield now and then, or CraftOS kills them ("Too long without yielding")
+local function breathe()
+  os.queueEvent("storage_breathe")
+  os.pullEvent("storage_breathe")
+end
+
 local function mergeDrawers(progress)
   local merged = {}
   for _, n in ipairs(storage) do
     if isDrawer(n) then
-      local keys = {}
-      for _, it in pairs(cache[n] or {}) do keys[keyOf(it)] = true end
-      for key in pairs(keys) do
-        local slots = drawerSlotsFor(n, key)   -- biggest first
+      local count = {}
+      for _, it in pairs(cache[n] or {}) do local k = keyOf(it); count[k] = (count[k] or 0) + 1 end
+      local done = 0
+      for key, c in pairs(count) do
+        done = done + 1
+        if done % 200 == 0 then breathe() end
+        local slots = c > 1 and drawerSlotsFor(n, key) or {}   -- biggest first
         if #slots > 1 then
           local name = cache[n][slots[1]].name
           if progress then progress(name) end
@@ -726,30 +735,43 @@ local function planDrawers()
     if a.n ~= b.n then return a.n < b.n end
     return a.s < b.s
   end)
+  -- Lists walked once with cursors (900 kinds x thousands of slots is too slow to rescan per item)
+  local mineOf, free, held = {}, {}, {}
+  for _, sl in ipairs(slots) do                -- slots are biggest first, so each list is too
+    if sl.key then
+      mineOf[sl.key] = mineOf[sl.key] or {}
+      table.insert(mineOf[sl.key], sl)
+      held[#held + 1] = sl
+    else
+      free[#free + 1] = sl
+    end
+  end
+  -- Victims: the lowest-ranked item's drawers first (biggest first within one item)
+  table.sort(held, function(a, b)
+    if rank[a.key] ~= rank[b.key] then return rank[a.key] > rank[b.key] end
+    if a.cap ~= b.cap then return a.cap > b.cap end
+    if a.n ~= b.n then return a.n < b.n end
+    return a.s < b.s
+  end)
   local claimed, plan = {}, {}
+  local fi, vi = 1, 1
   for i, k in ipairs(keys) do
+    if i % 100 == 0 then breathe() end
     local need, mine = stacks[k], {}
     local function take(sl) claimed[sl] = true; mine[#mine + 1] = sl; need = need - sl.cap end
-    for _, sl in ipairs(slots) do
+    for _, sl in ipairs(mineOf[k] or {}) do
       if need <= 0 then break end
-      if not claimed[sl] and sl.key == k then take(sl) end
+      if not claimed[sl] then take(sl) end
     end
-    for _, sl in ipairs(slots) do
-      if need <= 0 then break end
-      if not claimed[sl] and not sl.key then take(sl) end
+    while need > 0 and fi <= #free do
+      take(free[fi]); fi = fi + 1
     end
-    if need > 0 then
-      local victims = {}
-      for _, sl in ipairs(slots) do
-        if not claimed[sl] and sl.key and rank[sl.key] > i then victims[#victims + 1] = sl end
-      end
-      table.sort(victims, function(a, b)
-        if rank[a.key] ~= rank[b.key] then return rank[a.key] > rank[b.key] end
-        return a.cap > b.cap
-      end)
-      for _, sl in ipairs(victims) do
-        if need <= 0 then break end
-        take(sl)
+    while need > 0 and vi <= #held do
+      local sl = held[vi]
+      if rank[sl.key] <= i then vi = #held + 1   -- only better-ranked items left: none to take
+      else
+        if not claimed[sl] then take(sl) end
+        vi = vi + 1
       end
     end
     plan[#plan + 1] = { key = k, name = names[k], stacks = stacks[k], slots = mine }
@@ -805,31 +827,42 @@ end
 local function rebalanceDrawers(progress)
   local plan = planDrawers()
   local res = { moved = {}, evicted = {}, waiting = 0, blocked = 0 }
+  local inBarrels = {}                 -- item keys with stock in barrels (grows as items get evicted)
+  for _, b in ipairs(storage) do
+    if not isDrawer(b) then
+      for _, it in pairs(cache[b] or {}) do inBarrels[keyOf(it)] = true end
+    end
+  end
   for pi, p in ipairs(plan) do
-    if progress then progress(pi, #plan) end
+    if progress and (pi % 10 == 0 or pi == #plan) then progress(pi, #plan) end
+    if pi % 50 == 0 then breathe() end
     for _, sl in ipairs(p.slots) do
       local n, s = sl.n, sl.s
       local cur = cache[n][s]
-      local ok, victim = true, nil
-      if cur and keyOf(cur) ~= p.key then
-        victim = { key = keyOf(cur), name = cur.name }
-        local out = drawerToBarrels(n, s, cur.count, victim.key)
-        res.evicted[cur.name] = (res.evicted[cur.name] or 0) + out
-        scanInv(n)
-        if cache[n][s] then ok = false; res.blocked = res.blocked + 1 end
-      end
-      if ok then
-        local m, turnedAway = barrelsToDrawer(n, s, p.key)
-        if m > 0 then res.moved[p.name] = (res.moved[p.name] or 0) + m end
-        if turnedAway then
-          refused[n .. "#" .. s] = os.clock()
-          if victim then          -- a drawer locked to its old item: put that back
-            local back = barrelsToDrawer(n, s, victim.key)
-            res.evicted[victim.name] = res.evicted[victim.name] - back
-            if res.evicted[victim.name] <= 0 then res.evicted[victim.name] = nil end
-          end
+      -- Nothing of it in barrels: nothing to fill this drawer with, so don't evict anything for it
+      if inBarrels[p.key] and not (cur and keyOf(cur) == p.key and cur.count >= slotLimit(n, s, p.key)) then
+        local ok, victim = true, nil
+        if cur and keyOf(cur) ~= p.key then
+          victim = { key = keyOf(cur), name = cur.name }
+          local out = drawerToBarrels(n, s, cur.count, victim.key)
+          res.evicted[cur.name] = (res.evicted[cur.name] or 0) + out
+          if out > 0 then inBarrels[victim.key] = true end
+          scanInv(n)
+          if cache[n][s] then ok = false; res.blocked = res.blocked + 1 end
         end
-        scanInv(n)
+        if ok then
+          local m, turnedAway = barrelsToDrawer(n, s, p.key)
+          if m > 0 then res.moved[p.name] = (res.moved[p.name] or 0) + m end
+          if turnedAway then
+            refused[n .. "#" .. s] = os.clock()
+            if victim then          -- a drawer locked to its old item: put that back
+              local back = barrelsToDrawer(n, s, victim.key)
+              res.evicted[victim.name] = res.evicted[victim.name] - back
+              if res.evicted[victim.name] <= 0 then res.evicted[victim.name] = nil end
+            end
+          end
+          if m > 0 or turnedAway then scanInv(n) end
+        end
       end
     end
   end
@@ -1465,7 +1498,7 @@ end
 
 -- Wait for the next tick, waking early when the network hands us work
 local function waitTick()
-  if not paused and (#jobs > 0 or (weaverReq and weaverReq.seq ~= lastWeaverseq)
+  if not paused and not picking and (#jobs > 0 or (weaverReq and weaverReq.seq ~= lastWeaverseq)
     or (pocketReq and pocketReq.seq ~= lastPocketSeq)) then return end
   local t = os.startTimer(TICK)
   while true do
