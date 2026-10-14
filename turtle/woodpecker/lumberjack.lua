@@ -5,14 +5,17 @@
 -- Zone:  mark the edge of the tree farm with slabs on the ground (any slab). Woodpecker walks on the
 --        ground inside it. Start him inside the zone, next to his dock barrel.
 -- Dock:  a barrel storage knows as a dock (/dock on storage, or the coal marker in /setup).
---        Storage takes his logs and keeps the barrel stocked with fuel.
+--        Storage takes his logs and keeps the barrel stocked with fuel. For saplings, give the dock
+--        Keeps on the storage computer (/assign, pick his dock, e.g. "oak_sapling 64"): he tops
+--        himself up to KEEP_SAPLINGS of each from it at every dock visit.
 --
 -- What he does:
 --   * maps the zone (walks it until he hits slabs) and picks the tree grid that fits the most trees,
 --     with walking lanes between them (a tree every SPACING blocks). Re-maps keep the same grid.
 --   * every EVERY minutes: walks the lanes, chops every grown tree (and the leaves next to the trunk,
 --     which drops saplings), plants saplings where trees should be, picks up drops
---   * unloads at the dock (keeps KEEP_SAPLINGS saplings), refuels; unloads mid-round if full
+--   * unloads at the dock (keeps KEEP_SAPLINGS saplings), refuels, tops his saplings up from the dock;
+--     unloads mid-round if full; runs home once a round to restock if he runs out of saplings
 -- Control: the Farmhand computer, chat (island woodpecker rounds|survey|stop|go|found), or here:
 --   lumberjack rounds | survey (new map from where he stands) | stop | go | found
 -- Settings: woodpecker.env (edit live, or from the Farmhand).
@@ -25,7 +28,7 @@ local ZONE_VERSION = 2
 
 local DEFAULTS = {
   { "EVERY", 20, "Minutes between rounds (20 = one Minecraft day).", remote = true, min = 1 },
-  { "KEEP_SAPLINGS", 32, "Saplings he keeps for replanting; the rest goes to storage.", remote = true, min = 0 },
+  { "KEEP_SAPLINGS", 64, "Saplings of each kind he carries (64 = a full stack); spares go to storage, and he tops up from his dock's Keeps.", remote = true, min = 0, max = 640 },
   { "RESURVEY_EVERY", 12, "Re-map the zone every this many rounds; the tree grid stays put (0 = never).", remote = true, min = 0 },
   { "SPACING", 3, "A tree every this many blocks. Only used for a brand-new map.", min = 2, max = 6 },
   { "FUEL_TARGET", 4000, "Fuel he tops up to at the dock.", min = 200 },
@@ -309,6 +312,7 @@ end
 local function dock()
   return B.dock({
     keep = function(name, already) if isSapling(name) then return B.E.KEEP_SAPLINGS - already end return 0 end,
+    want = function(name, have) if isSapling(name) then return B.E.KEEP_SAPLINGS - have end return 0 end,
     burnOwn = isLog,
   })
 end
@@ -316,11 +320,22 @@ end
 local function rounds()
   local Z = B.Z
   B.setStatus("working", "Doing my rounds")
-  local chopped, planted, noSapling = 0, 0, false
+  local chopped, planted, noSapling, restocked = 0, 0, false, false
   local todo, total = {}, 0
   for _, k in ipairs(Z.spots) do todo[k] = true; total = total + 1 end
   for k, c in pairs(Z.cells) do if c == "tree" then todo[k] = "off"; total = total + 1 end end
   local done = 0
+  -- Out of saplings mid-round: one trip home to top up from the dock, then carry on
+  local function outOfSaplings(target)
+    if restocked then noSapling = true; return false end
+    restocked = true
+    B.setStatus("working", "Out of saplings: fetching more from the dock")
+    goHome(); dock()
+    B.setStatus("working", "Doing my rounds")
+    if B.countWhere(isSapling) == 0 then noSapling = true; return false end   -- the dock had none either
+    todo[target] = true                -- come back and plant it
+    return true
+  end
   while next(todo) do
     B.abortIfNeeded()
     if B.freeSlots() < 2 then goHome(); dock(); B.setStatus("working", "Doing my rounds") end
@@ -351,11 +366,11 @@ local function rounds()
           Z.cells[target] = "offtree"; B.saveZone()  -- becomes a lane
         else
           local r = plant(saplingFor(logName))
-          if r == "planted" then planted = planted + 1 elseif r == "nosapling" then noSapling = true end
+          if r == "planted" then planted = planted + 1 elseif r == "nosapling" and outOfSaplings(target) then done = done - 1 end
         end
       elseif h and kind ~= "off" and not (ok and isSapling(d.name)) then
         local r = plant()
-        if r == "planted" then planted = planted + 1 elseif r == "nosapling" then noSapling = true end
+        if r == "planted" then planted = planted + 1 elseif r == "nosapling" and outOfSaplings(target) then done = done - 1 end
       end
       if B.fuel() < 100 then break end
     end
@@ -440,5 +455,13 @@ local R = {
 local args = { ... }
 B.run({ name = "Woodpecker", role = "lumberjack", prog = "lumberjack",
         env = { file = "woodpecker.env", title = "Woodpecker (lumberjack)", defaults = DEFAULTS },
-        state = "lumberjack.state", zone = "lumberjack.zone", onLoad = function(st) S = st end },
+        state = "lumberjack.state", zone = "lumberjack.zone",
+        onLoad = function(st)
+          S = st
+          -- Oct 2026: the old default was 32; a full stack is the new one (only if it was never changed)
+          if not S.keep64 then
+            if B.E.KEEP_SAPLINGS == 32 then B.setEnv("KEEP_SAPLINGS", 64) end
+            S.keep64 = true
+          end
+        end },
       R, args)

@@ -498,13 +498,22 @@ local function moveInto(from, slot, count, n, key)
   return call(from, "pushItems", n, slot, count) or 0
 end
 -- Empty one input chest into storage (drawers holding the item first, see targetsFor).
-local function depositFrom(input, skip)
+-- skip: item ids left alone. leave: { [id] = n } leaves n of that item (a dock's Keeps) and takes the rest.
+local function depositFrom(input, skip, leave)
   local inp = call(input, "list")
   if not inp or not next(inp) then return 0, 0 end
   local movedTotal, leftTotal = 0, 0
+  local allow = {}
+  if leave then for k, v in pairs(leave) do allow[k] = v end end
   for slot, it in pairs(inp) do
-    if not (skip and skip[it.name]) then
-      local left = it.count
+    local spare = it.count
+    if allow[it.name] then
+      local stay = math.min(spare, allow[it.name])
+      allow[it.name] = allow[it.name] - stay
+      spare = spare - stay
+    end
+    if not (skip and skip[it.name]) and spare > 0 then
+      local left = spare
       local key = keyOf(it)
       for _, n in ipairs(targetsFor(key)) do
         if left <= 0 then break end
@@ -613,14 +622,10 @@ local function deposit()
     if left > 0 then stuck = true end
   end
   for _, d in ipairs(cfg.docks or {}) do
-    local skip = DOCK_FUELS
+    -- Its Keeps (the neural lab's matrices, Woodpecker's saplings...) stay up to their count;
+    -- anything over that is taken like the rest, so a turtle unloading spares can't fill the dock.
     local keep = cfg.dockKeep and cfg.dockKeep[d]
-    if keep and next(keep) then       -- this dock also keeps some of its own items (e.g. the neural lab's matrices)
-      skip = {}
-      for k, v in pairs(DOCK_FUELS) do skip[k] = v end
-      for k in pairs(keep) do skip[k] = true end
-    end
-    local m, left = depositFrom(d, skip)
+    local m, left = depositFrom(d, DOCK_FUELS, keep)
     moved = moved + m
     if left > 0 then stuck = true end
   end

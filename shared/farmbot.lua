@@ -403,8 +403,89 @@ local function dockOps(dir)
   return turtle.drop, turtle.suck
 end
 
+local DOCK_SIDE = { up = "top", down = "bottom" }
+
+-- What's in the dock barrel (a turtle can read the inventory next to it), or nil if it can't tell
+local function dockList(dir)
+  local side = DOCK_SIDE[dir] or "front"
+  if not peripheral.hasType or not peripheral.hasType(side, "inventory") then return nil end
+  local ok, l = pcall(peripheral.call, side, "list")
+  return ok and type(l) == "table" and l or nil
+end
+
+local function holding(name, except)
+  local n = 0
+  for s = 1, 16 do
+    if s ~= except then
+      local d = turtle.getItemDetail(s)
+      if d and d.name == name then n = n + d.count end
+    end
+  end
+  return n
+end
+
+-- Take what he needs out of the dock: fuel up to the target, plus o.want(name, have) more of
+-- anything he restocks from it (saplings, say). suck() always hands over the barrel's FIRST stack,
+-- so things he doesn't want are held in spare slots and only put back at the end: dropping them
+-- straight back would just get them sucked again (and used to stop him looking any further).
+-- Returns { [name] = taken } for the restocked items.
+local function rummage(drop, suck, dir, target, want)
+  local got = {}
+  local function fuelNeeded() return target > 0 and B.fuel() < target end
+  local function wantsFromDock()
+    if not want then return false end
+    local l = dockList(dir)
+    if not l then return true end              -- can't see in: have a look anyway
+    for _, it in pairs(l) do if want(it.name, holding(it.name)) > 0 then return true end end
+    return false
+  end
+  local function fuelInDock()
+    local l = dockList(dir)
+    if not l then return true end
+    for _, it in pairs(l) do if DOCK_FUEL[it.name] then return true end end
+    return false
+  end
+  local held = {}
+  for _ = 1, 27 do
+    local needFuel = fuelNeeded() and fuelInDock()
+    if not needFuel and not wantsFromDock() then break end
+    local free
+    for s = 16, 1, -1 do if turtle.getItemCount(s) == 0 then free = s; break end end
+    if not free then break end
+    turtle.select(free)
+    if not suck() then break end
+    local d = turtle.getItemDetail(free)
+    if d and DOCK_FUEL[d.name] and fuelNeeded() then
+      while fuelNeeded() and turtle.getItemCount(free) > 0 do turtle.refuel(1) end
+    end
+    local count = turtle.getItemCount(free)
+    if d and count > 0 then
+      local keep = want and math.max(0, math.min(count, want(d.name, holding(d.name, free)))) or 0
+      if keep > 0 then
+        got[d.name] = (got[d.name] or 0) + keep
+        if count > keep then drop(count - keep) end   -- he has enough now, so it won't be taken again
+        if turtle.getItemCount(free) > keep then held[#held + 1] = free end   -- dock full: hand it back later
+      else
+        held[#held + 1] = free
+      end
+    end
+  end
+  for _, s in ipairs(held) do
+    turtle.select(s)
+    local d = turtle.getItemDetail(s)
+    if d then
+      local keep = want and math.max(0, math.min(d.count, want(d.name, holding(d.name, s)))) or 0
+      if d.count > keep then drop(d.count - keep) end
+    end
+  end
+  turtle.select(1)
+  return got
+end
+
 -- Refuel first (so he never grabs his own produce back), then unload everything except what
 -- o.keep(name, alreadyKept) says to keep. o.burnOwn(name): his own items he may burn if the dock is dry.
+-- o.want(name, have): how many more of an item to take FROM the dock (restocking; storage keeps it
+-- there through the dock's Keeps list on the storage computer). B.lastRestock = what he took.
 function B.dock(o)
   B.setStatus("docked", "Unloading")
   local dir = B.Z.dockDir
@@ -412,21 +493,7 @@ function B.dock(o)
   local drop, suck = dockOps(dir)
   local limit = turtle.getFuelLimit()
   local target = math.min(B.E.FUEL_TARGET or 3000, limit == "unlimited" and 0 or limit)
-  for _ = 1, 8 do
-    if B.fuel() >= target then break end
-    local free
-    for s = 16, 1, -1 do if turtle.getItemCount(s) == 0 then free = s; break end end
-    if not free then break end
-    turtle.select(free)
-    if not suck() then break end
-    local d = turtle.getItemDetail(free)
-    if d and DOCK_FUEL[d.name] then
-      while B.fuel() < target and turtle.getItemCount(free) > 0 do turtle.refuel(1) end
-      if turtle.getItemCount(free) > 0 then drop() end
-    else
-      drop(); break                    -- not fuel (storage hasn't collected it yet): leave it
-    end
-  end
+  local restocked = rummage(drop, suck, dir, target, o.want)
   if B.fuel() < 500 and o.burnOwn then
     for s = 1, 16 do
       local d = turtle.getItemDetail(s)
@@ -454,6 +521,9 @@ function B.dock(o)
     end
   end
   turtle.select(1)
+  -- Second look now he has room (fuel or saplings may have been behind things he couldn't hold)
+  for n, c in pairs(rummage(drop, suck, dir, target, o.want)) do restocked[n] = (restocked[n] or 0) + c end
+  B.lastRestock = next(restocked) and restocked or nil
   local list = {}
   S.totals = S.totals or {}
   for n, c in pairs(haul) do
