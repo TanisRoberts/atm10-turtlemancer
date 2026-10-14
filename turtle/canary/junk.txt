@@ -1,4 +1,4 @@
-# Digger's junk list: blocks he may throw away underground.
+# Canary's junk list: blocks he may throw away underground.
 # One item per line. "minecraft:" is optional. Lines starting with # are ignored.
 # Junk still comes home (up to 4 slots) while storage has less than its cap of it.
 # Ores, raw metals and gems always come home. Anything else (flint, dripstone...)

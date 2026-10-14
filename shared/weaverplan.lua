@@ -1,7 +1,7 @@
--- riggerplan.lua  --  plan-file maths shared by Rigger (the builder) and the Architect (his screen).
+-- weaverplan.lua  --  plan-file maths shared by Weaver (the builder) and the Architect (his screen).
 --
--- Both sides must agree exactly on the order Rigger builds a layer in, so the Architect can tell
--- which blocks of the current layer are done just from Rigger's cell number. That order lives here.
+-- Both sides must agree exactly on the order Weaver builds a layer in, so the Architect can tell
+-- which blocks of the current layer are done just from Weaver's cell number. That order lives here.
 --
 -- Plan file format (e.g. mossy.plan):
 --   #info <serialized table>    name, palette, layers, ybase, topY, minX..maxZ, blocks, bill
@@ -95,7 +95,7 @@ local function nearestOrder(cells)
 end
 RP.nearestOrder = nearestOrder
 
--- A layer's run-length rows -> its cells { px, pz, ch } in Rigger's building order
+-- A layer's run-length rows -> its cells { px, pz, ch } in Weaver's building order
 function RP.orderRows(rows)
   local cells = {}
   for ri, row in ipairs(rows or {}) do

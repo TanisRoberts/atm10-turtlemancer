@@ -54,25 +54,25 @@ local function rows()
       nl.power and (nl.power .. "%") or "?"), _G.NEURAL_SEEN }
   end
   local digs = {}
-  for _, e in pairs(_G.DIGGERS or {}) do
+  for _, e in pairs(_G.CANARIES or {}) do
     if e.s.state ~= "retired" then digs[#digs + 1] = e end
   end
   table.sort(digs, function(a, b) return (a.s.num or 999) < (b.s.num or 999) end)
   for _, e in ipairs(digs) do
     local m = e.s
-    out[#out + 1] = { m.label or "Digger", m.state, ("Y %s, fuel %s, cargo %s/16%s"):format(tostring(m.y), tostring(m.fuel),
+    out[#out + 1] = { m.label or "Canary", m.state, ("Y %s, fuel %s, cargo %s/16%s"):format(tostring(m.y), tostring(m.fuel),
       tostring(m.slots), (m.msg and m.msg ~= "") and (". " .. m.msg) or ""), e.seen }
   end
-  local r = _G.RIGGER_STATUS
+  local r = _G.WEAVER_STATUS
   if r then
     local where = r.phase == "layer" and ("layer %s/%s"):format(tostring(r.layer), tostring(r.layers))
       or r.phase == "ext" and ("edge wall %s/%s"):format(tostring(r.ext), tostring(r.extTotal)) or tostring(r.phase or "idle")
-    out[#out + 1] = { r.label or "Rigger", r.state, where .. ((r.msg and r.msg ~= "") and (". " .. r.msg) or ""), _G.RIGGER_SEEN }
+    out[#out + 1] = { r.label or "Weaver", r.state, where .. ((r.msg and r.msg ~= "") and (". " .. r.msg) or ""), _G.WEAVER_SEEN }
   end
   local z = _G.CARTO
   if z then
     local pct = (z.mapping and tonumber(z.wps) and z.wps > 0) and (" %d%%,"):format(math.floor(((z.wp or 1) - 1) / z.wps * 100)) or ""
-    out[#out + 1] = { z.label or "Zigger", z.state, ("%s %d chunks, fuel %s%s"):format(pct, tonumber(z.chunks) or 0,
+    out[#out + 1] = { z.label or "Seagull", z.state, ("%s %d chunks, fuel %s%s"):format(pct, tonumber(z.chunks) or 0,
       tostring(z.fuel), (z.msg and z.msg ~= "") and (". " .. z.msg) or ""), _G.CARTO_SEEN }
   end
   local fh = _G.FARMHAND

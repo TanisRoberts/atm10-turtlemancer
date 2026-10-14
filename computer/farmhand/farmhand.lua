@@ -1,4 +1,4 @@
--- farmhand.lua  --  the Farmhand: control screen for every farm turtle (Figger, Tigger...)
+-- farmhand.lua  --  the Farmhand: control screen for every farm turtle (Partridge, Woodpecker...)
 --
 -- Needs: an advanced computer with a wireless or ENDER modem (ender reaches farms anywhere) and an
 -- advanced monitor touching it (any size; the computer's own screen works too, click with the mouse).
@@ -12,7 +12,7 @@
 --   Its exact position (with GPS), last haul and everything it has brought in since it started.
 -- Orders repeat every few seconds until the turtle confirms them, so it picks them up whenever it's
 -- in range. The mainframe board shows every farm turtle and a Farmhand row; chat commands
--- (island figger rounds...) keep working alongside this screen.
+-- (island partridge rounds...) keep working alongside this screen.
 
 local PROTOCOL   = "tanis-farm"
 local CONFIG     = "farmhand.cfg"
@@ -266,7 +266,7 @@ local function drawOverview(w, h)
   ui.scroll = math.max(1, math.min(ui.scroll, pages))
 
   if #list == 0 then
-    local lines = { "No farm turtles heard yet.", "Set up a turtle as Figger (crops) or Tigger (trees):",
+    local lines = { "No farm turtles heard yet.", "Set up a turtle as Partridge (crops) or Woodpecker (trees):",
                     "it shows up here as soon as it's on the air." }
     for i, l in ipairs(lines) do at(2, top + i, pad(l, w - 2), i == 1 and K.white or K.lightGrey) end
   end

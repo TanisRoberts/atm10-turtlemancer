@@ -2,8 +2,8 @@
 -- Asks what the device is (computer, turtle or glasses), then which role, then a label.
 -- Saves device.cfg and reboots; startup.lua then downloads that role's files.
 --
--- Advanced computers/turtles/glasses: click an option (click again or "Next" to go on).
--- Keyboard works everywhere: arrows to move, Enter to pick, Backspace on a menu to go back.
+-- One option at a time, like a character select: up/down (or scroll) to browse, Enter, "Pick >" or a
+-- click on the card to choose, Backspace or "< Back" to go back. Mouse works on advanced devices.
 
 local REPO = "https://raw.githubusercontent.com/TanisRoberts/atm10-turtlemancer/main/"
 local CFG  = "device.cfg"
@@ -56,6 +56,8 @@ local function button(x, y, label, bg, action)
   return x + #label + 3
 end
 
+local QY = H <= 13 and 2 or 3   -- question row (a turtle's short screen has no spare line)
+
 -- The frame every step shares: title bar with the step, a question, a footer with buttons.
 local function frame(step, steps, question)
   hits = {}
@@ -64,79 +66,109 @@ local function frame(step, steps, question)
   at(2, 1, "TURTLEMANCER SETUP", K.title, K.bar)
   local s = ("%d/%d"):format(step, steps)
   at(W - #s, 1, s, K.dim, K.bar)
-  at(2, 3, question, K.text)
+  at(2, QY, question, K.text)
 end
 
 ---------------------------------------------------------------------------
--- A menu: options = { { key, name, about, details, note } }. Returns a key, or nil for "back".
+-- A picker, character-select style: one option at a time as a full card, the neighbours peeking
+-- in above and below. options = { { key, name, about, details, note } }.
+-- Up/down (or left/right, scroll, number keys, clicking the names above/below) changes the card;
+-- Enter, "Pick >" or clicking the card picks it. Returns a key, or nil for "back".
 ---------------------------------------------------------------------------
+local function trim(text, width)
+  text = tostring(text or "")
+  if #text <= width then return text end
+  return (text:sub(1, width - 2):match("^(.*%S)%s") or text:sub(1, width - 2)) .. ".."
+end
+
 local function menu(step, steps, question, options, default, canBack)
   local sel = 1
   for i, o in ipairs(options) do if o[1] == default then sel = i end end
+  local n = #options
   local small = H <= 13                -- a turtle's screen: squeeze the spacing
-  local listTop = small and 4 or 5
-  local nameW = 2
-  for _, o in ipairs(options) do nameW = math.max(nameW, #o[2]) end
-  nameW = math.min(nameW, math.floor(W / 2))
+  local CW = W - 2                     -- card width (columns 2 .. W-1)
+  local TX = 4                         -- card text starts here (after the accent stripe)
+  local TW = W - TX - 1                -- card text width
+  local function move(d) sel = (sel - 1 + d) % n + 1 end
   while true do
     frame(step, steps, question)
-    for i, o in ipairs(options) do
-      local y = listTop + i - 1
-      local on = i == sel
-      local bg = on and K.pick or K.bg
-      fill(y, bg)
-      local mark = (o[1] == default) and "*" or " "
-      at(2, y, mark, on and K.pickText or K.guess, bg)
-      at(3, y, o[2]:sub(1, nameW), on and K.pickText or K.text, bg)
-      local room = W - nameW - 6
-      if o[3] and room > 8 then
-        local about = o[3]
-        if #about > room then about = about:sub(1, room - 2):match("^(.*%S)%s") or about:sub(1, room - 2); about = about .. ".." end
-        at(nameW + 5, y, about, on and K.pickText or K.dim, bg)
-      end
-      hits[#hits + 1] = { y = y, x1 = 1, x2 = W, action = function()
-        if sel == i then return "pick" end
-        sel = i
-      end }
-    end
-    -- Details of the highlighted option
     local o = options[sel]
-    local y = listTop + #options + 1
-    if not small and y < H - 1 then
-      at(2, y, ("\140"):rep(W - 2), K.faint)
+    local counter = n > 1 and ("%d of %d"):format(sel, n) or ""
+    if #question + #counter + 4 <= W then at(W - #counter, QY, counter, K.dim) end
+
+    local y = QY + (small and 1 or 2)
+    local nextY = H - (small and 1 or 2)
+    -- The one before (wraps round)
+    if n > 1 then
+      local p = options[(sel - 2) % n + 1]
+      at(2, y, trim("\30 " .. p[2], CW), K.faint)
+      hits[#hits + 1] = { y = y, x1 = 1, x2 = W, action = function() move(-1) end }
+    end
+    y = y + 1
+    -- The card: name bar, then an accent stripe down the left beside the words
+    local cardTop = y
+    local tag = (o[1] == default and n > 1) and "suggested " or ""
+    at(2, y, (" "):rep(CW), K.pickText, K.pick)
+    at(3, y, trim(o[2]:upper(), CW - 2 - #tag), K.pickText, K.pick)
+    if #tag > 0 and #o[2] + #tag + 3 <= CW then at(W - #tag, y, tag, K.pickText, K.pick) end
+    y = y + 1
+    local function cardLine(text, colour)
+      if y >= nextY then return false end
+      at(2, y, " ", K.text, K.pick)
+      at(TX, y, text, colour)
       y = y + 1
+      return true
     end
-    local last = small and H - 1 or H - 2
-    for _, line in ipairs(wrap(o[4] or o[3] or "", W - 2)) do
-      if y > last then break end
-      at(2, y, line, K.dim); y = y + 1
+    local lines = {}
+    for _, l in ipairs(wrap(o[3], TW)) do lines[#lines + 1] = { l, K.text } end
+    if o[4] and o[4] ~= o[3] then
+      if not small then lines[#lines + 1] = { "", K.text } end
+      for _, l in ipairs(wrap(o[4], TW)) do lines[#lines + 1] = { l, K.dim } end
     end
-    for _, line in ipairs(o[5] and wrap(o[5], W - 2) or {}) do
-      if y > last then break end
-      at(2, y, line, K.warn); y = y + 1
+    if o[5] then
+      lines[#lines + 1] = { "", K.text }
+      for _, l in ipairs(wrap(o[5], TW)) do lines[#lines + 1] = { l, K.warn } end
+    end
+    local room = nextY - y
+    if #lines > room and room > 0 then   -- too long for this screen: end on "..."
+      local t = lines[room][1]
+      if #t > TW - 3 then t = t:sub(1, TW - 3):match("^(.*%S)%s") or t:sub(1, TW - 3) end
+      lines[room][1] = t:gsub("[%.,;:]*$", "") .. "..."
+    end
+    for i = 1, math.min(#lines, room) do cardLine(lines[i][1], lines[i][2]) end
+    while y < nextY do cardLine("", K.text) end
+    hits[#hits + 1] = { y1 = cardTop, y2 = nextY - 1, x1 = 1, x2 = W, action = function() return "pick" end }
+    -- The one after
+    if n > 1 then
+      local nx = options[sel % n + 1]
+      at(2, nextY, trim("\31 " .. nx[2], CW), K.faint)
+      hits[#hits + 1] = { y = nextY, x1 = 1, x2 = W, action = function() move(1) end }
     end
     -- Footer
     fill(H, K.bg)
     if canBack then button(2, H, "< Back", K.bar, function() return "back" end) end
-    local hint = COLOUR and "click twice or Enter" or "arrows + Enter"
-    if W >= 45 then at(math.floor((W - #hint) / 2) + 1, H, hint, K.faint) end
-    button(W - 7, H, "Next >", K.pick, function() return "pick" end)
+    local hint = n > 1 and "\24\25 to browse" or ""
+    local left, right = canBack and 11 or 2, W - 9       -- room between "< Back" and "Pick >"
+    local hx = math.max(left, math.floor((W - #hint) / 2) + 1)
+    if #hint > 0 and hx + #hint - 1 <= right then at(hx, H, hint, K.faint) end
+    button(W - 7, H, "Pick >", K.pick, function() return "pick" end)
 
     local e, a, b, c = os.pullEvent()
     local act
     if e == "key" then
-      if a == keys.up then sel = (sel - 2) % #options + 1
-      elseif a == keys.down then sel = sel % #options + 1
+      if a == keys.up or a == keys.left then move(-1)
+      elseif a == keys.down or a == keys.right or a == keys.tab then move(1)
       elseif a == keys.enter or a == keys.numPadEnter then act = "pick"
       elseif a == keys.backspace and canBack then act = "back" end
     elseif e == "char" and tonumber(a) and options[tonumber(a)] then
       sel = tonumber(a)
     elseif e == "mouse_click" then
       for _, r in ipairs(hits) do
-        if c == r.y and b >= r.x1 and b <= r.x2 then act = r.action(); break end
+        local inY = r.y and c == r.y or (r.y1 and c >= r.y1 and c <= r.y2)
+        if inY and b >= r.x1 and b <= r.x2 then act = r.action(); break end
       end
     elseif e == "mouse_scroll" then
-      sel = math.max(1, math.min(#options, sel + a))
+      move(a > 0 and 1 or -1)
     end
     if act == "pick" then return options[sel][1] end
     if act == "back" then return nil end
@@ -210,11 +242,20 @@ end
 -- Best guess, so re-setting up an existing machine is mostly pressing Enter
 local label = os.getComputerLabel()
 local first = ((label or ""):match("^%a+") or ""):lower()
+-- A turtle from before the Oct 2026 rename (Digger-04, Rigger): suggest its new role and name
+for _, t in pairs(M.types) do
+  local nk = t.renamed and t.renamed[first]
+  if nk and t.roles[nk] then
+    label = t.roles[nk].name .. label:sub(#first + 1)
+    first = nk
+  end
+end
 local guessType = isTurtle and "turtle" or (isGlasses and "glasses" or "computer")
 local guessRole = nil
 for tk, t in pairs(M.types) do
-  for rk, r in pairs(t.roles) do
-    if first ~= "" and (rk == first or r.name:lower() == first) and fits(tk) then guessType, guessRole = tk, rk end
+  for _, rk in ipairs(t.order or {}) do
+    local r = t.roles[rk]
+    if r and first ~= "" and (rk == first or r.name:lower() == first) and fits(tk) then guessType, guessRole = tk, rk end
   end
 end
 -- Only one role on this type? Pre-pick it.
@@ -253,7 +294,7 @@ while true do
     if rk then R = T.roles[rk]; step = 3 else step = 1 end
   elseif step == 3 then
     if R.label == "auto" then
-      -- Named by its own program (Diggers get their number from the Foreman)
+      -- Named by its own program (Canaries get their number from the Foreman)
       local keep = label and label:lower():find(R.name:lower(), 1, true) and label or R.name
       local opts = { { "ok", "Save and reboot", "Label: " .. keep,
         ("A %s gets its name from the network when it starts, so there's nothing to type."):format(R.name) } }

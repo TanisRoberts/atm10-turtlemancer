@@ -1,4 +1,4 @@
--- farm_link.lua  --  base-side radio link for the farm turtles (Tigger, Figger...). Runs from startup.lua.
+-- farm_link.lua  --  base-side radio link for the farm turtles (Woodpecker, Partridge...). Runs from startup.lua.
 -- Keeps their status for alerts/chat and passes on orders from chat (island <name> rounds|survey|stop|go|found).
 -- Also hears the Farmhand's summary (its row on the board).
 

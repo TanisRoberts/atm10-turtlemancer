@@ -1,6 +1,6 @@
--- cartographer.lua  --  Zigger, the map-painting turtle (CC:Tweaked + Advanced Peripherals, ATM10)
+-- cartographer.lua  --  Seagull, the map-painting turtle (CC:Tweaked + Advanced Peripherals, ATM10)
 --
--- Zigger zig-zags over the island a few blocks above the ground, scanning as he goes, and builds a
+-- Seagull zig-zags over the island a few blocks above the ground, scanning as he goes, and builds a
 -- height map of everything: land, trees, shallow and deep water. The art controller's World view
 -- paints it on the wall as he flies.
 --
@@ -16,17 +16,17 @@
 -- strips, scanning every STEP blocks, comes home for fuel when he needs it, and docks when done.
 -- Restarts and chunk reloads: he asks GPS where he is and carries on.
 --
--- Settings: zigger.env (made on first run; same rules as the other .env files: edit live).
--- Map: zigger.map (his own copy). The art controller keeps its own and catches up from his.
+-- Settings: seagull.env (made on first run; same rules as the other .env files: edit live).
+-- Map: seagull.map (his own copy). The art controller keeps its own and catches up from his.
 
 local mc = dofile("mapchunk.lua")
 
 local PROTO      = "tanis-carto"
 local BASE       = "tanis-base"
-local ENV_FILE   = "zigger.env"
-local STATE_FILE = "zigger.state"
-local MAP_FILE   = "zigger.map"
-local ROLE       = "zigger"
+local ENV_FILE   = "seagull.env"
+local STATE_FILE = "seagull.state"
+local MAP_FILE   = "seagull.map"
+local ROLE       = "seagull"
 
 local DEFAULTS = {
   { "CENTRE_X", "", "Middle of the area to map (X). Blank = his dock." },
@@ -71,7 +71,7 @@ local function readEnv()
   if #missing > 0 then
     local new = not fs.exists(ENV_FILE)
     local f = fs.open(ENV_FILE, new and "w" or "a")
-    if new then f.writeLine("# Zigger (cartographer) settings. Edit and save: picked up within a few seconds.") end
+    if new then f.writeLine("# Seagull (cartographer) settings. Edit and save: picked up within a few seconds.") end
     for _, d in ipairs(missing) do
       f.writeLine(""); f.writeLine("# " .. d[3]); f.writeLine(d[1] .. "=" .. tostring(d[2]))
     end
@@ -128,7 +128,7 @@ local function setStatus(st, msg)
   local x, y = term.getCursorPos()
   term.setCursorPos(1, 1); term.clearLine()
   if term.isColour() then term.setTextColour(colours.cyan) end
-  term.write(("ZIGGER  %s: %s"):format(st:upper(), note):sub(1, w))
+  term.write(("SEAGULL  %s: %s"):format(st:upper(), note):sub(1, w))
   term.setTextColour(colours.white)
   term.setCursorPos(x, math.max(2, y))
 end
@@ -821,7 +821,7 @@ local function boot()
   readEnv()
   load()
   term.clear(); term.setCursorPos(1, 2)
-  print("Zigger the cartographer. M = map now, D = dock.")
+  print("Seagull the cartographer. M = map now, D = dock.")
   print("Hold Ctrl+T to stop him where he is.")
   if not findScanner() then
     setStatus("error", "No Geo Scanner: equip one on a side")

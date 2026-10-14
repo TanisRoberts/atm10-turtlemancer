@@ -75,7 +75,7 @@ end
 -- share ONE disk, and whichever was set up last takes over the other. owner.cfg remembers which
 -- machine this disk belongs to (label + hardware). If a different machine boots from it, stop and ask.
 -- Not a false alarm on: `reset` (deletes owner.cfg; the next boot records whoever is here), setup
--- relabelling, `label set`, Diggers naming themselves (all go through os.setComputerLabel, which is
+-- relabelling, `label set`, Canaries naming themselves (all go through os.setComputerLabel, which is
 -- wrapped below to keep owner.cfg up to date), or crafting a computer into a turtle (same label).
 ---------------------------------------------------------------------------
 local OWNER = "owner.cfg"
@@ -185,7 +185,7 @@ end
 
 if not ownerCheck() then return end
 
--- Keep owner.cfg in step with label changes made on this machine (setup, `label set`, Diggers naming themselves)
+-- Keep owner.cfg in step with label changes made on this machine (setup, `label set`, Canaries naming themselves)
 do
   local setLabel = os.setComputerLabel
   os.setComputerLabel = function(lbl)
@@ -241,6 +241,25 @@ if not M then
 end
 
 local T = M.types[cfg.type]
+
+-- Renamed roles (the turtles became birds, Oct 2026): switch device.cfg to the new role id, and a
+-- label that starts with the old name (Digger-04, Rigger) to the new one (Canary-04, Weaver).
+local newRole = T and T.renamed and T.renamed[cfg.role]
+if newRole and T.roles[newRole] then
+  cfg.role = newRole
+  writeFile(CFG, textutils.serialize(cfg))
+  local old = T.oldNames and T.oldNames[newRole]
+  local lbl = os.getComputerLabel()
+  if old and lbl and lbl:lower():sub(1, #old) == old:lower() then
+    os.setComputerLabel(T.roles[newRole].name .. lbl:sub(#old + 1))
+  end
+  say(colours.yellow, ("Renamed: I'm a %s now."):format(T.roles[newRole].name))
+end
+for _, f in ipairs(M.gone or {}) do if fs.exists(f) then fs.delete(f) end end
+for from, to in pairs(M.moved or {}) do
+  if fs.exists(from) and not fs.exists(to) then fs.move(from, to) end
+end
+
 local R = T and T.roles[cfg.role]
 local label = os.getComputerLabel()
 say(colours.cyan, ("Turtlemancer: %s %s%s"):format(R and R.name or tostring(cfg.role), T and T.name:lower() or tostring(cfg.type),

@@ -11,7 +11,7 @@
 -- The visitor column only appears when the wall is wide enough (VISITOR_W + 30 characters).
 -- butler.lua (Inventory Manager + Player Detector) draws the visitor column.
 -- Only monitors touching the computer count; the biggest one is the wall.
--- Mining control lives on its own computer now (the Foreman); dig_link just listens to the Diggers.
+-- Mining control lives on its own computer now (the Foreman); dig_link just listens to the Canaries.
 -- Any program can be missing or crash; the others keep running.
 
 local STATION_LINES = 3
@@ -122,7 +122,7 @@ parallel.waitForAll(
   runScript("board.lua",        sandbox(boardTarget, true, nil),                   "Status board",   wallName and boardTarget),
   runScript("butler.lua",       sandbox(visitorTarget, true, nil),                 "Butler",         wallName and visitorTarget),
   runScript("base_link.lua",    sandbox(nil, true, nil),                           "Base link",      nil),
-  runScript("dig_link.lua",     sandbox(nil, true, nil),                           "Digger link",    nil),
-  runScript("rigger_link.lua",  sandbox(nil, true, nil),                           "Rigger link",    nil),
+  runScript("dig_link.lua",     sandbox(nil, true, nil),                           "Canary link",    nil),
+  runScript("weaver_link.lua",  sandbox(nil, true, nil),                           "Weaver link",    nil),
   runScript("farm_link.lua",    sandbox(nil, true, nil),                           "Farm link",      nil)
 )

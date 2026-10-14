@@ -1,15 +1,15 @@
--- foreman.lua  --  mining control for every Digger (CC:Tweaked, ATM10 / MC 1.21.1)
+-- foreman.lua  --  mining control for every Canary (CC:Tweaked, ATM10 / MC 1.21.1)
 --
--- Needs: an advanced computer with an ENDER modem (reaches the Diggers anywhere) and an advanced
+-- Needs: an advanced computer with an ENDER modem (reaches the Canaries anywhere) and an advanced
 -- monitor touching it (bigger is nicer; the computer's own screen works too, click with the mouse).
 --
--- Overview: one card per Digger (state, depth, fuel, cargo, where it is). Tap one to open it:
+-- Overview: one card per Canary (state, depth, fuel, cargo, where it is). Tap one to open it:
 --   its layers (presets or Min/Max), START, STOP + DOCK, its exact position and last haul,
 --   and RETIRE (tap twice): it docks for good and its number is never handed out again.
--- Numbers: a new Digger asks for one when it first starts and gets the next free one (Digger-04).
---   A Digger keeps its number when you move it or reset it. Saved in foreman.cfg.
--- Orders are repeated every few seconds, so a Digger picks them up whenever it's in range.
--- Junk caps from storage are passed on, so Diggers stop bringing home what storage has plenty of.
+-- Numbers: a new Canary asks for one when it first starts and gets the next free one (Canary-04).
+--   A Canary keeps its number when you move it or reset it. Saved in foreman.cfg.
+-- Orders are repeated every few seconds, so a Canary picks them up whenever it's in range.
+-- Junk caps from storage are passed on, so Canaries stop bringing home what storage has plenty of.
 --
 -- Presets: named layer settings (Min/Max Y + which rings around the shaft to mine). Ring 1 = 3x3,
 --   ring 50 = 101x101; "from ring 51" skips a middle that's already mined out. Saved in foreman.cfg.
@@ -20,10 +20,10 @@ local PROTOCOL   = "tanis-miner"
 local BASE       = "tanis-base"
 local CONFIG     = "foreman.cfg"
 local SEND_EVERY = 3     -- seconds between order broadcasts
-local STALE      = 15    -- seconds without news before a Digger greys out
+local STALE      = 15    -- seconds without news before a Canary greys out
 local TEXT_SCALE = 0.5
 
-local RING_CAP   = 150   -- furthest ring a Digger will mine (301x301; matches miner.lua)
+local RING_CAP   = 150   -- furthest ring a Canary will mine (301x301; matches miner.lua)
 local DEF_R2     = 50    -- default outer ring (101x101)
 local Y_MIN, Y_MAX = -63, 319
 local NAME_MAX   = 16
@@ -40,20 +40,25 @@ local DEFAULT_PRESETS = {
 }
 
 ---------------------------------------------------------------------------
--- Registry: every Digger ever seen, keyed by computer ID
+-- Registry: every Canary ever seen, keyed by computer ID
 --   { num, label, retired, want, minY, maxY, r1, r2, seq, pMin, pMax, pR1, pR2 }
 --   minY/maxY/r1/r2 = the order it's running; pMin/pMax/pR1/pR2 = picked on screen, sent on START.
 -- Presets: list of { name, minY, maxY, r1, r2 }.
 ---------------------------------------------------------------------------
-local cfg = { nextNum = 1, diggers = {}, retiredNums = {}, presets = nil }
+local cfg = { nextNum = 1, canaries = {}, retiredNums = {}, presets = nil }
 local function copyPreset(p) return { name = p.name, minY = p.minY, maxY = p.maxY, r1 = p.r1, r2 = p.r2 } end
 local function loadCfg()
   if fs.exists(CONFIG) then
     local f = fs.open(CONFIG, "r"); local t = textutils.unserialize(f.readAll()); f.close()
     if type(t) == "table" then
       cfg.nextNum = tonumber(t.nextNum) or 1
-      cfg.diggers = type(t.diggers) == "table" and t.diggers or {}
+      cfg.canaries = type(t.canaries) == "table" and t.canaries
+        or type(t.diggers) == "table" and t.diggers or {}  -- saved before the Oct 2026 rename
       cfg.retiredNums = type(t.retiredNums) == "table" and t.retiredNums or {}
+      -- Labels from before the rename (Digger-04 -> Canary-04)
+      local function rename(l) return type(l) == "string" and (l:gsub("^Digger%-", "Canary-")) or l end
+      for _, dd in pairs(cfg.canaries) do dd.label = rename(dd.label) end
+      for n, l in pairs(cfg.retiredNums) do cfg.retiredNums[n] = rename(l) end
       cfg.presets = type(t.presets) == "table" and t.presets or nil
     end
   end
@@ -62,7 +67,7 @@ local function loadCfg()
     for _, p in ipairs(DEFAULT_PRESETS) do cfg.presets[#cfg.presets + 1] = copyPreset(p) end
   end
   for _, p in ipairs(cfg.presets) do p.r1, p.r2 = p.r1 or 1, p.r2 or DEF_R2 end
-  for _, dd in pairs(cfg.diggers) do  -- entries from before rings were adjustable
+  for _, dd in pairs(cfg.canaries) do  -- entries from before rings were adjustable
     dd.r1, dd.r2 = dd.r1 or 1, dd.r2 or DEF_R2
     dd.pR1, dd.pR2 = dd.pR1 or dd.r1, dd.pR2 or dd.r2
   end
@@ -77,39 +82,39 @@ local function newEntry(num)
 end
 local function numTaken(num, exceptId)
   if cfg.retiredNums[num] then return true end
-  for id, d in pairs(cfg.diggers) do
+  for id, d in pairs(cfg.canaries) do
     if id ~= exceptId and d.num == num and not d.retired then return true end
   end
   return false
 end
-local function nameOf(num) return ("Digger-%02d"):format(num) end
-local REBOOT_WAIT = 600000 -- ms: stop asking a Digger to reboot if it hasn't confirmed by then
+local function nameOf(num) return ("Canary-%02d"):format(num) end
+local REBOOT_WAIT = 600000 -- ms: stop asking a Canary to reboot if it hasn't confirmed by then
 
 local live = {}        -- id -> { s = last status, seen = os.clock() }
-local radioOK = nil    -- false = no ender/wireless modem on this computer: Diggers can't hear it
+local radioOK = nil    -- false = no ender/wireless modem on this computer: Canaries can't hear it
 local capped = {}      -- junk storage has plenty of (from the storage computer)
 local storageSeen = nil
 local sendNow = {}     -- id -> true: send its order on the next pass
 
--- A Digger asks for a number. Same computer keeps its number; a hint (its old label) is honoured
+-- A Canary asks for a number. Same computer keeps its number; a hint (its old label) is honoured
 -- if free; otherwise the next number. Retired numbers are never reused.
 local function assign(id, hint)
-  local d = cfg.diggers[id]
+  local d = cfg.canaries[id]
   if d and not d.retired then return d.num end
   local num = tonumber(hint)
   if not num or num < 1 or numTaken(num, id) then
     num = cfg.nextNum
     while numTaken(num, id) do num = num + 1 end
   end
-  cfg.diggers[id] = newEntry(num)
-  cfg.diggers[id].label = nameOf(num)
+  cfg.canaries[id] = newEntry(num)
+  cfg.canaries[id].label = nameOf(num)
   cfg.nextNum = math.max(cfg.nextNum, num + 1)
   saveCfg()
   return num
 end
 
 local function retire(id)
-  local d = cfg.diggers[id]
+  local d = cfg.canaries[id]
   if not d then return end
   d.retired, d.want, d.seq = true, "dock", os.epoch("utc")
   cfg.retiredNums[d.num] = d.label or nameOf(d.num)
@@ -118,7 +123,7 @@ local function retire(id)
 end
 
 local function order(id, want)
-  local d = cfg.diggers[id]
+  local d = cfg.canaries[id]
   if not d or d.retired then return end
   d.want = want
   if want == "run" then d.minY, d.maxY, d.r1, d.r2 = d.pMin, d.pMax, d.pR1, d.pR2 end
@@ -127,9 +132,9 @@ local function order(id, want)
   sendNow[id] = true
 end
 
--- Ask a Digger to reboot (it does so between blocks, then carries on). One fresh token per press.
+-- Ask a Canary to reboot (it does so between blocks, then carries on). One fresh token per press.
 local function requestReboot(id)
-  local d = cfg.diggers[id]
+  local d = cfg.canaries[id]
   if not d then return end
   d.reboot, d.rebootAt = os.epoch("utc"), os.epoch("utc")
   d.rebootSeen = nil
@@ -186,7 +191,7 @@ local function posText(s)
   return ("%d, %d, %d"):format(s.pos.x, s.pos.y, s.pos.z)
 end
 local function stateOf(id)
-  local d, l = cfg.diggers[id], live[id]
+  local d, l = cfg.canaries[id], live[id]
   if d and d.retired then return "RETIRED", K.grey end
   if not l then return "NO SIGNAL", K.grey end
   local m = STATES[l.s.state] or { tostring(l.s.state or "?"):upper(), K.white }
@@ -194,17 +199,17 @@ local function stateOf(id)
   return m[1], m[2]
 end
 
--- Sorted list of Digger IDs to show
+-- Sorted list of Canary IDs to show
 local function digIds(showRetired)
   local out = {}
-  for id, d in pairs(cfg.diggers) do
+  for id, d in pairs(cfg.canaries) do
     if (d.retired == true) == (showRetired == true) then out[#out + 1] = id end
   end
-  table.sort(out, function(a, b) return cfg.diggers[a].num < cfg.diggers[b].num end)
+  table.sort(out, function(a, b) return cfg.canaries[a].num < cfg.canaries[b].num end)
   if not showRetired then
     -- Heard on the air but never asked for a number: running an old program
     local odd = {}
-    for id in pairs(live) do if not cfg.diggers[id] then odd[#odd + 1] = id end end
+    for id in pairs(live) do if not cfg.canaries[id] then odd[#odd + 1] = id end end
     table.sort(odd)
     for _, id in ipairs(odd) do out[#out + 1] = id end
   end
@@ -294,13 +299,13 @@ end
 local function drawOverview(w, h)
   local ids = digIds(ui.showRetired)
   if radioOK == false and not (ui.notice and os.clock() < ui.notice.untilT) then
-    ui.notice = { text = "No ender modem on me: Diggers can't hear me", colour = K.red, untilT = os.clock() + 1e9 }
+    ui.notice = { text = "No ender modem on me: Canaries can't hear me", colour = K.red, untilT = os.clock() + 1e9 }
   end
   local active, retiredN = 0, 0
-  for _, dd in pairs(cfg.diggers) do if dd.retired then retiredN = retiredN + 1 else active = active + 1 end end
+  for _, dd in pairs(cfg.canaries) do if dd.retired then retiredN = retiredN + 1 else active = active + 1 end end
   local storageTxt = storageSeen and (os.clock() - storageSeen < 30) and "storage ok" or "storage ?"
   header(w, ui.showRetired and "FOREMAN  retired" or "FOREMAN",
-    ("%d digger%s  %s"):format(active, active == 1 and "" or "s", storageTxt))
+    ("%d canary%s  %s"):format(active, active == 1 and "" or "s", storageTxt))
 
   local top, bottom = 3, h - 2
   local rowH = (h >= 16) and 3 or 1      -- a card is 2 lines + a gap, or 1 line on small screens
@@ -309,9 +314,9 @@ local function drawOverview(w, h)
   ui.scroll = math.max(1, math.min(ui.scroll, pages))
 
   if #ids == 0 then
-    local lines = ui.showRetired and { "No retired Diggers." } or {
-      "No Diggers yet.",
-      "Set up a turtle as a Digger (startup.lua, pick Digger):",
+    local lines = ui.showRetired and { "No retired Canaries." } or {
+      "No Canaries yet.",
+      "Set up a turtle as a Canary (startup.lua, pick Canary):",
       "it asks me for a number and shows up here.",
     }
     for i, l in ipairs(lines) do at(2, top + i, pad(l, w - 2), i == 1 and K.white or K.lightGrey) end
@@ -322,7 +327,7 @@ local function drawOverview(w, h)
     if not id then break end
     local l = live[id]
     local s = l and l.s
-    local dd = cfg.diggers[id] or { unknown = true, label = (s and s.label or "?") .. "?", num = 0 }
+    local dd = cfg.canaries[id] or { unknown = true, label = (s and s.label or "?") .. "?", num = 0 }
     local y = top + (i - 1) * rowH
     local name = dd.label or nameOf(dd.num)
     local st, colour = stateOf(id)
@@ -370,7 +375,7 @@ local function drawOverview(w, h)
         say((s and s.label or "It") .. ": old program. Hold Ctrl+R on it to update.", K.orange)
       end)
     else
-      hit(1, y, w, y + rowH - 1, function() ui.page, ui.id, ui.confirmRetire = "digger", id, nil end)
+      hit(1, y, w, y + rowH - 1, function() ui.page, ui.id, ui.confirmRetire = "canary", id, nil end)
     end
   end
 
@@ -381,7 +386,7 @@ local function drawOverview(w, h)
   if not ui.showRetired then
     x = smallButton(x, fy, "Dock all", K.red, function()
       for _, id in ipairs(digIds(false)) do order(id, "dock") end
-      say("Sent every Digger home.", K.yellow)
+      say("Sent every Canary home.", K.yellow)
     end)
   end
   if retiredN > 0 or ui.showRetired then
@@ -392,8 +397,8 @@ local function drawOverview(w, h)
     x = smallButton(x, fy, "Presets", K.lightBlue, function() ui.page, ui.lscroll = "presets", 1 end)
     if active > 0 and w >= 48 then
       x = smallButton(x, fy, "Reboot all", K.purple, function()
-        for _, id in ipairs(digIds(false)) do if cfg.diggers[id] then requestReboot(id) end end
-        say("Reboot sent to every Digger: they finish the block they're on first.", K.purple)
+        for _, id in ipairs(digIds(false)) do if cfg.canaries[id] then requestReboot(id) end end
+        say("Reboot sent to every Canary: they finish the block they're on first.", K.purple)
       end, K.white)
     end
   end
@@ -409,10 +414,10 @@ local function drawOverview(w, h)
 end
 
 ---------------------------------------------------------------------------
--- One Digger
+-- One Canary
 ---------------------------------------------------------------------------
 local function drawStatus(id, x, y, w, maxY)
-  local dd, l = cfg.diggers[id], live[id]
+  local dd, l = cfg.canaries[id], live[id]
   local s = l and l.s
   local st, colour = stateOf(id)
   local function line(fn) if y <= maxY then fn(); end y = y + 1 end
@@ -473,7 +478,7 @@ end
 local function clampY(v) return math.max(Y_MIN, math.min(Y_MAX, v)) end
 local function clampR(v) return math.max(1, math.min(RING_CAP, v)) end
 
--- Digger page: nudge the picked (not yet started) settings
+-- Canary page: nudge the picked (not yet started) settings
 local function adjust(dd, key, delta)
   if key == "pR1" or key == "pR2" then
     dd[key] = clampR(dd[key] + delta)
@@ -505,7 +510,7 @@ local function numRow(x, y, w, label, value, steps, fn, fieldFn, focused, buf)
 end
 
 local function drawControls(id, x, y, w, maxY)
-  local dd, l = cfg.diggers[id], live[id]
+  local dd, l = cfg.canaries[id], live[id]
   local s = l and l.s
   local yStep = { { "-", -1 }, { "+", 1 } }
   local rStep = { { "-5", -5 }, { "+5", 5 } }
@@ -652,8 +657,8 @@ local function savePreset()
   local new = { name = e.name, minY = e.minY, maxY = e.maxY, r1 = e.r1, r2 = e.r2 }
   if e.idx and cfg.presets[e.idx] then
     local old = cfg.presets[e.idx]
-    -- Diggers that had the old version picked (not started yet) get the new one picked instead
-    for _, dd in pairs(cfg.diggers) do
+    -- Canaries that had the old version picked (not started yet) get the new one picked instead
+    for _, dd in pairs(cfg.canaries) do
       if isSelected(dd, old) then dd.pMin, dd.pMax, dd.pR1, dd.pR2 = new.minY, new.maxY, new.r1, new.r2 end
     end
     cfg.presets[e.idx] = new
@@ -662,7 +667,7 @@ local function savePreset()
   end
   saveCfg()
   ui.edit, ui.page = nil, "presets"
-  say(("Saved %s: pick it on a Digger's page."):format(new.name))
+  say(("Saved %s: pick it on a Canary's page."):format(new.name))
 end
 
 local function deletePreset(idx)
@@ -670,7 +675,7 @@ local function deletePreset(idx)
   if not p then return end
   table.remove(cfg.presets, idx)
   saveCfg()
-  say(("Deleted %s. Diggers keep what they're running."):format(p.name), K.orange)
+  say(("Deleted %s. Canaries keep what they're running."):format(p.name), K.orange)
 end
 
 local function movePreset(idx, dir)
@@ -791,7 +796,7 @@ end
 ---------------------------------------------------------------------------
 -- Commands typed on the computer (bottom row): /presets, /new, /edit, /delete, /home, /help
 ---------------------------------------------------------------------------
-local HELP = "/presets /new /edit /delete <name>  /reboot <digger|all>  /home"
+local HELP = "/presets /new /edit /delete <name>  /reboot <canary|all>  /home"
 
 local function runCommand(line)
   local cmd, arg = line:match("^/?(%S*)%s*(.-)%s*$")
@@ -803,19 +808,19 @@ local function runCommand(line)
   elseif cmd == "new" or cmd == "add" then openEditor(nil, arg)
   elseif cmd == "reboot" or cmd == "restart" then
     local a = arg:lower()
-    if a == "" then say("/reboot <digger number or name> or /reboot all", K.red); return end
+    if a == "" then say("/reboot <canary number or name> or /reboot all", K.red); return end
     local hits = {}
-    for id, dd in pairs(cfg.diggers) do
+    for id, dd in pairs(cfg.canaries) do
       if not dd.retired then
         local lbl = (dd.label or nameOf(dd.num)):lower()
         if a == "all" or lbl == a or tonumber(a) == dd.num or lbl:find(a, 1, true) then hits[#hits + 1] = id end
       end
     end
-    if #hits == 0 then say("No Digger matches " .. arg, K.red); return end
-    if a ~= "all" and #hits > 1 then say(arg .. " matches " .. #hits .. " Diggers: be more exact", K.red); return end
+    if #hits == 0 then say("No Canary matches " .. arg, K.red); return end
+    if a ~= "all" and #hits > 1 then say(arg .. " matches " .. #hits .. " Canaries: be more exact", K.red); return end
     for _, id in ipairs(hits) do requestReboot(id) end
-    say(#hits == 1 and ((cfg.diggers[hits[1]].label or "Digger") .. ": reboot sent.") or
-      ("Reboot sent to " .. #hits .. " Diggers."), K.purple)
+    say(#hits == 1 and ((cfg.canaries[hits[1]].label or "Canary") .. ": reboot sent.") or
+      ("Reboot sent to " .. #hits .. " Canaries."), K.purple)
   elseif cmd == "edit" or cmd == "delete" or cmd == "remove" or cmd == "del" then
     local idx = findPreset(arg)
     if not idx then say(arg == "" and ("/" .. cmd .. " <preset name>") or ("No preset called " .. arg), K.red); return end
@@ -830,7 +835,7 @@ end
 local function drawCmdBar(w, h)
   local y = h - 1
   if ui.page == "presets" or ui.page == "edit" then y = h end
-  if ui.page == "digger" and not ui.cmd then return end
+  if ui.page == "canary" and not ui.cmd then return end
   if ui.page == "presets" and not ui.cmd then return end
   if ui.cmd then
     at(1, y, pad("> " .. ui.cmd .. "_", w), K.white, K.grey)
@@ -841,9 +846,9 @@ local function drawCmdBar(w, h)
   end
 end
 
-local function drawDigger(w, h)
+local function drawCanary(w, h)
   local id = ui.id
-  local dd = cfg.diggers[id]
+  local dd = cfg.canaries[id]
   if not dd then ui.page = "overview"; return drawOverview(w, h) end
   header(w, "< " .. (dd.label or nameOf(dd.num)), "computer #" .. id)
   hit(1, 1, math.min(w, 14), 1, function() ui.page, ui.confirmRetire = "overview", nil end)
@@ -874,7 +879,7 @@ local function draw()
         local w, h = d.getSize()
         if not w then return end
         d.setBackgroundColour(K.black); d.clear()
-        if ui.page == "digger" then drawDigger(w, h)
+        if ui.page == "canary" then drawCanary(w, h)
         elseif ui.page == "presets" then drawPresets(w, h)
         elseif ui.page == "edit" then drawEdit(w, h, v.kind)
         else drawOverview(w, h) end
@@ -890,11 +895,11 @@ end
 -- Loops
 ---------------------------------------------------------------------------
 local function sendOrder(id)
-  local dd = cfg.diggers[id]
+  local dd = cfg.canaries[id]
   if dd.reboot and os.epoch("utc") - (dd.rebootAt or 0) > REBOOT_WAIT then
     dd.reboot, dd.rebootAt = nil, nil
     saveCfg()
-    say((dd.label or "A Digger") .. " never confirmed its reboot: old program? Reboot it by hand once.", K.orange)
+    say((dd.label or "A Canary") .. " never confirmed its reboot: old program? Reboot it by hand once.", K.orange)
   end
   local list = {}
   for name in pairs(capped) do list[#list + 1] = name end
@@ -913,7 +918,7 @@ local function netLoop()
     return false
   end)
   if opened == 0 then
-    say("No modem! I need an ender modem to reach the Diggers.", K.red)
+    say("No modem! I need an ender modem to reach the Canaries.", K.red)
     while true do draw(); os.sleep(5) end
   end
   local lastSend = -100
@@ -928,7 +933,7 @@ local function netLoop()
         sendNow[from] = true
       elseif msg.type == "status" and msg.id == from then
         live[from] = { s = msg, seen = os.clock() }
-        local dd = cfg.diggers[from]
+        local dd = cfg.canaries[from]
         if dd and dd.reboot and msg.rebootDone == dd.reboot then
           if msg.state == "rebooting" then
             dd.rebootSeen = true
@@ -936,11 +941,11 @@ local function netLoop()
             -- Back up after the reboot: stop asking
             dd.reboot, dd.rebootAt, dd.rebootSeen = nil, nil, nil
             saveCfg()
-            say((dd.label or "Digger") .. " is back up and carrying on.", K.lime)
+            say((dd.label or "Canary") .. " is back up and carrying on.", K.lime)
           end
         end
         if not dd and tonumber(msg.num) and not numTaken(tonumber(msg.num), from) then
-          -- A Digger I don't know that already has a number (e.g. foreman.cfg was lost): adopt it
+          -- A Canary I don't know that already has a number (e.g. foreman.cfg was lost): adopt it
           dd = newEntry(tonumber(msg.num))
           dd.label = msg.label or nameOf(dd.num)
           if msg.minY then dd.minY, dd.maxY, dd.pMin, dd.pMax = msg.minY, msg.maxY, msg.minY, msg.maxY end
@@ -951,7 +956,7 @@ local function netLoop()
           if msg.want then dd.want = msg.want end
           if msg.seq then dd.seq = msg.seq end
           if msg.retired then dd.retired = true; cfg.retiredNums[dd.num] = dd.label end
-          cfg.diggers[from] = dd
+          cfg.canaries[from] = dd
           cfg.nextNum = math.max(cfg.nextNum, dd.num + 1)
           saveCfg()
         elseif dd and msg.label and msg.label ~= dd.label and not dd.retired then
@@ -965,7 +970,7 @@ local function netLoop()
       capped = set
     end
     local all = os.clock() - lastSend >= SEND_EVERY
-    for id in pairs(cfg.diggers) do
+    for id in pairs(cfg.canaries) do
       if all or sendNow[id] then sendOrder(id) end
     end
     sendNow = {}
@@ -1032,7 +1037,7 @@ local function inputLoop()
       local u = views[2].ui
       if u.page == "overview" then u.scroll = u.scroll + a
       elseif u.page == "presets" then u.lscroll = u.lscroll + a
-      elseif u.page == "digger" then u.pscroll = u.pscroll + a end
+      elseif u.page == "canary" then u.pscroll = u.pscroll + a end
       draw()
     elseif e == "char" or e == "key" or e == "paste" then
       handleKey(e, a); draw()

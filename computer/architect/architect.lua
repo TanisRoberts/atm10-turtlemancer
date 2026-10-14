@@ -1,4 +1,4 @@
--- architect.lua  --  Rigger's control computer (CC:Tweaked, ATM10 / MC 1.21.1)
+-- architect.lua  --  Weaver's control computer (CC:Tweaked, ATM10 / MC 1.21.1)
 --
 -- Needs: an advanced computer with a wireless or ender modem. No monitor: everything is on the
 -- computer's own screen (click with the mouse, type commands at the bottom).
@@ -15,9 +15,9 @@
 -- Commands (type at the bottom, Enter): build, stop, test, clear, reboot, layer <n>, follow, ext,
 --   zoom <n>, refresh, help. "reboot" makes him reboot (and update) the next time he's at the dock.
 --
--- Orders: sent straight to Rigger and repeated until he confirms. The mainframe's rigger_link hears
+-- Orders: sent straight to Weaver and repeated until he confirms. The mainframe's weaver_link hears
 -- them too and keeps repeating the newest order, so chat orders and Architect orders never fight.
--- The plan's shape comes from Rigger himself (he has the plan file), so nothing to copy over here.
+-- The plan's shape comes from Weaver himself (he has the plan file), so nothing to copy over here.
 
 local PROTOCOL = "tanis-rigger"
 local BASE     = "tanis-base"
@@ -29,7 +29,7 @@ local GIVE_UP  = 60      -- stop repeating an order after this long
 local PAD      = 3       -- blocks of padding around the build on the map
 
 local G  = dofile("art_gfx.lua")
-local RP = dofile("riggerplan.lua")
+local RP = dofile("weaverplan.lua")
 
 local W, H = term.getSize()
 local TOP, BOT = 3, H - 2           -- content rows
@@ -38,8 +38,8 @@ local TOP, BOT = 3, H - 2           -- content rows
 -- State
 ---------------------------------------------------------------------------
 local st = {
-  id = nil, status = nil, seen = nil,        -- Rigger's latest status
-  info = nil, infoAsked = -100,               -- plan + site (from Rigger)
+  id = nil, status = nil, seen = nil,        -- Weaver's latest status
+  info = nil, infoAsked = -100,               -- plan + site (from Weaver)
   layers = {}, layerAsked = {},               -- [n] = ordered cells { px, pz, ch, wx, wz }
   items = nil, itemsSeen = nil,               -- storage's stock (by item name)
   lastLine = nil,
@@ -49,7 +49,7 @@ local ui = {
   layer = nil, follow = true, ext = nil, zoom = nil, vx = nil, vz = nil, axis = "x",
   scroll = { bill = 0, log = 0 }, hits = {}, help = false,
 }
-local order = nil    -- { want, seq, sentAt, firstAt, word } until Rigger confirms
+local order = nil    -- { want, seq, sentAt, firstAt, word } until Weaver confirms
 local reboot = nil   -- { token, sentAt, firstAt, done }
 local log = {}
 
@@ -133,44 +133,44 @@ peripheral.find("modem", function(name, m)
   return false
 end)
 
-local function toRigger(msg)
+local function toWeaver(msg)
   if st.id then rednet.send(st.id, msg, PROTOCOL) else rednet.broadcast(msg, PROTOCOL) end
 end
 
 local function askInfo()
   st.infoAsked = now()
-  toRigger({ type = "ask", what = "info", to = st.id })
+  toWeaver({ type = "ask", what = "info", to = st.id })
 end
 local function askLayer(n)
   if not n or st.layers[n] or (st.layerAsked[n] and now() - st.layerAsked[n] < 5) then return end
   st.layerAsked[n] = now()
-  toRigger({ type = "ask", what = "layer", n = n, to = st.id })
+  toWeaver({ type = "ask", what = "layer", n = n, to = st.id })
 end
 
 local function sendOrder(word)
   local want = WANTS[word]
   order = { want = want, word = word, seq = os.epoch("utc"), firstAt = now(), sentAt = -100 }
   addLog("> order: " .. word)
-  notice("Sent \"" .. word .. "\". Waiting for Rigger to pick it up...")
+  notice("Sent \"" .. word .. "\". Waiting for Weaver to pick it up...")
 end
 
 local function sendReboot()
-  if not st.id then notice("Haven't heard from Rigger yet, so I can't reboot him."); return end
+  if not st.id then notice("Haven't heard from Weaver yet, so I can't reboot him."); return end
   reboot = { token = os.epoch("utc"), firstAt = now(), sentAt = -100 }
   addLog("> reboot requested")
   notice("Reboot queued: he'll reboot (and update) next time he's at the dock.")
 end
 
-local function pump()  -- repeat orders until Rigger confirms them
+local function pump()  -- repeat orders until Weaver confirms them
   local s = st.status
   if order then
     if s and type(s.seq) == "number" and s.seq >= order.seq then
-      addLog("Rigger took the order: " .. order.word)
-      notice("Rigger got it: " .. order.word)
+      addLog("Weaver took the order: " .. order.word)
+      notice("Weaver got it: " .. order.word)
       order = nil
     elseif now() - order.firstAt > GIVE_UP then
-      addLog("Rigger never confirmed: " .. order.word)
-      notice("Rigger didn't answer. Out of range, or not running? The mainframe keeps repeating it.")
+      addLog("Weaver never confirmed: " .. order.word)
+      notice("Weaver didn't answer. Out of range, or not running? The mainframe keeps repeating it.")
       order = nil
     elseif now() - order.sentAt >= RESEND then
       order.sentAt = now()
@@ -180,8 +180,8 @@ local function pump()  -- repeat orders until Rigger confirms them
   if reboot and not reboot.done then
     if s and s.rebootDone == reboot.token and s.state ~= "rebooting" then
       reboot.done = true
-      addLog("Rigger rebooted and is back")
-      notice("Rigger rebooted and is back up.")
+      addLog("Weaver rebooted and is back")
+      notice("Weaver rebooted and is back up.")
       reboot = nil
     elseif now() - reboot.firstAt > 20 * 60 then
       addLog("Reboot request expired (20 min)")
@@ -214,7 +214,7 @@ local function onStatus(from, msg)
   end
   st.lastSkipped = sk
   if first and (msg.v or 0) < 2 then
-    notice("Rigger is on old software: reboot him once by hand (hold Ctrl+R) to update.")
+    notice("Weaver is on old software: reboot him once by hand (hold Ctrl+R) to update.")
   end
   if (not st.info or st.info.id ~= from) and now() - st.infoAsked > 10 then askInfo()
   elseif st.info and msg.phase == "layer" and msg.layer then askLayer(msg.layer) end
@@ -229,7 +229,7 @@ local function onMessage(from, msg, proto)
     if msg.type == "status" then onStatus(from, msg)
     elseif msg.type == "info" then
       st.info = msg; st.layers = {}; st.layerAsked = {}
-      addLog("Plan from Rigger: " .. tostring(msg.plan) .. ", " .. comma(msg.blocks) .. " blocks")
+      addLog("Plan from Weaver: " .. tostring(msg.plan) .. ", " .. comma(msg.blocks) .. " blocks")
     elseif msg.type == "layer" and tonumber(msg.n) and st.info then
       local py = st.info.ybase + msg.n - 1
       local cells = RP.orderRows(msg.rows)
@@ -303,11 +303,11 @@ local function drawHeader()
   clearRow(2)
   local s = st.status
   if not s then
-    put(1, 2, hasModem and "Listening for Rigger..." or "No modem! Put a wireless or ender modem on me.",
+    put(1, 2, hasModem and "Listening for Weaver..." or "No modem! Put a wireless or ender modem on me.",
       hasModem and colors.lightGray or colors.red)
   else
     local col = alive() and (STATE_COL[s.state] or colors.white) or colors.gray
-    local head = (s.label or "Rigger") .. " " .. tostring(s.state or "?")
+    local head = (s.label or "Weaver") .. " " .. tostring(s.state or "?")
     put(1, 2, head, col)
     local rest = (s.msg and s.msg ~= "") and (" " .. s.msg) or ""
     if not alive() then rest = " (not heard " .. ago(st.seen) .. ")" .. rest end
@@ -349,14 +349,14 @@ local function drawStatus()
   local s, info = st.status, st.info
   local y = TOP
   if not s then
-    put(1, y, "Rigger hasn't been heard yet.", colors.white)
+    put(1, y, "Weaver hasn't been heard yet.", colors.white)
     y = y + 2
     put(1, y, "My radio  ", colors.gray)
     put(11, y, hasWireless and "wireless/ender modem, listening" or (hasModem and "only a WIRED modem: add a wireless/ender one" or "NO modem"),
       hasWireless and colors.lime or colors.red)
     y = y + 1
     put(1, y, "Mainframe ", colors.gray)
-    put(11, y, st.heardLink and ("its Rigger link heard " .. ago(st.heardLink) .. " (#" .. st.linkId .. ")") or "not heard either",
+    put(11, y, st.heardLink and ("its Weaver link heard " .. ago(st.heardLink) .. " (#" .. st.linkId .. ")") or "not heard either",
       st.heardLink and colors.lime or colors.orange)
     y = y + 1
     put(1, y, "Plan ask  ", colors.gray)
@@ -366,12 +366,12 @@ local function drawStatus()
     if not hasWireless then
       lines = { "I can't hear the turtles without a wireless or ender modem." }
     elseif st.heardLink and not st.info then
-      lines = { "The mainframe gets through but Rigger doesn't, so:",
-        "- look at Rigger's own screen: is there an error?",
+      lines = { "The mainframe gets through but Weaver doesn't, so:",
+        "- look at Weaver's own screen: is there an error?",
         "- or he's out of my range: plain wireless reaches ~64 blocks.",
         "  An ENDER modem on me hears him anywhere." }
     elseif not st.heardLink then
-      lines = { "Nothing at all on Rigger's channel yet. If the mainframe",
+      lines = { "Nothing at all on Weaver's channel yet. If the mainframe",
         "is running, I'm probably out of range of everything:",
         "an ENDER modem on me fixes that." }
     else
@@ -507,7 +507,7 @@ local function drawMap()
   local info, s = st.info, st.status
   ui.mapLabel = nil
   if not info then
-    put(2, TOP + 2, st.status and "Asking Rigger for the plan..." or "Waiting for Rigger...", colors.lightGray)
+    put(2, TOP + 2, st.status and "Asking Weaver for the plan..." or "Waiting for Weaver...", colors.lightGray)
     if st.status and now() - st.infoAsked > 10 then askInfo() end
     return
   end
@@ -551,7 +551,7 @@ local function drawMap()
     end
   else
     local cells = st.layers[n]
-    if not cells then askLayer(n); label = "Layer " .. n .. ": asking Rigger..."
+    if not cells then askLayer(n); label = "Layer " .. n .. ": asking Weaver..."
     else
       local doneUpTo
       if not s or s.phase == nil or s.phase == "ext" then doneUpTo = 0
@@ -571,7 +571,7 @@ local function drawMap()
     local x = (i - 1) % PW + 1
     gfx.rawPixel(x, (i - x) / PW + 1, t[1] >= t[2] and C_DONE or C_TODO)
   end
-  -- Corner markers, dock, Rigger
+  -- Corner markers, dock, Weaver
   for _, c in ipairs((s and s.corners) or {}) do if c.my then ov(c.x, c.z, C_MARK) end end
   ov(info.site.dx, info.site.dz, C_DOCK)
   local at = s and s.at
@@ -580,7 +580,7 @@ local function drawMap()
     if i then over[i] = C_RIG
     else
       local dx, dz = at.x - cx, at.z - cz
-      label = (label or "") .. "  Rigger " .. (math.abs(dx) > math.abs(dz) and (dx > 0 and "->" or "<-") or (dz > 0 and "v" or "^"))
+      label = (label or "") .. "  Weaver " .. (math.abs(dx) > math.abs(dz) and (dx > 0 and "->" or "<-") or (dz > 0 and "v" or "^"))
     end
   end
   gfx.setOverlay(over)
@@ -594,7 +594,7 @@ local function drawMap()
       local d = at.y - ly - 1
       rel = d == 0 and " (on this layer)" or (d > 0 and (" (" .. d .. " above)") or (" (" .. -d .. " below)"))
     end
-    gfx.text(cells_, W - #("Rigger Y " .. at.y .. rel) + 1, 1, "Rigger Y " .. at.y .. rel, cidx(colors.red), C_BG)
+    gfx.text(cells_, W - #("Weaver Y " .. at.y .. rel) + 1, 1, "Weaver Y " .. at.y .. rel, cidx(colors.red), C_BG)
   end
   gfx.setLayer("labels", cells_)
   gfx.markAll()
@@ -622,7 +622,7 @@ end
 local function drawSide()
   local info, s = st.info, st.status
   if not info then
-    put(2, TOP + 2, st.status and "Asking Rigger for the plan..." or "Waiting for Rigger...", colors.lightGray)
+    put(2, TOP + 2, st.status and "Asking Weaver for the plan..." or "Waiting for Weaver...", colors.lightGray)
     return
   end
   local site, b = info.site, info.bounds
@@ -693,7 +693,7 @@ local function drawBill()
   local s = st.status
   local bill = s and s.bill
   if type(bill) ~= "table" then
-    put(2, TOP + 1, "No bill yet: Rigger sends it with his status.", colors.lightGray)
+    put(2, TOP + 1, "No bill yet: Weaver sends it with his status.", colors.lightGray)
     return
   end
   local missing = {}
@@ -748,7 +748,7 @@ local RES = {
   trip = { "couldn't fly there", colors.red }, going = { "on his way", colors.yellow },
   todo = { "not done", colors.gray },
 }
--- The 8 corners in the order Rigger visits them, with a compass name for walking there
+-- The 8 corners in the order Weaver visits them, with a compass name for walking there
 local function plannedCorners(bx)
   local out = {}
   for _, y in ipairs({ bx.y1, bx.y2 }) do
@@ -776,8 +776,8 @@ local function drawCorners()
   local tested = s and type(s.corners) == "table" and #s.corners > 0
   local y = TOP
   if not info then
-    put(1, y + 1, st.status and "Asking Rigger for the plan..." or "Waiting for Rigger...", colors.lightGray)
-    put(1, y + 3, "Rigger also prints the box and chunks on his own screen", colors.lightGray)
+    put(1, y + 1, st.status and "Asking Weaver for the plan..." or "Waiting for Weaver...", colors.lightGray)
+    put(1, y + 3, "Weaver also prints the box and chunks on his own screen", colors.lightGray)
     put(1, y + 4, "every time he starts.", colors.lightGray)
   else
     local b = info.bounds
@@ -840,7 +840,7 @@ local HELP = {
   "ext       show the edge walls on the map",
   "zoom N    blocks per pixel on the map (fit = all)",
   "status / map / side / bill / corners / log",
-  "refresh   ask Rigger for his plan again",
+  "refresh   ask Weaver for his plan again",
   "Keys: Tab = next tab, arrows pan/scroll, PgUp/PgDn",
   "layers or pages, mouse wheel zooms the map.",
 }
@@ -917,7 +917,7 @@ local function run(line)
     if a == "fit" or not tonumber(a) then ui.zoom, ui.vx, ui.vz = nil, nil, nil
     else ui.zoom = math.max(0.25, tonumber(a)) end
     ui.tab = "map"
-  elseif c == "refresh" then st.info = nil; st.layers = {}; askInfo(); notice("Asked Rigger for his plan.")
+  elseif c == "refresh" then st.info = nil; st.layers = {}; askInfo(); notice("Asked Weaver for his plan.")
   elseif c == "help" or c == "?" then ui.help = true
   else
     for _, t in ipairs(TABS) do

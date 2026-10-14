@@ -5,7 +5,7 @@ ComputerCraft (CC:Tweaked + Advanced Peripherals) scripts for Tanis's ATM10 isla
 ## Setting up any device
 
 1. Drag `startup.lua` onto the computer, turtle or Smart Glasses (or `wget https://raw.githubusercontent.com/TanisRoberts/atm10-turtlemancer/main/startup.lua startup.lua`).
-2. Reboot (hold Ctrl+R). Setup asks: computer, turtle or glasses, which role (click, or arrows + Enter; each role is described underneath), and a label. Diggers skip the label: the Foreman numbers them.
+2. Reboot (hold Ctrl+R). Setup asks: computer, turtle or glasses, which role (one role at a time as a full card: up/down or scroll to browse, Enter or click the card to pick), and a label. Canaries skip the label: the Foreman numbers them.
 3. It reboots, downloads that role's files and starts.
 
 **Updating:** reboot. Every boot pulls the device's latest files from `main` (raw GitHub links can cache ~5 min after a push). If `startup.lua` itself changed, the device reboots once more by itself so the new one runs.
@@ -16,22 +16,22 @@ ComputerCraft (CC:Tweaked + Advanced Peripherals) scripts for Tanis's ATM10 isla
 | Type | Role | Runs | What it does |
 |---|---|---|---|
 | Computer | Mainframe | `mainframe` | Chat commands, alerts, island strip, status board for every machine, the butler (`$dump`, torch top-ups, warnings, welcomes, visitors, storage lock) |
-| Computer | Storage | `storage` | Sorts input chests, touch screen, fuels the turtles, fills Rigger's barrel, does the smelter's item moves |
+| Computer | Storage | `storage` | Sorts input chests, touch screen, fuels the turtles, fills Weaver's barrel, does the smelter's item moves |
 | Computer | Smelter | `smelter` | Auto-smelting rules (`smelt.txt`); asks storage to move the items |
-| Computer | Foreman | `foreman` | Mining control: overview of every Digger, tap one for its layers / START / DOCK / position / retire; hands out Digger numbers; layer presets (Y range + rings) edited on the Presets page or with `/presets` on its screen; Reboot / Reboot all / `/reboot` (a Digger finishes its block, reboots, updates and carries on) |
-| Computer | Nether Foreman | `nether` | In the Nether by Pigger's dock: Pigger cards (layers / START / DOCK / reboot / retire), the Nether barrels (`/assign`: dock, output home, stock, input), Rules for what stays in the Nether, what Pigger throws away and when he drinks lava |
-| Computer | Farmhand | `farmhand` | Control screen for the farm turtles: overview of Figger, Tigger and friends, tap one for ROUNDS NOW / PAUSE / RE-MAP / FOUND / REBOOT, live settings, position, last haul and running totals |
-| Computer | Architect | `architect` | Rigger's control screen (no monitor, the computer's own screen): what he's doing, a map of the layer he's on (done / to do / him / his next block), the island from the side, materials left vs storage, where the test markers went, a log, and build / stop / test / clear / reboot orders (typed or clicked) |
+| Computer | Foreman | `foreman` | Mining control: overview of every Canary, tap one for its layers / START / DOCK / position / retire; hands out Canary numbers; layer presets (Y range + rings) edited on the Presets page or with `/presets` on its screen; Reboot / Reboot all / `/reboot` (a Canary finishes its block, reboots, updates and carries on) |
+| Computer | Nether Foreman | `nether` | In the Nether by Firecrest's dock: Firecrest cards (layers / START / DOCK / reboot / retire), the Nether barrels (`/assign`: dock, output home, stock, input), Rules for what stays in the Nether, what Firecrest throws away and when he drinks lava |
+| Computer | Farmhand | `farmhand` | Control screen for the farm turtles: overview of Partridge, Woodpecker and friends, tap one for ROUNDS NOW / PAUSE / RE-MAP / FOUND / REBOOT, live settings, position, last haul and running totals |
+| Computer | Architect | `architect` | Weaver's control screen (no monitor, the computer's own screen): what he's doing, a map of the layer he's on (done / to do / him / his next block), the island from the side, materials left vs storage, where the test markers went, a log, and build / stop / test / clear / reboot orders (typed or clicked) |
 | Computer | GPS host | `gps_host` | One of 4 GPS towers so turtles know their exact X/Y/Z |
 | Computer | Plastic factory | `plastic` | Industrial Foregoing plastic line: tree taps -> Latex Processing Unit -> furnace -> dock barrel (`plastic.env`) |
 | Computer | Neural lab | `neural` | Hostile Neural Networks wall: runs each chamber + fab column until storage has enough of what it makes (`neural.txt`, `neural.env`) |
-| Computer | Art controller | `art` | Monitor wall: live turtle map coloured by height, GPS pylons, Zigger's world map, generative art you can poke (`art.env`) |
-| Turtle | Digger | `miner` | Shaft + expanding-square mining (`junk.txt`); numbered Digger-01, -02... by the Foreman; reports its exact position |
-| Turtle | Pigger | `pigger` | Nether miner: Digger's shaft + squares, refuels by scooping lava with his bucket (under 25% until 75%), one dock barrel; numbered Pigger-01... by the Nether Foreman |
-| Turtle | Rigger | `rigger` | Builds from a plan file (`mossy.plan`, put on him by hand: it's big); run from the Architect or `island rigger ...` in chat |
-| Turtle | Tigger | `lumberjack` | Tree farm: maps a slab-ringed zone, plants a tree grid, chops and replants on a timer (`tigger.env`) |
-| Turtle | Figger | `farmer` | Crop farm: harvests and replants any crop, hoes new soil, picks up what falls (`figger.env`) |
-| Turtle | Zigger | `cartographer` | Flies over the island with a Geo Scanner and maps it for the art wall's World map (`zigger.env`) |
+| Computer | Art controller | `art` | Monitor wall: live turtle map coloured by height, GPS pylons, Seagull's world map, generative art you can poke (`art.env`) |
+| Turtle | Canary | `miner` | Shaft + expanding-square mining (`junk.txt`); numbered Canary-01, -02... by the Foreman; reports its exact position |
+| Turtle | Firecrest | `firecrest` | Nether miner: Canary's shaft + squares, refuels by scooping lava with his bucket (under 25% until 75%), one dock barrel; numbered Firecrest-01... by the Nether Foreman |
+| Turtle | Weaver | `weaver` | Builds from a plan file (`mossy.plan`, put on him by hand: it's big); run from the Architect or `island weaver ...` in chat |
+| Turtle | Woodpecker | `lumberjack` | Tree farm: maps a slab-ringed zone, plants a tree grid, chops and replants on a timer (`woodpecker.env`) |
+| Turtle | Partridge | `farmer` | Crop farm: harvests and replants any crop, hoes new soil, picks up what falls (`partridge.env`) |
+| Turtle | Seagull | `cartographer` | Flies over the island with a Geo Scanner and maps it for the art wall's World map (`seagull.env`) |
 | Glasses | HUD | `glasses` | Smart Glasses: night vision AUTO / ON / OFF, HUD stats (clock, coords + facing, inventory bar), aggro alerts (`glasses.env`) |
 
 Every role is defined in `manifest.lua`: its files live under `computer/<role>/`, `turtle/<role>/` or `glasses/<role>/`
@@ -61,7 +61,7 @@ Every role is defined in `manifest.lua`: its files live under `computer/<role>/`
 
 - **Mainframe and storage** need a wireless or ender modem: they talk on the `tanis-base` network (the smelter can use the storage cable instead, see below).
 - **Storage:** a wired modem on the storage cable (barrels, drawers, input/output chests), its own monitor for the touch screen, then `/assign` on its computer to say which inventory does what.
-  - **`/assign`** lists every inventory with a job: Input (any number), Output, Dock, Digger fuel, Rigger supply, Pocket dump, Pocket restock, Drawers, Ignore. Click one to change its job, give it a nickname ("Nether chest") or delete it. **+ Add** shows every unassigned inventory on the cable with what's in it: type part of its network name (`barrel_74`, `drawer`, `ender`) and the list narrows, Enter picks the last one left. Or **Find it**: drop one item into the chest you mean. Everything not on the list is storage. `/setup` with marker items still works and adds to the list.
+  - **`/assign`** lists every inventory with a job: Input (any number), Output, Dock, Canary fuel, Weaver supply, Pocket dump, Pocket restock, Drawers, Ignore. Click one to change its job, give it a nickname ("Nether chest") or delete it. **+ Add** shows every unassigned inventory on the cable with what's in it: type part of its network name (`barrel_74`, `drawer`, `ender`) and the list narrows, Enter picks the last one left. Or **Find it**: drop one item into the chest you mean. Everything not on the list is storage. `/setup` with marker items still works and adds to the list.
   - **Wired modems won't go on chests here:** feed a chest into a barrel with a hopper (chest > hopper > barrel) and put the modem on the barrel. The barrel is the Input.
 - **Smelter:** just a wired modem on the **same** storage cable, with the furnaces on that cable too. No wireless modem needed: it talks to storage over the cable, and storage passes its news to the mainframe. Storage is the only computer that moves items, so they never fight.
 - **Mainframe:** Environment Detector, optional Chat Box, monitor wall (island strip + status board, plus a visitor column when the wall is at least 50 characters wide). For the butler: an **Inventory Manager** with your bound Memory Card and a **Player Detector**, both touching the mainframe.
@@ -75,10 +75,10 @@ Every role is defined in `manifest.lua`: its files live under `computer/<role>/`
 - Private warnings: inventory nearly full / full; armour or a tool at 15% and again at 5%.
 - Player Detector: "welcome home" (with who dropped by), guests greeted, a visitor column on the wall, and the **storage monitor locks** (big padlock, taps ignored) while you're away. The storage computer's own screen always works. `/lock` and `/unlock` on storage do it by hand. If the mainframe goes quiet for a minute, the auto-lock lets go.
 - Settings: `butler.env` on the mainframe, made on first run. Edit it live; deleted keys come back with their defaults, your lines are never overwritten. The Inventory Manager only works while you're online.
-- **Foreman:** advanced computer, **ender modem** (reaches Diggers anywhere), advanced monitor touching it (any size; the computer's own screen works too).
+- **Foreman:** advanced computer, **ender modem** (reaches Canaries anywhere), advanced monitor touching it (any size; the computer's own screen works too).
 - **Farmhand:** advanced computer, wireless or **ender modem**, advanced monitor touching it (any size; the computer's own screen works too).
-- **GPS hosts (optional, recommended):** 4 computers with ender modems, high up and not all at one height. Diggers then check their position against GPS, notice if they've been carried somewhere, and find their own way back. Farm turtles pin their farm map to GPS and can't get lost.
-- **Each Digger:** pickaxe + ender modem, a dump barrel (storage input) and a fuel barrel next to its dock. Storage `/assign` each fuel barrel as Digger fuel (or `/setup` with a lava bucket in each; Diggers also link their own barrels); storage keeps one refill in every one, but never takes its last stack of coal/charcoal (the smelter needs it).
+- **GPS hosts (optional, recommended):** 4 computers with ender modems, high up and not all at one height. Canaries then check their position against GPS, notice if they've been carried somewhere, and find their own way back. Farm turtles pin their farm map to GPS and can't get lost.
+- **Each Canary:** pickaxe + ender modem, a dump barrel (storage input) and a fuel barrel next to its dock. Storage `/assign` each fuel barrel as Canary fuel (or `/setup` with a lava bucket in each; Canaries also link their own barrels); storage keeps one refill in every one, but never takes its last stack of coal/charcoal (the smelter needs it).
 
 ## Plastic factory
 
@@ -127,27 +127,27 @@ A wall of **columns**, one per mob: a **Simulation Chamber** on top, **its Loot 
 - **Alerts** (mainframe): out of matrices, no power, chamber stuck or on Training, fab with no drop picked, dock full, no counts from storage. Chat: `island neural`, `island neural pause | go`.
 - **Tip:** level a model with the Deep Learner (kills) rather than Training mode (one matrix per run). With the mod's default numbers that's about 100 kills from blank to Self Aware.
 
-## The art wall (art controller + Zigger)
+## The art wall (art controller + Seagull)
 
 **Art controller:** an advanced computer, an ender modem, and the biggest **advanced** monitor you can build touching it
 (an 8x6 wall = 328 x 243 pixels: every character cell is split into 2 x 3 little pixels). Tap the **three bars in the
 bottom-right corner** to switch screens:
 
 - **Turtle map:** every turtle that knows its GPS position, as a dot coloured by height (14 bands from Y -64 to 320,
-  key on the right), with a trail of where it's been. Diggers, Figger, Tigger, Rigger and Zigger all report one now.
+  key on the right), with a trail of where it's been. Canaries, Partridge, Woodpecker, Weaver and Seagull all report one now.
   The **GPS pylons are red crosses**: the wall asks the GPS towers where they are, so new pylons appear by themselves.
   Tap a turtle for its details, tap anywhere else to move the map there, **-** / **+** to zoom, **FIT** to follow everyone again.
   Turtles in the Nether or End aren't shown.
-- **World map:** Zigger's height map: land coloured by height (sand to green to rock to snow, scaled to your island),
-  trees, shallow and deep water, turtles in magenta, pylons red, and Zigger's scan square in white while he works.
-  **MAP** sends Zigger off on a new pass, **DOCK** calls him home.
+- **World map:** Seagull's height map: land coloured by height (sand to green to rock to snow, scaled to your island),
+  trees, shallow and deep water, turtles in magenta, pylons red, and Seagull's scan square in white while he works.
+  **MAP** sends Seagull off on a new pass, **DOCK** calls him home.
 - **Art: Plasma, Rings, Aurora:** generative art. Tap to send a ripple out from your finger. A fresh pattern every
   time it's picked, and again after 10 minutes without a tap.
 - Goes back to the Turtle map after 5 minutes without a tap (`DEFAULT_VIEW`, `IDLE_RETURN`), or set `CYCLE=60` to
   rotate through every screen when nobody's touching it. Other settings in `art.env`: height bands, trail length, FPS.
 - Its terminal: `1`-`5` switch screens, `Q` stops it (the monitor's colours go back to normal).
 
-**Zigger (cartographer turtle):** a turtle with a **Geo Scanner** on one side and an **ender modem** on the other. No pickaxe:
+**Seagull (cartographer turtle):** a turtle with a **Geo Scanner** on one side and an **ender modem** on the other. No pickaxe:
 he never digs, he flies over things. Needs the GPS towers.
 
 - **Dock:** a barrel touching him that storage keeps fuelled. On storage: `/assign` the barrel as a Dock, Keeps e.g. `coal 128`
@@ -157,54 +157,68 @@ he never digs, he flies over things. Needs the GPS towers.
   above the ground, scanning every 8 blocks, and the wall paints each scan as it arrives. A full 328 x 243 pass is about an
   hour and ~6,500 fuel (80-ish coal). He goes home for fuel when he needs to, and docks when done. **D** on his screen = dock.
 - Area: centred on his dock, 328 x 243 (fills an 8x6 wall at 1 block per pixel). Change `CENTRE_X`, `CENTRE_Z`, `WIDTH`,
-  `DEPTH` in `zigger.env`; he starts the pass again if you change the area mid-way.
+  `DEPTH` in `seagull.env`; he starts the pass again if you change the area mid-way.
 - **Chunks:** he only works where chunks are loaded (near a player, or force-loaded). Spots outside are skipped, not fatal:
   run another pass later with someone over there. Restarted or reloaded mid-pass? He asks GPS where he is and carries on.
-- The wall keeps its own copy of the map (`art.map`) and catches up from Zigger's (`zigger.map`) whenever it starts.
+- The wall keeps its own copy of the map (`art.map`) and catches up from Seagull's (`seagull.map`) whenever it starts.
   On the mainframe's board he has his own row (state, % done, chunks, fuel).
 
 ## Farm turtles and the Farmhand
 
-Figger (crops) and Tigger (trees) run on one shared engine (`shared/farmbot.lua`).
+Partridge (crops) and Woodpecker (trees) run on one shared engine (`shared/farmbot.lua`).
 
-- **Farm:** ring the area with slabs: on the ground for Tigger, at crop height for Figger (he flies one block above the
-  crops). Start the turtle inside it next to its dock barrel (Figger can also start ON a dock built into the ring, facing
+- **Farm:** ring the area with slabs: on the ground for Woodpecker, at crop height for Partridge (he flies one block above the
+  crops). Start the turtle inside it next to its dock barrel (Partridge can also start ON a dock built into the ring, facing
   in). Make the barrel a storage dock (`/assign` it as a Dock, or the coal marker in `/setup`): storage takes the produce and keeps fuel in it.
 - **It maps the farm by itself** and re-maps every few rounds (`RESURVEY_EVERY`), so new rows or a bigger field get picked
-  up. Tigger keeps his tree grid on re-maps. A map that fails (gap in the slabs, no fuel) is retried every few minutes.
+  up. Woodpecker keeps his tree grid on re-maps. A map that fails (gap in the slabs, no fuel) is retried every few minutes.
 - **Never lost with GPS:** the map is pinned to world coordinates. After a restart, even one mid-turn, it asks GPS where it
   is and steps once to learn which way it faces; at home after every round it checks GPS agrees with its count. Carried off
-  the farm? It says where it is and where home is; put it back and press **Found** (or `island figger found`). Without GPS
+  the farm? It says where it is and where home is; put it back and press **Found** (or `island partridge found`). Without GPS
   it works its way out from the map, like before.
-- **Settings:** `figger.env` / `tigger.env` on the turtle, edited live. Round timer, seeds/saplings kept and how often it
+- **Settings:** `partridge.env` / `woodpecker.env` on the turtle, edited live. Round timer, seeds/saplings kept and how often it
   re-maps can also be changed from the Farmhand (yellow until the turtle confirms).
 - **Farmhand screen:** a card per turtle (state, fuel, next round or progress, position). Tap one for ROUNDS NOW, PAUSE/GO,
   RE-MAP, FOUND (when lost), REBOOT (it finishes its job, restarts, updates), settings, last haul and everything it has
   brought in. Footer: Rounds all, Pause all, Reboot all. A turtle silent for 2 minutes can be forgotten.
 - **Still on the mainframe:** every farm turtle keeps its row on the board (round progress, last round, fuel) plus a
-  Farmhand row; alerts and chat (`island figger rounds|survey|stop|go|found`) work as before.
+  Farmhand row; alerts and chat (`island partridge rounds|survey|stop|go|found`) work as before.
 - **ATM10 note:** with a hoe, CC:Tweaked right-clicks a crop before digging it, and ATM10 harvests ripe crops on right-click,
-  dropping them on the ground. Figger hoovers up under him at every plot.
+  dropping them on the ground. Partridge hoovers up under him at every plot.
 
-## Diggers and the Foreman
+## Canaries and the Foreman
 
-- **Numbers:** a new Digger asks the Foreman for one when it first starts (Digger-01, -02...). It keeps it when moved or reset. **Retire** (tap twice on its page) docks it for good; its number is never handed out again.
+- **Numbers:** a new Canary asks the Foreman for one when it first starts (Canary-01, -02...). It keeps it when moved or reset. **Retire** (tap twice on its page) docks it for good; its number is never handed out again.
 - **Position:** set up at its dock, it learns X/Y/Z (from GPS, or typed in), which way it faces and the dimension, and reports where it is all the time.
 - **Carried off?** With GPS it notices on restart, works out which way it faces by stepping once, and waits. Press START or DOCK on its Foreman page: it digs down to Y 0, tunnels under everything to its shaft and comes up. Put it down outside, not on a floor you care about. Without GPS it counts its moves, so carry it back to its dock instead.
-- **Older Diggers** fill in their dock's X/Z and facing by themselves on the first boot with GPS, or ask once on their screen without it.
+- **Older Canaries** fill in their dock's X/Z and facing by themselves on the first boot with GPS, or ask once on their screen without it.
 
-## Pigger and the Nether Foreman
+## Firecrest and the Nether Foreman
 
-Pigger mines the Nether and his haul comes home through a linked ender chest.
+Firecrest mines the Nether and his haul comes home through a linked ender chest.
 
-- **Pigger:** an **advanced** mining turtle (diamond pickaxe) with an **ender modem**, and **one empty bucket** in his inventory. Set him up (startup.lua, pick Pigger) on top of where his shaft should go, with **one barrel** next to him (a side or above): his dock. He asks for his X/Y/Z and facing (F3) unless there's GPS in the Nether.
-- **The Nether cable:** a wired modem on the Nether Foreman computer, joined by cable to wired modems on: Pigger's **dock** barrel, an **output** barrel, and one or more **stock** barrels (optional: **input** barrels to drop things in by hand). On the computer: `/assign` (or the Barrels button) and give each its job, the same screen as storage's.
+- **Firecrest:** an **advanced** mining turtle (diamond pickaxe) with an **ender modem**, and **one empty bucket** in his inventory. Set him up (startup.lua, pick Firecrest) on top of where his shaft should go, with **one barrel** next to him (a side or above): his dock. He asks for his X/Y/Z and facing (F3) unless there's GPS in the Nether.
+- **The Nether cable:** a wired modem on the Nether Foreman computer, joined by cable to wired modems on: Firecrest's **dock** barrel, an **output** barrel, and one or more **stock** barrels (optional: **input** barrels to drop things in by hand). On the computer: `/assign` (or the Barrels button) and give each its job, the same screen as storage's.
 - **Getting it home:** output barrel > hopper > Ender Storage ender chest (orange/orange/orange). Its twin at home feeds storage the same way: ender chest > hopper > a barrel that's a storage Input. A hopper moves ~150 items a minute; a Pipez item pipe is quicker if it ever backs up.
-- **What goes where:** everything Pigger brings (and anything in an input) goes to stock if the Rules keep some of it and stock is short of that; the rest goes home. Stock above its keep count goes home too. Defaults keep 4 buckets, 16 lava buckets and some coal / charcoal / coal blocks / blaze rods for emergencies. `/keep <item> <count>` (0 = stop), or the - / + / x buttons on the Rules page.
+- **What goes where:** everything Firecrest brings (and anything in an input) goes to stock if the Rules keep some of it and stock is short of that; the rest goes home. Stock above its keep count goes home too. Defaults keep 4 buckets, 16 lava buckets and some coal / charcoal / coal blocks / blaze rods for emergencies. `/keep <item> <count>` (0 = stop), or the - / + / x buttons on the Rules page.
 - **Fuel:** under **25%** he scoops every lava source he sees with his bucket and drinks it (1,000 each); finding one, he drinks the whole pool around him (only the lava cells, on his own level, inside his rings) until he's over **75%**, then leaves lava alone. Both numbers are on the Rules page. Running low with no lava about, he comes home and the dock gives him lava buckets / coal from stock. No bucket? The dock gives him one from stock.
 - **Junk:** the Rules page lists what he throws away underground (netherrack, basalt, blackstone...); everything else comes home. `/junk <item>`, `/unjunk <item>`.
-- **Chunk loading:** force-load Pigger's dock, his whole dig area and the Nether Foreman's chunk (FTB Chunks). Keep his rings inside it: ring 24 (the default) is 49x49, about 3x3 chunks around the dock. An unloaded Pigger just stops and carries on when it loads again. Force-load the island base too if you want storage sorting while you're away.
-- **The mainframe** hears Piggers through its ender modem: they show on the status board, in `island miner` and in the alerts like Diggers.
+- **Chunk loading:** force-load Firecrest's dock, his whole dig area and the Nether Foreman's chunk (FTB Chunks). Keep his rings inside it: ring 24 (the default) is 49x49, about 3x3 chunks around the dock. An unloaded Firecrest just stops and carries on when it loads again. Force-load the island base too if you want storage sorting while you're away.
+- **The mainframe** hears Firecrests through its ender modem: they show on the status board, in `island miner` and in the alerts like Canaries.
+
+## Renamed turtles (Oct 2026)
+
+The turtles are birds now: Canary (miner), Firecrest (Nether miner), Weaver (builder), Woodpecker (lumberjack),
+Partridge (farmer), Seagull (map-maker). Nothing to do by hand: on its next boot each turtle switches its role, its
+label (Digger-04 becomes Canary-04), and its saved state and `.env` settings over to the new name, and drops its old
+program files. The Foreman, Nether Foreman and storage carry their saved settings over too. Chat commands use the new
+names (`island weaver build`, `island partridge rounds`).
+
+## Canaries never dig turtles
+
+ComputerCraft lets a turtle mine another turtle (it turns into an item in the digger's bag). Canaries and Firecrests
+never do: a turtle in the way makes them wait up to 2 minutes for it to move on (status "Another turtle in my way"),
+and a turtle item they pick up always comes home rather than being thrown away underground.
 
 ## Safety
 
@@ -228,7 +242,7 @@ machine's program:
 - **[1] Same machine, carry on**: you renamed it outside the scripts (e.g. an anvil). It remembers the new name.
 - **[2] Stop: show the fix**: leaves you at the shell with the steps below.
 
-No false alarms from `reset`, re-running setup, `label set`, Diggers naming themselves, or crafting a computer
+No false alarms from `reset`, re-running setup, `label set`, Canaries naming themselves, or crafting a computer
 into a turtle. It can't tell apart two machines that are both unlabelled *and* the same hardware, so keep
 everything labelled (setup always does). The check arrives with the new `startup.lua`, so it starts working
 from a device's *second* reboot.

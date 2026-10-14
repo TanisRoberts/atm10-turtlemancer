@@ -2,7 +2,7 @@
 -- Needs an Environment Detector next to the computer. Optional: a Chat Box and a monitor.
 --
 -- Chat commands (start with $ to keep them out of public chat, e.g. "$island miner"):
---   island status | scan | miner (every Digger) | storage | alerts | test | help
+--   island status | scan | miner (every Canary) | storage | alerts | test | help
 -- ($dump and $pocket are the butler's: see butler.lua)
 -- "island alerts" subscribes you to private alerts: storage filling up, the miner going quiet,
 -- getting lost, running out of fuel, finishing, or bringing home diamonds. Alerts you miss
@@ -139,10 +139,10 @@ end
 
 local function minerName(m) return (m and m.label) or "The miner" end
 
--- Every Digger the mainframe has heard (dig_link), sorted by number, retired ones left out
-local function diggers()
+-- Every Canary the mainframe has heard (dig_link), sorted by number, retired ones left out
+local function canaries()
   local out = {}
-  for id, e in pairs(_G.DIGGERS or {}) do
+  for id, e in pairs(_G.CANARIES or {}) do
     if e.s.state ~= "retired" then out[#out + 1] = { id = id, s = e.s, seen = e.seen } end
   end
   table.sort(out, function(a, b) return (a.s.num or 999) < (b.s.num or 999) end)
@@ -170,15 +170,15 @@ local function storageLine(s)
   return line
 end
 
-local function riggerLine(r)
-  if not r then return "Rigger hasn't checked in yet." end
-  local ago = _G.RIGGER_SEEN and math.floor(os.clock() - _G.RIGGER_SEEN) or 0
+local function weaverLine(r)
+  if not r then return "Weaver hasn't checked in yet." end
+  local ago = _G.WEAVER_SEEN and math.floor(os.clock() - _G.WEAVER_SEEN) or 0
   local pct = (r.total and r.total > 0) and math.floor((r.placed or 0) / r.total * 100) or 0
   local where = r.phase == "ext" and ("edge wall %s/%s"):format(tostring(r.ext), tostring(r.extTotal))
     or r.phase == "layer" and ("layer %s/%s"):format(tostring(r.layer), tostring(r.layers))
     or tostring(r.phase or "not started")
   return ("%s: %s%s. %s, %d/%d blocks (%d%%). Fuel %s. Seen %ds ago."):format(
-    r.label or "Rigger", tostring(r.state or "?"):upper(), (r.msg and r.msg ~= "") and (" (" .. r.msg .. ")") or "",
+    r.label or "Weaver", tostring(r.state or "?"):upper(), (r.msg and r.msg ~= "") and (" (" .. r.msg .. ")") or "",
     where, r.placed or 0, r.total or 0, pct, tostring(r.fuel), ago)
 end
 
@@ -196,7 +196,7 @@ local function farmLine(st)
   return ("%s %s Fuel %s. Seen %ds ago."):format(head, body, tostring(st.fuel), ago)
 end
 
-local lastHaul = {}   -- per Digger
+local lastHaul = {}   -- per Canary
 local factoryKeys = {} -- plastic factory problems we've raised
 local neuralKeys = {}  -- neural lab problems we've raised
 local function watch()
@@ -211,7 +211,7 @@ local function watch()
     condition("inputStuck", s.inputStuck == true, "Storage is full: items are piling up in the input chests.")
     if s.fuelTarget then
       condition("fuelDry", (s.fuelUnits or 0) < s.fuelTarget * 0.25 and (s.fuelAvailable or 0) == 0,
-        "A Digger fuel barrel is running dry and storage has no coal or lava buckets left.")
+        "A Canary fuel barrel is running dry and storage has no coal or lava buckets left.")
     end
   end
 
@@ -244,7 +244,7 @@ local function watch()
     for k, text in pairs(probs) do neuralKeys[k] = true; condition("neural:" .. k, true, tostring(text)) end
   end
 
-  for _, e in ipairs(diggers()) do
+  for _, e in ipairs(canaries()) do
     local m, k = e.s, tostring(e.id)
     local name = minerName(m)
     local ago = os.clock() - e.seen
@@ -293,21 +293,21 @@ local function watch()
       "Lost contact with the Farmhand (" .. tostring(_G.FARMHAND.label or "Farmhand") .. ").")
   end
 
-  local r = _G.RIGGER_STATUS
+  local r = _G.WEAVER_STATUS
   if r then
-    local name = r.label or "Rigger"
-    local ago = _G.RIGGER_SEEN and (os.clock() - _G.RIGGER_SEEN) or 0
-    condition("riggerSilent", ago > SILENT_AFTER, ("Lost contact with %s (last seen at Y %s)."):format(name, tostring(r.y)))
-    condition("riggerWaiting", r.state == "waiting", name .. " is waiting at the dock. " .. tostring(r.msg))
-    condition("riggerError", r.state == "error", name .. " hit a problem: " .. tostring(r.msg))
-    condition("riggerLost", r.state == "lost", name .. " lost track of which way he's facing. Carry him to his dock and type: rigger found")
-    condition("riggerDone", r.state == "done", name .. " finished building " .. tostring(r.plan or "the island") .. "!")
+    local name = r.label or "Weaver"
+    local ago = _G.WEAVER_SEEN and (os.clock() - _G.WEAVER_SEEN) or 0
+    condition("weaversilent", ago > SILENT_AFTER, ("Lost contact with %s (last seen at Y %s)."):format(name, tostring(r.y)))
+    condition("weaverWaiting", r.state == "waiting", name .. " is waiting at the dock. " .. tostring(r.msg))
+    condition("weaverError", r.state == "error", name .. " hit a problem: " .. tostring(r.msg))
+    condition("weaverLost", r.state == "lost", name .. " lost track of which way he's facing. Carry him to his dock and type: weaver found")
+    condition("weaverDone", r.state == "done", name .. " finished building " .. tostring(r.plan or "the island") .. "!")
     if r.phase == "layer" and r.layers and r.layer then
       local tenth = math.floor((r.layer - 1) / r.layers * 10)
-      if A.riggerTenth and tenth > A.riggerTenth then
+      if A.weaverTenth and tenth > A.weaverTenth then
         notify(("%s is %d%% of the way up (layer %d/%d)."):format(name, tenth * 10, r.layer, r.layers))
       end
-      A.riggerTenth = tenth
+      A.weaverTenth = tenth
     end
   end
 end
@@ -456,7 +456,7 @@ end
 ---------------------------------------------------------------------------
 -- Chat commands
 ---------------------------------------------------------------------------
-local HELP = "Commands: island status | scan | miner | storage | rigger | tigger | figger | smelt | plastic | neural | alerts | test."
+local HELP = "Commands: island status | scan | miner | storage | weaver | woodpecker | partridge | smelt | plastic | neural | alerts | test."
   .. " Your inventory: $get [n] <item> | $dump | $pocket"
 
 local function chatLoop()
@@ -492,13 +492,13 @@ local function chatLoop()
           names[#names + 1] = ("%s %.0fm"):format(state.near[i].name, state.near[i].d)
         end
         say(#names > 0 and table.concat(names, ", ") or "Nothing nearby.", user)
-      elseif cmd == "miner" or cmd == "diggers" or cmd == "digger" then
-        local list = diggers()
-        if #list == 0 then say("No Digger has checked in yet.", user) end
+      elseif cmd == "miner" or cmd == "canaries" or cmd == "canary" then
+        local list = canaries()
+        if #list == 0 then say("No Canary has checked in yet.", user) end
         for _, e in ipairs(list) do say(minerLine(e), user) end
       elseif cmd == "storage" then
         say(storageLine(_G.STORAGE_STATS), user)
-      elseif (_G.FARM_STATUS and _G.FARM_STATUS[cmd]) or cmd == "tigger" or cmd == "figger" then
+      elseif (_G.FARM_STATUS and _G.FARM_STATUS[cmd]) or cmd == "woodpecker" or cmd == "partridge" then
         local sub = tostring(msg):lower():match(cmd .. "%s+(%a+)")
         local orders = { rounds = "rounds", now = "rounds", survey = "survey", remap = "survey", stop = "stop", pause = "stop",
           go = "go", resume = "go", found = "found" }
@@ -558,17 +558,17 @@ local function chatLoop()
           for i = 1, math.min(#lines, 8) do say(lines[i], user) end
           say("Orders: island neural pause | go", user)
         end
-      elseif cmd == "rigger" then
-        local sub = tostring(msg):lower():match("rigger%s+(%a+)")
+      elseif cmd == "weaver" then
+        local sub = tostring(msg):lower():match("weaver%s+(%a+)")
         local orders = { build = "build", start = "build", stop = "dock", dock = "dock", test = "test", clear = "clear" }
         if sub and orders[sub] then
-          _G.RIGGER_CMD = { want = orders[sub], seq = os.epoch("utc") }
+          _G.WEAVER_CMD = { want = orders[sub], seq = os.epoch("utc") }
           local words = { build = "Building. He'll restock as he goes.", dock = "Stopping. He'll head back to his dock.",
             test = "Placing markers on the 8 corners of the build.", clear = "Taking the corner markers back down." }
-          say("Rigger: " .. words[orders[sub]], user)
+          say("Weaver: " .. words[orders[sub]], user)
         else
-          say(riggerLine(_G.RIGGER_STATUS), user)
-          say("Orders: island rigger test | clear | build | stop", user)
+          say(weaverLine(_G.WEAVER_STATUS), user)
+          say("Orders: island weaver test | clear | build | stop", user)
         end
       elseif cmd == "alerts" then
         if A.subs[user] then

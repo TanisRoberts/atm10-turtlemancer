@@ -8,12 +8,12 @@
 --               from Y_MIN to Y_MAX, key on the right), with a trail of where it's been. The GPS
 --               pylons are the red crosses. Tap a turtle for its details; tap anywhere else to
 --               move the map there; - / + zoom; FIT follows everything again.
---   World map   the height map Zigger (the cartographer turtle) paints as he flies: land coloured
---               by height, trees, shallow and deep water. Turtles in magenta, pylons red, Zigger's
---               scan square in white. MAP sends Zigger off on a new pass, DOCK calls him home.
+--   World map   the height map Seagull (the cartographer turtle) paints as he flies: land coloured
+--               by height, trees, shallow and deep water. Turtles in magenta, pylons red, Seagull's
+--               scan square in white. MAP sends Seagull off on a new pass, DOCK calls him home.
 --   Plasma, Rings, Aurora   generative art. Tap it to send a ripple out from your finger.
 --
--- Settings: art.env (made on first run; edit live). Map copy: art.map (Zigger keeps the master).
+-- Settings: art.env (made on first run; edit live). Map copy: art.map (Seagull keeps the master).
 -- Terminal keys: 1-5 switch screens, Q stops (and puts the monitor's colours back).
 
 local G = dofile("art_gfx.lua")
@@ -107,7 +107,7 @@ local function breathe()
 end
 
 ---------------------------------------------------------------------------
--- What we know: turtles, pylons, Zigger, the map
+-- What we know: turtles, pylons, Seagull, the map
 ---------------------------------------------------------------------------
 local turtles = {}        -- [id] = { id, label, role, state, msg, pos, seen, trail, fuel }
 local pylons = {}         -- [key] = { x, y, z, seen }
@@ -120,8 +120,8 @@ local cmdSeq = math.floor(os.epoch("utc") / 1000) % 100000
 
 local function short(label, id)
   local s = tostring(label or ("#" .. id))
-  local d = s:match("^[Dd]igger%-(%d+)$")
-  if d then return "D" .. d end
+  local d = s:match("^[Cc]anary%-(%d+)$")
+  if d then return "C" .. d end
   return s:sub(1, 10)
 end
 
@@ -678,7 +678,7 @@ local function WorldView()
       local x, y = w2p(V, p.x, p.z)
       plus(px, x, y, W_RED)
     end
-    -- Zigger's scan square
+    -- Seagull's scan square
     if zig and type(zig.scan) == "table" and tonumber(zig.scan.x) and zig.state == "mapping" then
       local r = tonumber(zig.scan.r) or 8
       local x0, y0 = w2p(V, zig.scan.x - r, zig.scan.z - r)
@@ -698,13 +698,13 @@ local function WorldView()
     gfx.setOverlay(px)
     gfx.setLayer("labels", cells)
 
-    -- Title + Zigger's news
+    -- Title + Seagull's news
     local tc = {}
     local n = 0
     for _ in pairs(chunks) do n = n + 1 end
     gfx.text(tc, 2, 1, ("WORLD MAP  %d chunks mapped"):format(n), W_WHITE, 0)
     local line
-    if not zig then line = "No cartographer heard yet. Set up a Zigger turtle."
+    if not zig then line = "No cartographer heard yet. Set up a Seagull turtle."
     else
       local pct = (tonumber(zig.wps) and zig.wps > 0 and zig.mapping) and
         (" %d%%"):format(math.floor(((zig.wp or 1) - 1) / zig.wps * 100)) or ""
@@ -871,7 +871,7 @@ local function showStatus()
   print(("Showing: %s"):format(tostring(currentId)))
   print(("Turtles on the map: %d   Pylons: %d"):format(#liveTurtles(), np))
   print(("Map chunks: %d"):format(n))
-  print(("Zigger: %s"):format(zig and (tostring(zig.state) .. " " .. tostring(zig.msg or "")) or "not heard yet"))
+  print(("Seagull: %s"):format(zig and (tostring(zig.state) .. " " .. tostring(zig.msg or "")) or "not heard yet"))
   print("")
   print("1 Turtles 2 World 3 Plasma 4 Rings 5 Aurora")
   print("Q = stop. Settings: art.env")
@@ -956,14 +956,14 @@ local function netLoop()
   while true do
     local from, msg, proto = rednet.receive(nil, 0.5)
     if type(msg) == "table" and from then
-      if proto == "tanis-miner" and msg.type == "status" then noteTurtle(from, msg, "digger")
+      if proto == "tanis-miner" and msg.type == "status" then noteTurtle(from, msg, "canary")
       elseif proto == "tanis-farm" and msg.type == "status" then noteTurtle(from, msg, msg.role)
-      elseif proto == "tanis-rigger" and msg.type == "status" then noteTurtle(from, msg, "rigger")
+      elseif proto == "tanis-rigger" and msg.type == "status" then noteTurtle(from, msg, "weaver")
       elseif proto == CARTO then
         if msg.type == "status" then
           local first = zigId == nil
           zig, zigId, zigSeen = msg, from, os.clock()
-          noteTurtle(from, msg, "zigger")
+          noteTurtle(from, msg, "seagull")
           if first then lastSync = -1000 end
           if zigCmd and msg.seq == zigCmd.seq then zigCmd = nil end
         elseif msg.type == "chunks" and type(msg.chunks) == "table" then
@@ -972,14 +972,14 @@ local function netLoop()
         end
       end
     end
-    -- Catch up with Zigger's map (on start, then every few minutes, faster while he has more)
+    -- Catch up with Seagull's map (on start, then every few minutes, faster while he has more)
     if zigId and (os.clock() - lastSync > 180 or (syncMore and os.clock() - lastSync > 0.5)) then
       local revs = {}
       for k, c in pairs(chunks) do revs[k] = c.rev end
       rednet.send(zigId, { type = "have", to = zigId, revs = revs }, CARTO)
       lastSync, syncMore = os.clock(), false
     end
-    -- Orders for Zigger: repeat until his status shows he took it
+    -- Orders for Seagull: repeat until his status shows he took it
     if zigCmd then
       if os.clock() > zigCmd.untilT then zigCmd = nil
       elseif os.clock() - zigCmd.sentAt > 2 and zigId then

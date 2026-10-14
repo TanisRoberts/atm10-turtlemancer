@@ -5,13 +5,20 @@
 -- once:    only downloaded if missing (things you edit, or big data files).
 -- run:     the program started after updating (a file name without .lua).
 -- about:   one line for the setup menu.  details: a few more words, shown under the menu.
--- label:   "auto" = no label question; the program names the device itself (Diggers get a number
+-- label:   "auto" = no label question; the program names the device itself (Canaries get a number
 --          from the Foreman).
 -- A file lands on the device under its own name (computer/storage/storage.lua -> storage.lua).
 -- Adding a role = adding an entry here (and its folder in the repo). Nothing else to change.
 
-return {
+local M = {
   common = { "startup.lua", "reset.lua" },
+
+  -- Files from before the Oct 2026 rename: startup deletes them from any device that still has them.
+  gone = { "rigger.lua", "pigger.lua", "riggerplan.lua", "rigger_link.lua" },
+  -- Saved state/config under an old name: startup renames it (only if the new one doesn't exist yet).
+  moved = { ["rigger.state"] = "weaver.state", ["rigger.cfg"] = "weaver.cfg", ["pigger.state"] = "firecrest.state",
+            ["rigger_link.cfg"] = "weaver_link.cfg", ["zigger.env"] = "seagull.env", ["zigger.state"] = "seagull.state",
+            ["zigger.map"] = "seagull.map", ["tigger.env"] = "woodpecker.env", ["figger.env"] = "partridge.env" },
 
   types = {
     computer = {
@@ -31,14 +38,14 @@ return {
           files = { "computer/mainframe/mainframe.lua", "computer/mainframe/island.lua",
                     "computer/mainframe/board.lua", "computer/mainframe/butler.lua",
                     "computer/mainframe/base_link.lua",
-                    "computer/mainframe/dig_link.lua", "computer/mainframe/rigger_link.lua",
+                    "computer/mainframe/dig_link.lua", "computer/mainframe/weaver_link.lua",
                     "computer/mainframe/farm_link.lua" },
         },
         storage = {
           name = "Storage",
           about = "Sorts chests, search screen, fuels turtles",
           details = "The only computer that moves items. Sorts the input chests into barrels and "
-            .. "drawers, search + take on its screen, tops up turtle fuel barrels, supplies Rigger "
+            .. "drawers, search + take on its screen, tops up turtle fuel barrels, supplies Weaver "
             .. "and does the smelter's moves. Wired modem on the storage cable + wireless modem.",
           run = "storage",
           files = { "computer/storage/storage.lua", "shared/assignui.lua" },
@@ -54,18 +61,18 @@ return {
         },
         foreman = {
           name = "Foreman",
-          about = "Mining control for every Digger",
-          details = "Overview of all Diggers on its monitor; tap one to set its layers, start or "
-            .. "dock it, see where it is, or retire it. Hands out Digger numbers. Needs an ender "
+          about = "Mining control for every Canary",
+          details = "Overview of all Canaries on its monitor; tap one to set its layers, start or "
+            .. "dock it, see where it is, or retire it. Hands out Canary numbers. Needs an ender "
             .. "modem and an advanced monitor.",
           run = "foreman",
           files = { "computer/foreman/foreman.lua" },
         },
         nether = {
           name = "Nether Foreman",
-          about = "Pigger control + the Nether dock barrels",
-          details = "Lives in the Nether by Pigger's dock. Pigger cards on its monitor (layers, START, "
-            .. "dock, reboot, retire), and the barrels on its cable: empties Pigger's dock, keeps "
+          about = "Firecrest control + the Nether dock barrels",
+          details = "Lives in the Nether by Firecrest's dock. Firecrest cards on its monitor (layers, START, "
+            .. "dock, reboot, retire), and the barrels on its cable: empties Firecrest's dock, keeps "
             .. "what the Rules say in Nether stock, sends the rest home through the output barrel "
             .. "(hopper -> ender chest). Ender modem + wired modem; /assign for the barrels.",
           run = "nether",
@@ -74,7 +81,7 @@ return {
         farmhand = {
           name = "Farmhand",
           about = "Control screen for the farm turtles",
-          details = "Every farm turtle (Figger, Tigger) on its monitor; tap one for rounds now, "
+          details = "Every farm turtle (Partridge, Woodpecker) on its monitor; tap one for rounds now, "
             .. "pause, re-map, reboot, its settings, where it is and what it has brought in. "
             .. "Needs a wireless or ender modem and an advanced monitor.",
           run = "farmhand",
@@ -82,13 +89,13 @@ return {
         },
         architect = {
           name = "Architect",
-          about = "Rigger's control screen: map, orders, bill",
-          details = "Everything about Rigger the builder on the computer's own screen: what he's "
+          about = "Weaver's control screen: map, orders, bill",
+          details = "Everything about Weaver the builder on the computer's own screen: what he's "
             .. "doing, a map of the layer he's on, the island from the side, materials still "
             .. "needed, the corner markers, and build / stop / test / clear / reboot orders. "
             .. "Needs a wireless or ender modem; no monitor.",
           run = "architect",
-          files = { "computer/architect/architect.lua", "computer/art/art_gfx.lua", "shared/riggerplan.lua" },
+          files = { "computer/architect/architect.lua", "computer/art/art_gfx.lua", "shared/weaverplan.lua" },
         },
         gps = {
           name = "GPS host",
@@ -122,7 +129,7 @@ return {
           name = "Art controller",
           about = "Monitor wall: turtle map, world map, art",
           details = "Shows off the island on an advanced monitor wall: every turtle live by height, "
-            .. "the GPS pylons, Zigger's world map, and generative art you can poke. Three bars in "
+            .. "the GPS pylons, Seagull's world map, and generative art you can poke. Three bars in "
             .. "the bottom-right corner switch screens. Needs an ender modem and an advanced monitor.",
           run = "art",
           files = { "computer/art/art.lua", "computer/art/art_gfx.lua", "computer/art/art_scenes.lua",
@@ -134,37 +141,37 @@ return {
       name = "Turtle",
       about = "A turtle that goes out and works",
       details = "Mining, building, lumberjacking, farming and map-making turtles.",
-      order = { "digger", "pigger", "rigger", "tigger", "figger", "zigger" },
+      order = { "canary", "firecrest", "weaver", "woodpecker", "partridge", "seagull" },
       roles = {
-        digger = { name = "Digger", about = "Miner: shaft + expanding squares", run = "miner",
+        canary = { name = "Canary", about = "Miner: shaft + expanding squares", run = "miner",
                    details = "Digs a shaft at its dock and mines squares at the layers the Foreman "
                      .. "picks. Gets its number from the Foreman. Pickaxe + ender modem.",
                    label = "auto",
-                   files = { "turtle/digger/miner.lua" }, once = { "turtle/digger/junk.txt" } },
-        pigger = { name = "Pigger", about = "Nether miner: drinks lava for fuel", run = "pigger",
-                   details = "Digger's cousin for the Nether: shaft + squares at the layers the Nether "
+                   files = { "turtle/canary/miner.lua" }, once = { "turtle/canary/junk.txt" } },
+        firecrest = { name = "Firecrest", about = "Nether miner: drinks lava for fuel", run = "firecrest",
+                   details = "Canary's cousin for the Nether: shaft + squares at the layers the Nether "
                      .. "Foreman picks, refuels from lava with his bucket, one dock barrel. Advanced "
                      .. "turtle, pickaxe + ender modem, one empty bucket.",
                    label = "auto",
-                   files = { "turtle/pigger/pigger.lua" } },
-        rigger = { name = "Rigger", about = "Builder: follows a plan file", run = "rigger",
+                   files = { "turtle/firecrest/firecrest.lua" } },
+        weaver = { name = "Weaver", about = "Builder: follows a plan file", run = "weaver",
                    details = "Builds the island from a plan file, layer by layer, and fetches "
                      .. "materials from storage.",
-                   files = { "turtle/rigger/rigger.lua", "shared/riggerplan.lua" },
-                   once = { "turtle/rigger/mossy.plan" } },
-        tigger = { name = "Tigger", about = "Lumberjack: tree farm", run = "lumberjack",
+                   files = { "turtle/weaver/weaver.lua", "shared/weaverplan.lua" },
+                   once = { "turtle/weaver/mossy.plan" } },
+        woodpecker = { name = "Woodpecker", about = "Lumberjack: tree farm", run = "lumberjack",
                    details = "Plants, chops and replants a tree farm and drops logs at its dock. "
                      .. "Axe + wireless or ender modem; GPS makes it unlosable. Run from the Farmhand.",
-                   files = { "turtle/tigger/lumberjack.lua", "shared/farmbot.lua" } },
-        figger = { name = "Figger", about = "Farmer: crops", run = "farmer",
+                   files = { "turtle/woodpecker/lumberjack.lua", "shared/farmbot.lua" } },
+        partridge = { name = "Partridge", about = "Farmer: crops", run = "farmer",
                    details = "Harvests and replants crops, hoes new soil, drops produce at its dock. "
                      .. "Hoe + wireless or ender modem; GPS makes it unlosable. Run from the Farmhand.",
-                   files = { "turtle/figger/farmer.lua", "shared/farmbot.lua" } },
-        zigger = { name = "Zigger", about = "Cartographer: flies and maps the island", run = "cartographer",
+                   files = { "turtle/partridge/farmer.lua", "shared/farmbot.lua" } },
+        seagull = { name = "Seagull", about = "Cartographer: maps the island", run = "cartographer",
                    details = "Zig-zags over the island with a Geo Scanner and paints the world map on "
                      .. "the art wall. Geo Scanner + ender modem, no pickaxe. Needs GPS and a fuel dock "
                      .. "with open sky above it.",
-                   files = { "turtle/zigger/cartographer.lua", "shared/mapchunk.lua" } },
+                   files = { "turtle/seagull/cartographer.lua", "shared/mapchunk.lua" } },
       },
     },
     glasses = {
@@ -187,3 +194,16 @@ return {
     },
   },
 }
+
+-- The turtles were renamed in Oct 2026 (birds). Devices still set up under an old role id boot through
+-- the alias once; startup.lua then switches their device.cfg (and a label starting with the old
+-- name, e.g. Digger-04 -> Canary-04) to the new one. Aliases aren't in `order`, so setup never offers them.
+local T = M.types.turtle
+T.renamed = { digger = "canary", pigger = "firecrest", rigger = "weaver",
+              tigger = "woodpecker", figger = "partridge", zigger = "seagull" }
+T.oldNames = { canary = "Digger", firecrest = "Pigger", weaver = "Rigger",
+               woodpecker = "Tigger", partridge = "Figger", seagull = "Zigger" }
+T.roles.digger, T.roles.pigger, T.roles.rigger = T.roles.canary, T.roles.firecrest, T.roles.weaver
+T.roles.tigger, T.roles.figger, T.roles.zigger = T.roles.woodpecker, T.roles.partridge, T.roles.seagull
+
+return M

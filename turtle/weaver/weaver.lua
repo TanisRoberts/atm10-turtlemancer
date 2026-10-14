@@ -1,13 +1,13 @@
--- rigger.lua  --  plan-following builder turtle (CC:Tweaked, ATM10 / MC 1.21.1)
+-- weaver.lua  --  plan-following builder turtle (CC:Tweaked, ATM10 / MC 1.21.1)
 --
 -- Needs: a turtle with a diamond pickaxe (to clear kelp/sand in the way) and a wireless or
 -- ender modem. A plan file (e.g. mossy.plan) on the turtle. A SUPPLY barrel next to the dock
 -- that storage fills (marker: 1 brick in /setup).
 --
 -- Commands come from the Architect computer, or chat via the mainframe:
---   island rigger test | clear | build | stop | status
--- Or type them here:  rigger test  /  rigger build  /  rigger stop  /  rigger clear
--- The plan maths (loading, building order, rotation) is in riggerplan.lua, shared with the Architect.
+--   island weaver test | clear | build | stop | status
+-- Or type them here:  weaver test  /  weaver build  /  weaver stop  /  weaver clear
+-- The plan maths (loading, building order, rotation) is in weaverplan.lua, shared with the Architect.
 --
 -- How it builds:
 --   1. Edge columns: walls under the island's outer edge, from your real seabed up to the plan.
@@ -17,8 +17,8 @@
 --      for the next batch, and carries on exactly where he stopped.
 
 local PROTOCOL   = "tanis-rigger"
-local STATE_FILE = "rigger.state"
-local CFG_FILE   = "rigger.cfg"
+local STATE_FILE = "weaver.state"
+local CFG_FILE   = "weaver.cfg"
 local MARKER     = "minecraft:dirt" -- block used by "test" to mark the corners
 local FUEL_TOPUP = 20000            -- fuel to top up to at every dock visit
 local SLOTS_FOR_BLOCKS = 15         -- one slot kept free for junk/fuel
@@ -44,7 +44,7 @@ local function save() writeT(STATE_FILE, S) end
 ---------------------------------------------------------------------------
 -- Plan
 ---------------------------------------------------------------------------
-local RP = dofile("riggerplan.lua")
+local RP = dofile("weaverplan.lua")
 local P -- { info, ext = {{x,z,ch}}, layers = { [n] = {{z,x0,rle}} } }
 
 local function loadPlan(path) return RP.load(path) end
@@ -757,7 +757,7 @@ local function mainLoop()
     applyCtrl()
     if rebootWanted() and (atDock() or S.lost) then doReboot() end
     if S.lost then
-      setStatus("lost", "Carry me back to the dock, then type: rigger found")
+      setStatus("lost", "Carry me back to the dock, then type: weaver found")
       waitFor(5)
     elseif S.want == "test" then
       S.want = "idle"; save()
@@ -810,7 +810,7 @@ local function mainLoop()
       if not atDock() then setStatus("returning", "Heading home"); safeHome() end
       if S.phase == "done" then setStatus("done", "Build finished. " .. (S.placed or 0) .. " blocks placed.")
       elseif S.status ~= "docked" or not ((S.msg or ""):find("^Marker") or (S.msg or ""):find("stopped")) then
-        setStatus("docked", "Waiting. Say: island rigger build | test | clear")
+        setStatus("docked", "Waiting. Say: island weaver build | test | clear")
       end
       waitFor(10)
     end
@@ -894,7 +894,7 @@ end
 
 local function setup()
   term.clear(); term.setCursorPos(1, 1)
-  print("RIGGER SETUP  (use F3 for coordinates)")
+  print("WEAVER SETUP  (use F3 for coordinates)")
   local plan = ask("Plan file", "mossy.plan")
   local p = loadPlan(plan)
   print(("%s: %d blocks, %d layers, %dx%d"):format(p.info.name, p.info.blocks, p.info.layers,
@@ -918,12 +918,12 @@ local function setup()
   if not found and isContainer(turtle.inspectUp()) then found = "up" end
   if not found and isContainer(turtle.inspectDown()) then found = "down" end
   face(C.dh)
-  if not found then error("No supply barrel next to me. Place one and run rigger again.", 0) end
+  if not found then error("No supply barrel next to me. Place one and run weaver again.", 0) end
   C.supplyDir = found
   writeT(CFG_FILE, C)
   save()
   print("Setup saved. Supply barrel found.")
-  print("Next: island rigger test   (puts markers on the 8 corners)")
+  print("Next: island weaver test   (puts markers on the 8 corners)")
 end
 
 ---------------------------------------------------------------------------
@@ -934,7 +934,7 @@ if args[1] == "setup" or not C then
 end
 
 if not fs.exists("startup.lua") then
-  local f = fs.open("startup.lua", "w"); f.write('shell.run("rigger")\n'); f.close()
+  local f = fs.open("startup.lua", "w"); f.write('shell.run("weaver")\n'); f.close()
 end
 
 P = loadPlan(C.plan)

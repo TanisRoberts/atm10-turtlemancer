@@ -1,8 +1,8 @@
--- lumberjack.lua  --  Tigger, the tree farmer (CC:Tweaked, ATM10 / MC 1.21.1)
+-- lumberjack.lua  --  Woodpecker, the tree farmer (CC:Tweaked, ATM10 / MC 1.21.1)
 --
 -- Needs: a turtle with a diamond axe and a wireless or ender modem. GPS towers make him unlosable
 --        (optional: without them he finds his way from his map, like before).
--- Zone:  mark the edge of the tree farm with slabs on the ground (any slab). Tigger walks on the
+-- Zone:  mark the edge of the tree farm with slabs on the ground (any slab). Woodpecker walks on the
 --        ground inside it. Start him inside the zone, next to his dock barrel.
 -- Dock:  a barrel storage knows as a dock (/dock on storage, or the coal marker in /setup).
 --        Storage takes his logs and keeps the barrel stocked with fuel.
@@ -13,9 +13,9 @@
 --   * every EVERY minutes: walks the lanes, chops every grown tree (and the leaves next to the trunk,
 --     which drops saplings), plants saplings where trees should be, picks up drops
 --   * unloads at the dock (keeps KEEP_SAPLINGS saplings), refuels; unloads mid-round if full
--- Control: the Farmhand computer, chat (island tigger rounds|survey|stop|go|found), or here:
+-- Control: the Farmhand computer, chat (island woodpecker rounds|survey|stop|go|found), or here:
 --   lumberjack rounds | survey (new map from where he stands) | stop | go | found
--- Settings: tigger.env (edit live, or from the Farmhand).
+-- Settings: woodpecker.env (edit live, or from the Farmhand).
 
 local B = dofile("farmbot.lua")
 local S
@@ -438,7 +438,7 @@ local R = {
 }
 
 local args = { ... }
-B.run({ name = "Tigger", role = "lumberjack", prog = "lumberjack",
-        env = { file = "tigger.env", title = "Tigger (lumberjack)", defaults = DEFAULTS },
+B.run({ name = "Woodpecker", role = "lumberjack", prog = "lumberjack",
+        env = { file = "woodpecker.env", title = "Woodpecker (lumberjack)", defaults = DEFAULTS },
         state = "lumberjack.state", zone = "lumberjack.zone", onLoad = function(st) S = st end },
       R, args)

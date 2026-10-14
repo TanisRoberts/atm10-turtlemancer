@@ -1,4 +1,4 @@
--- farmbot.lua  --  the engine under every farm turtle (Figger, Tigger). Loaded with dofile().
+-- farmbot.lua  --  the engine under every farm turtle (Partridge, Woodpecker). Loaded with dofile().
 --
 -- What it gives a farm turtle:
 --   * <name>.env settings, made on first run, edited live (same rules as the other .env files)

@@ -4,7 +4,7 @@
 --   * An Advanced Computer
 --   * Storage: any chests/barrels/drawers, each with a wired modem, joined with networking cable
 --   * INPUT chest(s) and one OUTPUT chest, also on the network
---   * Optional: a FUEL barrel for each Digger (each kept at exactly one refill)
+--   * Optional: a FUEL barrel for each Canary (each kept at exactly one refill)
 --   * Optional: an advanced monitor wall (touch screen). Normal monitors work as display-only.
 --   * A wireless or ender modem, so it can talk to the mainframe and the turtles. The smelter can use the
 --     wired cable instead: storage talks on every modem and passes the smelter's news on to the mainframe
@@ -18,7 +18,7 @@
 --     x1 / x16 / Stack buttons and paging (scroll wheel, arrow keys) work the same as on the monitor.
 --   * Commands: type / in the search bar to see them
 --     (/assign /setup /rescan /drawers /tidy /fuelinfo /lock /unlock)
---   * /assign: the list of inventories that have a job (input, output, dock, Digger fuel, Rigger supply,
+--   * /assign: the list of inventories that have a job (input, output, dock, Canary fuel, Weaver supply,
 --     pocket dump/restock, drawers, ignore), picked by network name (type to narrow it down, e.g.
 --     "barrel_74" or "drawer") or by dropping one item in. Add, edit (type + nickname) or delete them.
 --     ANY number of inputs. Everything not on the list is storage. (/dock /fuel /pocket /addinput
@@ -27,7 +27,7 @@
 --
 -- Storage is the only computer that moves items in or out of storage. Over the network it:
 --   * broadcasts its status (fill level, item totals, junk caps) for the mainframe and smelter
---   * fills Rigger's supply barrel when he asks, and keeps each Digger fuel barrel at one refill
+--   * fills Weaver's supply barrel when he asks, and keeps each Canary fuel barrel at one refill
 --   * carries out the smelter's moves (furnace output back to storage, inputs and fuel in)
 --   * the mainframe's butler: empties the POCKET DUMP chest ($dump) and fills the POCKET RESTOCK chest
 --     (torch top-ups). Both chests touch the mainframe's Inventory Manager and sit on this cable.
@@ -58,7 +58,7 @@ local FUEL_VALUES = {
   { "minecraft:coal", 80 },
   { "minecraft:charcoal", 80 },
 }
--- Digger fuel barrels never take the last of these: the smelter burns them in the furnaces
+-- Canary fuel barrels never take the last of these: the smelter burns them in the furnaces
 local SMELTER_RESERVE = { ["minecraft:coal"] = 64, ["minecraft:charcoal"] = 64 }
 
 ---------------------------------------------------------------------------
@@ -80,6 +80,11 @@ local function loadCfg()
   cfg.drawers = cfg.drawers or {}   -- assigned as drawers (bulk storage) by hand, besides those found by name
   cfg.ignored = cfg.ignored or {}   -- never touched or counted
   cfg.names = cfg.names or {}       -- network name -> nickname, shown in /assign
+  -- Saved before the turtles were renamed (Oct 2026)
+  if cfg.rigger and not cfg.weaver then cfg.weaver = cfg.rigger end
+  cfg.rigger = nil
+  if cfg.diggerBarrels and not cfg.canaryBarrels then cfg.canaryBarrels = cfg.diggerBarrels end
+  cfg.diggerBarrels = nil
 end
 local function saveCfg()
   local f = fs.open(CONFIG, "w")
@@ -119,7 +124,7 @@ local function listAdd(list, n)
 end
 
 local function isSpecial(n)
-  if n == cfg.output or n == cfg.rigger or n == cfg.pocketIn or n == cfg.pocketOut then return true end
+  if n == cfg.output or n == cfg.weaver or n == cfg.pocketIn or n == cfg.pocketOut then return true end
   for _, d in ipairs(cfg.docks or {}) do if d == n then return true end end
   for _, d in ipairs(cfg.fuels) do if d == n then return true end end
   for _, d in ipairs(cfg.ignored or {}) do if d == n then return true end end
@@ -136,10 +141,10 @@ local TYPES = {
     about = "Where items you take from the screens go. Only one." },
   { key = "dock",      label = "Dock",           short = "Dock",    tag = "DOCK",   col = colours.yellow,
     about = "Turtle/machine dock: ~32 coal kept in it (plus its keep list), everything else taken." },
-  { key = "fuel",      label = "Digger fuel",    short = "Fuel",    tag = "FUEL",   col = colours.orange,
-    about = "Kept at one Digger refill (lava, coal blocks, coal...). One per Digger." },
-  { key = "rigger",    label = "Rigger supply",  short = "Rigger",  tag = "RIGGER", col = colours.purple,
-    about = "Filled with what Rigger asks for. Only one." },
+  { key = "fuel",      label = "Canary fuel",    short = "Fuel",    tag = "FUEL",   col = colours.orange,
+    about = "Kept at one Canary refill (lava, coal blocks, coal...). One per Canary." },
+  { key = "weaver",    label = "Weaver supply",  short = "Weaver",  tag = "WEAVER", col = colours.purple,
+    about = "Filled with what Weaver asks for. Only one." },
   { key = "pocketIn",  label = "Pocket dump",    short = "P.dump",  tag = "P.DUMP", col = colours.pink,
     about = "The butler's $dump lands here and gets sorted. Only one." },
   { key = "pocketOut", label = "Pocket restock", short = "P.stock", tag = "P.STCK", col = colours.magenta,
@@ -152,7 +157,7 @@ local TYPES = {
 local TYPE_BY = {}
 for _, t in ipairs(TYPES) do TYPE_BY[t.key] = t end
 local LISTS   = { input = "inputs", dock = "docks", fuel = "fuels", drawer = "drawers", ignore = "ignored" }
-local SINGLES = { output = "output", rigger = "rigger", pocketIn = "pocketIn", pocketOut = "pocketOut" }
+local SINGLES = { output = "output", weaver = "weaver", pocketIn = "pocketIn", pocketOut = "pocketOut" }
 
 local function typeOf(n)
   for key, field in pairs(SINGLES) do if cfg[field] == n then return key end end
@@ -165,7 +170,7 @@ local function unassign(n)
   for _, field in pairs(SINGLES) do if cfg[field] == n then cfg[field] = nil end end
   for _, field in pairs(LISTS) do if cfg[field] then listRemove(cfg[field], n) end end
   if cfg.dockKeep then cfg.dockKeep[n] = nil end
-  for _, b in pairs(cfg.diggerBarrels or {}) do
+  for _, b in pairs(cfg.canaryBarrels or {}) do
     if b.fuel == n then b.fuel = nil end
     if b.dump == n then b.dump = nil end
   end
@@ -235,9 +240,9 @@ local picking, workerBusy = false, false   -- workerBusy: a sorting pass is runn
 local MARKERS = {
   { key = "input",  item = "minecraft:stick",       what = "1 stick",       label = "INPUT",        need = true, many = true },
   { key = "output", item = "minecraft:dirt",        what = "1 dirt",        label = "OUTPUT",       need = true },
-  { key = "dump",   item = "minecraft:cobblestone", what = "1 cobblestone", label = "DIGGER DUMP", many = true },
-  { key = "fuel",   item = "minecraft:lava_bucket", what = "1 lava bucket", label = "DIGGER FUEL", many = true },
-  { key = "rigger", item = "minecraft:brick",       what = "1 brick",       label = "RIGGER SUPPLY" },
+  { key = "dump",   item = "minecraft:cobblestone", what = "1 cobblestone", label = "CANARY DUMP", many = true },
+  { key = "fuel",   item = "minecraft:lava_bucket", what = "1 lava bucket", label = "CANARY FUEL", many = true },
+  { key = "weaver", item = "minecraft:brick",       what = "1 brick",       label = "WEAVER SUPPLY" },
   { key = "docks",  item = "minecraft:coal",        what = "1 coal",        label = "TURTLE DOCK", many = true },
   { key = "pocketIn",  item = "minecraft:flint",   what = "1 flint",       label = "POCKET DUMP",    keep = true },
   { key = "pocketOut", item = "minecraft:feather", what = "1 feather",     label = "POCKET RESTOCK", keep = true },
@@ -292,7 +297,7 @@ local function setup()
       end
     end
     if ok then
-      local types = { input = "input", output = "output", dump = "input", fuel = "fuel", rigger = "rigger",
+      local types = { input = "input", output = "output", dump = "input", fuel = "fuel", weaver = "weaver",
         docks = "dock", pocketIn = "pocketIn", pocketOut = "pocketOut" }
       for _, m in ipairs(MARKERS) do
         for _, n in ipairs(f[m.key] or {}) do assign(n, types[m.key]) end
@@ -321,8 +326,8 @@ local info    = {}   -- item key -> { label, max }
 local items   = {}   -- sorted item summaries
 local byName  = {}   -- item id -> total count (all variants)
 local stats   = { used = 0, total = 0, kinds = 0, inv = 0 }
-local overCapList = {}  -- items storage has enough of (sent to Digger via the mainframe)
-local minerFuelLimit, riggerBill = nil, {}   -- heard over the network from Digger / Rigger
+local overCapList = {}  -- items storage has enough of (sent to Canary via the mainframe)
+local minerFuelLimit, weaverBill = nil, {}   -- heard over the network from Canary / Weaver
 
 local function keyOf(it) return it.name .. (it.nbt and ("#" .. it.nbt) or "") end
 
@@ -395,12 +400,12 @@ local function buildItems()
     items[#items + 1] = e
     byName[e.name] = (byName[e.name] or 0) + e.count
   end
-  -- Anything Rigger's build still needs is kept until storage has enough of it
-  local bill = riggerBill or {}
+  -- Anything Weaver's build still needs is kept until storage has enough of it
+  local bill = weaverBill or {}
   for name, c in pairs(byName) do
     if c >= math.max(JUNK_CAP, bill[name] or 0) then overCap[#overCap + 1] = name end
   end
-  overCapList = overCap -- broadcast; the mainframe's miner panel passes it to Digger
+  overCapList = overCap -- broadcast; the mainframe's miner panel passes it to Canary
   if cfg.sort == "az" then
     table.sort(items, function(a, b)
       local la, lb = a.label:lower(), b.label:lower()
@@ -666,7 +671,7 @@ local function retrieve(key, amount, target, toSlot)
   return got, full
 end
 
--- Emptiest Digger fuel barrel, in fuel units (see topUpFuel)
+-- Emptiest Canary fuel barrel, in fuel units (see topUpFuel)
 local fuelUnits = 0
 -- Keep each turtle dock stocked with ~32 coal worth of fuel (charcoal first, then coal)
 local function topUpDocks()
@@ -699,7 +704,7 @@ local function topUpDocks()
   return changed
 end
 
--- Keep every Digger fuel barrel at (as close as possible to) one refill.
+-- Keep every Canary fuel barrel at (as close as possible to) one refill.
 -- fuelUnits = the emptiest barrel, for the screen and the mainframe's "running dry" alert.
 local function topUpFuel()
   if #cfg.fuels == 0 then return false end
@@ -790,26 +795,26 @@ local function runNeuralOps(ops)
   return results
 end
 
--- Fill Rigger's supply barrel with what he asked for (items + fuel units).
-local lastRiggerSeq = nil
-local riggerReq = nil            -- latest "need" message from Rigger (set by the network loop)
-local function replyRigger(msg)
+-- Fill Weaver's supply barrel with what he asked for (items + fuel units).
+local lastWeaverseq = nil
+local weaverReq = nil            -- latest "need" message from Weaver (set by the network loop)
+local function replyWeaver(msg)
   if rednet.isOpen() then rednet.broadcast(msg, "tanis-rigger") end
 end
-local function supplyRigger()
-  local req = riggerReq
-  if not req or req.seq == lastRiggerSeq then return false end
-  lastRiggerSeq = req.seq
+local function supplyWeaver()
+  local req = weaverReq
+  if not req or req.seq == lastWeaverseq then return false end
+  lastWeaverseq = req.seq
   local got, missing = {}, {}
-  if not cfg.rigger then
-    replyRigger({ type = "supplied", seq = req.seq, got = got, missing = req.items or {} })
+  if not cfg.weaver then
+    replyWeaver({ type = "supplied", seq = req.seq, got = got, missing = req.items or {} })
     return false
   end
-  depositFrom(cfg.rigger)  -- take back whatever he handed in, then load the next batch
+  depositFrom(cfg.weaver)  -- take back whatever he handed in, then load the next batch
   buildItems()
   for _, e in ipairs(req.items or {}) do
     local name, want = e[1], e[2]
-    local moved = retrieve(name, want, cfg.rigger)
+    local moved = retrieve(name, want, cfg.weaver)
     if moved > 0 then got[name] = moved end
     if moved < want then missing[#missing + 1] = { name, want - moved } end
   end
@@ -818,13 +823,13 @@ local function supplyRigger()
     local name, v = fv[1], fv[2]
     local n = math.floor(units / v)
     if n > 0 and (byName[name] or 0) > 0 then
-      local moved = retrieve(name, math.min(n, byName[name]), cfg.rigger)
+      local moved = retrieve(name, math.min(n, byName[name]), cfg.weaver)
       units = units - moved * v
       if moved > 0 then got[name] = (got[name] or 0) + moved end
     end
   end
   if units >= 80 then missing[#missing + 1] = { "fuel", units } end
-  replyRigger({ type = "supplied", seq = req.seq, got = got, missing = missing })
+  replyWeaver({ type = "supplied", seq = req.seq, got = got, missing = missing })
   return true
 end
 
@@ -884,7 +889,7 @@ local COMMANDS = {
   { "/rescan",   "re-read every chest now" },
   { "/drawers",  "what storage sees in the drawers" },
   { "/tidy",     "fill big drawers first; barrels in" },
-  { "/fuelinfo", "Digger fuel barrels and fuel stock" },
+  { "/fuelinfo", "Canary fuel barrels and fuel stock" },
   { "/lock",     "lock the monitor (padlock screen)" },
   { "/unlock",   "lift a /lock" },
 }
@@ -1193,7 +1198,7 @@ end
 
 -- Wait for the next tick, waking early when the network hands us work
 local function waitTick()
-  if not paused and (#jobs > 0 or (riggerReq and riggerReq.seq ~= lastRiggerSeq)
+  if not paused and (#jobs > 0 or (weaverReq and weaverReq.seq ~= lastWeaverseq)
     or (pocketReq and pocketReq.seq ~= lastPocketSeq)) then return end
   local t = os.startTimer(TICK)
   while true do
@@ -1217,7 +1222,7 @@ local function workerLoop()
       if moved > 0 then buildItems() end
       if topUpFuel() then buildItems() end
       if topUpDocks() then buildItems() end
-      if supplyRigger() then buildItems() end
+      if supplyWeaver() then buildItems() end
       if fillPocket() then buildItems() end
       if #jobs > 0 then
         while #jobs > 0 do
@@ -1244,7 +1249,7 @@ local function workerLoop()
 end
 
 ---------------------------------------------------------------------------
--- Digger barrel probe: a Digger takes 1 item from its fuel barrel and drops it in its dump barrel
+-- Canary barrel probe: a Canary takes 1 item from its fuel barrel and drops it in its dump barrel
 -- while sorting is paused. The barrel that lost it is its fuel barrel, the one that gained it its
 -- dump barrel; both get registered (fuel barrel kept topped up, dump barrel emptied like an input).
 ---------------------------------------------------------------------------
@@ -1263,8 +1268,8 @@ local function snapshotAll()
   return snap
 end
 
-local function registerDiggerBarrels(id, fuel, dump)
-  cfg.diggerBarrels = cfg.diggerBarrels or {}
+local function registerCanaryBarrels(id, fuel, dump)
+  cfg.canaryBarrels = cfg.canaryBarrels or {}
   if fuel then
     listRemove(cfg.inputs, fuel); listRemove(cfg.docks or {}, fuel)
     listAdd(cfg.fuels, fuel)
@@ -1273,7 +1278,7 @@ local function registerDiggerBarrels(id, fuel, dump)
     listRemove(cfg.fuels, dump); listRemove(cfg.docks or {}, dump)
     listAdd(cfg.inputs, dump)
   end
-  cfg.diggerBarrels[tostring(id)] = { fuel = fuel, dump = dump }
+  cfg.canaryBarrels[tostring(id)] = { fuel = fuel, dump = dump }
   saveCfg()
   scanAll(); buildItems()
 end
@@ -1295,7 +1300,7 @@ local function probeFinish(from, item)
   elseif fuelN ~= 1 or dumpN ~= 1 then
     msg = "Couldn't tell which barrels moved. Are both on the storage cable with modems on?"
   else
-    registerDiggerBarrels(from, fuel, dump)
+    registerCanaryBarrels(from, fuel, dump)
     ok, msg = true, "Storage knows my barrels: fuel " .. fuel .. ", dump " .. dump
   end
   paused = false
@@ -1314,7 +1319,7 @@ local function netLoop()
   if not wireless then print("No wireless modem: the mainframe and turtles can't reach storage.") end
   while true do
     local from, msg, proto = rednet.receive(1)
-    if probe and os.clock() > probe.untilT then probe = nil; paused = false end -- Digger never finished
+    if probe and os.clock() > probe.untilT then probe = nil; paused = false end -- Canary never finished
     if type(msg) == "table" and proto == "tanis-miner" and msg.type == "barrel_probe" and msg.id == from then
       if msg.step == "start" and not probe then
         paused = true
@@ -1329,9 +1334,9 @@ local function netLoop()
       if proto == "tanis-miner" and msg.type == "status" then
         minerFuelLimit = tonumber(msg.fuelLimit) or minerFuelLimit
       elseif proto == "tanis-rigger" and msg.type == "status" then
-        riggerBill = type(msg.bill) == "table" and msg.bill or riggerBill
+        weaverBill = type(msg.bill) == "table" and msg.bill or weaverBill
       elseif proto == "tanis-rigger" and msg.type == "need" then
-        riggerReq = msg
+        weaverReq = msg
         os.queueEvent("storage_work")
       elseif proto == BASE and msg.type == "pocket_fill" and msg.seq then
         pocketReq = msg
@@ -1574,14 +1579,14 @@ function runCommand(cmd)
     elseif found == "/fuelinfo" then
       print("Rescanning..."); scanAll(); buildItems()
       local target = minerFuelLimit or REFILL
-      print(("Each Digger fuel barrel is kept at %d fuel"):format(target))
-      print(minerFuelLimit and "(a Digger's full tank)." or "(default: no Digger heard yet).")
+      print(("Each Canary fuel barrel is kept at %d fuel"):format(target))
+      print(minerFuelLimit and "(a Canary's full tank)." or "(default: no Canary heard yet).")
       if not minerFuelLimit then
-        printError("Storage hasn't heard a Digger: it needs a wireless or ender modem on it.")
+        printError("Storage hasn't heard a Canary: it needs a wireless or ender modem on it.")
       end
       local value = {}
       for _, fv in ipairs(FUEL_VALUES) do value[fv[1]] = fv[2] end
-      if #cfg.fuels == 0 then printError("No fuel barrels set: /assign one as Digger fuel.") end
+      if #cfg.fuels == 0 then printError("No fuel barrels set: /assign one as Canary fuel.") end
       for _, b in ipairs(cfg.fuels) do
         local have, parts = 0, {}
         for _, it in pairs(call(b, "list") or {}) do

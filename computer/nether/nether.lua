@@ -1,35 +1,35 @@
--- nether.lua  --  the Nether Foreman: Pigger control + the Nether dock barrels (CC:Tweaked, ATM10 / MC 1.21.1)
+-- nether.lua  --  the Nether Foreman: Firecrest control + the Nether dock barrels (CC:Tweaked, ATM10 / MC 1.21.1)
 --
--- Lives in the Nether, next to Pigger's dock. Needs: an advanced computer with an ender (or wireless)
--- modem for the Piggers, a WIRED modem on the Nether cable, and an advanced monitor touching it
+-- Lives in the Nether, next to Firecrest's dock. Needs: an advanced computer with an ender (or wireless)
+-- modem for the Firecrests, a WIRED modem on the Nether cable, and an advanced monitor touching it
 -- (optional: the computer's own screen works too, click with the mouse). Force-load its chunk.
 --
 -- Barrels on the Nether cable, each given a job with /assign (the same screen as storage's):
---   Dock    one per Pigger: he empties into it; I take everything out and put in what he asks for
+--   Dock    one per Firecrest: he empties into it; I take everything out and put in what he asks for
 --   Output  goes home: barrel > hopper > ender chest (its twin at home feeds storage's input)
 --   Stock   what stays in the Nether (spare buckets, lava buckets, coal...): see Rules
---   Input   drop things in by hand: sorted like Pigger's haul
+--   Input   drop things in by hand: sorted like Firecrest's haul
 --   Ignore  never touched
--- Everything Pigger brings (and anything in an Input) goes to Stock if the Rules keep some of it and
+-- Everything Firecrest brings (and anything in an Input) goes to Stock if the Rules keep some of it and
 -- Stock is short, else home through the Output. Stock above its keep count goes home too.
 --
--- Pigger: one card each on the overview (state, depth, fuel, cargo); tap one for its layers
--- (presets or Min/Max/rings), START, STOP + DOCK, reboot, retire. Numbers Pigger-01, -02... like
--- the Foreman's Diggers (a retired number is never handed out again). Saved in nether.cfg.
--- Rules page: when Piggers drink lava (under 25% until 75% by default), what the Nether keeps and
--- what Pigger throws away underground. Typed on the computer: /keep /junk /unjunk /assign /presets
+-- Firecrest: one card each on the overview (state, depth, fuel, cargo); tap one for its layers
+-- (presets or Min/Max/rings), START, STOP + DOCK, reboot, retire. Numbers Firecrest-01, -02... like
+-- the Foreman's Canaries (a retired number is never handed out again). Saved in nether.cfg.
+-- Rules page: when Firecrests drink lava (under 25% until 75% by default), what the Nether keeps and
+-- what Firecrest throws away underground. Typed on the computer: /keep /junk /unjunk /assign /presets
 -- (/help lists them all).
 
 local PROTOCOL   = "tanis-nether"
 local BASE       = "tanis-base"
 local CONFIG     = "nether.cfg"
 local SEND_EVERY = 3     -- seconds between order broadcasts
-local STALE      = 15    -- seconds without news before a Pigger greys out
+local STALE      = 15    -- seconds without news before a Firecrest greys out
 local TEXT_SCALE = 0.5
 local TICK       = 2     -- seconds between barrel passes
-local HOLD_FOR   = 90    -- seconds a dock stays untouched while its Pigger takes his supplies
+local HOLD_FOR   = 90    -- seconds a dock stays untouched while its Firecrest takes his supplies
 
-local RING_CAP   = 100   -- furthest ring a Pigger will mine (matches pigger.lua)
+local RING_CAP   = 100   -- furthest ring a Firecrest will mine (matches firecrest.lua)
 local DEF_R2     = 24    -- default outer ring (49x49: about 3x3 chunks)
 local Y_MIN, Y_MAX = 6, 120
 local NAME_MAX   = 16
@@ -41,7 +41,7 @@ local DEFAULT_PRESETS = {
   { name = "Above lava",  minY = 33, maxY = 44, r1 = 1, r2 = DEF_R2 },
   { name = "High quartz", minY = 60, maxY = 74, r1 = 1, r2 = DEF_R2 },
 }
--- What the Nether keeps by default (the rest goes home), and what Pigger throws away underground
+-- What the Nether keeps by default (the rest goes home), and what Firecrest throws away underground
 local DEFAULT_KEEP = {
   ["minecraft:bucket"] = 4, ["minecraft:lava_bucket"] = 16, ["minecraft:coal"] = 64,
   ["minecraft:charcoal"] = 64, ["minecraft:coal_block"] = 16, ["minecraft:blaze_rod"] = 64,
@@ -56,20 +56,25 @@ local FUELS = {
 }
 
 ---------------------------------------------------------------------------
--- Registry: every Pigger ever seen, keyed by computer ID (the code says "digger": it's Foreman's)
+-- Registry: every Firecrest ever seen, keyed by computer ID
 --   { num, label, retired, want, minY, maxY, r1, r2, seq, pMin, pMax, pR1, pR2 }
 --   minY/maxY/r1/r2 = the order it's running; pMin/pMax/pR1/pR2 = picked on screen, sent on START.
 -- Presets: list of { name, minY, maxY, r1, r2 }.
 ---------------------------------------------------------------------------
-local cfg = { nextNum = 1, diggers = {}, retiredNums = {}, presets = nil }
+local cfg = { nextNum = 1, firecrests = {}, retiredNums = {}, presets = nil }
 local function copyPreset(p) return { name = p.name, minY = p.minY, maxY = p.maxY, r1 = p.r1, r2 = p.r2 } end
 local function loadCfg()
   if fs.exists(CONFIG) then
     local f = fs.open(CONFIG, "r"); local t = textutils.unserialize(f.readAll()); f.close()
     if type(t) == "table" then
       cfg.nextNum = tonumber(t.nextNum) or 1
-      cfg.diggers = type(t.diggers) == "table" and t.diggers or {}
+      cfg.firecrests = type(t.firecrests) == "table" and t.firecrests
+        or type(t.diggers) == "table" and t.diggers or {}  -- saved before the Oct 2026 rename
       cfg.retiredNums = type(t.retiredNums) == "table" and t.retiredNums or {}
+      -- Labels from before the rename (Pigger-04 -> Firecrest-04)
+      local function rename(l) return type(l) == "string" and (l:gsub("^Pigger%-", "Firecrest-")) or l end
+      for _, dd in pairs(cfg.firecrests) do dd.label = rename(dd.label) end
+      for n, l in pairs(cfg.retiredNums) do cfg.retiredNums[n] = rename(l) end
       cfg.presets = type(t.presets) == "table" and t.presets or nil
       for _, k in ipairs({ "docks", "outputs", "stocks", "inputs", "ignored", "names", "dockFor", "keep",
                           "junk", "hungryAt", "fullAt", "sent" }) do cfg[k] = t[k] end
@@ -87,7 +92,7 @@ local function loadCfg()
     for _, p in ipairs(DEFAULT_PRESETS) do cfg.presets[#cfg.presets + 1] = copyPreset(p) end
   end
   for _, p in ipairs(cfg.presets) do p.r1, p.r2 = p.r1 or 1, p.r2 or DEF_R2 end
-  for _, dd in pairs(cfg.diggers) do  -- entries from before rings were adjustable
+  for _, dd in pairs(cfg.firecrests) do  -- entries from before rings were adjustable
     dd.r1, dd.r2 = dd.r1 or 1, dd.r2 or DEF_R2
     dd.pR1, dd.pR2 = dd.pR1 or dd.r1, dd.pR2 or dd.r2
   end
@@ -102,39 +107,39 @@ local function newEntry(num)
 end
 local function numTaken(num, exceptId)
   if cfg.retiredNums[num] then return true end
-  for id, d in pairs(cfg.diggers) do
+  for id, d in pairs(cfg.firecrests) do
     if id ~= exceptId and d.num == num and not d.retired then return true end
   end
   return false
 end
-local function nameOf(num) return ("Pigger-%02d"):format(num) end
-local REBOOT_WAIT = 600000 -- ms: stop asking a Pigger to reboot if it hasn't confirmed by then
+local function nameOf(num) return ("Firecrest-%02d"):format(num) end
+local REBOOT_WAIT = 600000 -- ms: stop asking a Firecrest to reboot if it hasn't confirmed by then
 
 local live = {}        -- id -> { s = last status, seen = os.clock() }
-local radioOK = nil    -- false = no ender/wireless modem on this computer: Piggers can't hear it
+local radioOK = nil    -- false = no ender/wireless modem on this computer: Firecrests can't hear it
 local capped = {}      -- junk storage has plenty of (from the storage computer)
 local storageSeen = nil
 local sendNow = {}     -- id -> true: send its order on the next pass
 
--- A Pigger asks for a number. Same computer keeps its number; a hint (its old label) is honoured
+-- A Firecrest asks for a number. Same computer keeps its number; a hint (its old label) is honoured
 -- if free; otherwise the next number. Retired numbers are never reused.
 local function assign(id, hint)
-  local d = cfg.diggers[id]
+  local d = cfg.firecrests[id]
   if d and not d.retired then return d.num end
   local num = tonumber(hint)
   if not num or num < 1 or numTaken(num, id) then
     num = cfg.nextNum
     while numTaken(num, id) do num = num + 1 end
   end
-  cfg.diggers[id] = newEntry(num)
-  cfg.diggers[id].label = nameOf(num)
+  cfg.firecrests[id] = newEntry(num)
+  cfg.firecrests[id].label = nameOf(num)
   cfg.nextNum = math.max(cfg.nextNum, num + 1)
   saveCfg()
   return num
 end
 
 local function retire(id)
-  local d = cfg.diggers[id]
+  local d = cfg.firecrests[id]
   if not d then return end
   d.retired, d.want, d.seq = true, "dock", os.epoch("utc")
   cfg.retiredNums[d.num] = d.label or nameOf(d.num)
@@ -143,7 +148,7 @@ local function retire(id)
 end
 
 local function order(id, want)
-  local d = cfg.diggers[id]
+  local d = cfg.firecrests[id]
   if not d or d.retired then return end
   d.want = want
   if want == "run" then d.minY, d.maxY, d.r1, d.r2 = d.pMin, d.pMax, d.pR1, d.pR2 end
@@ -152,9 +157,9 @@ local function order(id, want)
   sendNow[id] = true
 end
 
--- Ask a Pigger to reboot (it does so between blocks, then carries on). One fresh token per press.
+-- Ask a Firecrest to reboot (it does so between blocks, then carries on). One fresh token per press.
 local function requestReboot(id)
-  local d = cfg.diggers[id]
+  local d = cfg.firecrests[id]
   if not d then return end
   d.reboot, d.rebootAt = os.epoch("utc"), os.epoch("utc")
   d.rebootSeen = nil
@@ -170,13 +175,13 @@ local function listAdd(list, n) for _, x in ipairs(list) do if x == n then retur
 
 local TYPES = {
   { key = "dock",   label = "Dock",   short = "Dock",   tag = "DOCK",   col = colours.yellow,
-    about = "Pigger's barrel: I empty it, and put in a bucket or fuel when he asks. One per Pigger." },
+    about = "Firecrest's barrel: I empty it, and put in a bucket or fuel when he asks. One per Firecrest." },
   { key = "output", label = "Output", short = "Output", tag = "OUTPUT", col = colours.cyan,
     about = "Goes home: barrel > hopper > ender chest. Everything the Nether doesn't keep." },
   { key = "stock",  label = "Stock",  short = "Stock",  tag = "STOCK",  col = colours.lime,
     about = "Stays in the Nether: what the Rules keep (spare buckets, fuel). Extra goes home." },
   { key = "input",  label = "Input",  short = "Input",  tag = "INPUT",  col = colours.lightBlue,
-    about = "Drop things in by hand: kept or sent home like Pigger's haul." },
+    about = "Drop things in by hand: kept or sent home like Firecrest's haul." },
   { key = "ignore", label = "Ignore", short = "Ignore", tag = "IGNORE", col = colours.lightGrey,
     about = "Never touched: I pretend it isn't there." },
 }
@@ -222,7 +227,7 @@ end
 local paused, workerBusy = false, false   -- paused: /assign is watching for a dropped item
 local barrel = { stock = {}, outFree = 0, outSlots = 0, outFull = false, docks = {}, seen = {} }
 local requests = {}    -- dock requests waiting for the worker: { id, seq, bucket, fuel }
-local holds = {}       -- dock name -> { id, untilT }: left alone while its Pigger takes his supplies
+local holds = {}       -- dock name -> { id, untilT }: left alone while its Firecrest takes his supplies
 local lastReply = {}   -- id -> the last dock_ready sent (repeated if he asks again with the same seq)
 local servedSeq = {}   -- id -> seq of the last request taken on
 
@@ -326,7 +331,7 @@ local function dockOf(id)
   return free
 end
 
--- A Pigger at his dock asks for a bucket and/or fuel: empty the dock, then load what Stock has
+-- A Firecrest at his dock asks for a bucket and/or fuel: empty the dock, then load what Stock has
 local function serveRequest(r)
   local dock = dockOf(r.id)
   local reply = { type = "dock_ready", id = r.id, seq = r.seq, got = {}, missing = {} }
@@ -466,7 +471,7 @@ local function posText(s)
   return ("%d, %d, %d"):format(s.pos.x, s.pos.y, s.pos.z)
 end
 local function stateOf(id)
-  local d, l = cfg.diggers[id], live[id]
+  local d, l = cfg.firecrests[id], live[id]
   if d and d.retired then return "RETIRED", K.grey end
   if not l then return "NO SIGNAL", K.grey end
   local m = STATES[l.s.state] or { tostring(l.s.state or "?"):upper(), K.white }
@@ -474,17 +479,17 @@ local function stateOf(id)
   return m[1], m[2]
 end
 
--- Sorted list of Pigger IDs to show
+-- Sorted list of Firecrest IDs to show
 local function digIds(showRetired)
   local out = {}
-  for id, d in pairs(cfg.diggers) do
+  for id, d in pairs(cfg.firecrests) do
     if (d.retired == true) == (showRetired == true) then out[#out + 1] = id end
   end
-  table.sort(out, function(a, b) return cfg.diggers[a].num < cfg.diggers[b].num end)
+  table.sort(out, function(a, b) return cfg.firecrests[a].num < cfg.firecrests[b].num end)
   if not showRetired then
     -- Heard on the air but never asked for a number: running an old program
     local odd = {}
-    for id in pairs(live) do if not cfg.diggers[id] then odd[#odd + 1] = id end end
+    for id in pairs(live) do if not cfg.firecrests[id] then odd[#odd + 1] = id end end
     table.sort(odd)
     for _, id in ipairs(odd) do out[#out + 1] = id end
   end
@@ -593,14 +598,14 @@ end
 local function drawOverview(w, h)
   local ids = digIds(ui.showRetired)
   if radioOK == false and not (ui.notice and os.clock() < ui.notice.untilT) then
-    ui.notice = { text = "No ender modem on me: Piggers can't hear me", colour = K.red, untilT = os.clock() + 1e9 }
+    ui.notice = { text = "No ender modem on me: Firecrests can't hear me", colour = K.red, untilT = os.clock() + 1e9 }
   end
   local active, retiredN = 0, 0
-  for _, dd in pairs(cfg.diggers) do if dd.retired then retiredN = retiredN + 1 else active = active + 1 end end
+  for _, dd in pairs(cfg.firecrests) do if dd.retired then retiredN = retiredN + 1 else active = active + 1 end end
   local outTxt = #cfg.outputs == 0 and "no output" or barrel.outFull and "OUTPUT FULL"
     or ("out %d/%d free"):format(barrel.outFree, barrel.outSlots)
   header(w, ui.showRetired and "NETHER  retired" or "NETHER FOREMAN",
-    ("%d pigger%s  %s"):format(active, active == 1 and "" or "s", outTxt))
+    ("%d firecrest%s  %s"):format(active, active == 1 and "" or "s", outTxt))
   if not (ui.notice and os.clock() < ui.notice.untilT) then
     local line, col = barrelLine()
     at(2, 2, pad(line, w - 2), col)
@@ -613,9 +618,9 @@ local function drawOverview(w, h)
   ui.scroll = math.max(1, math.min(ui.scroll, pages))
 
   if #ids == 0 then
-    local lines = ui.showRetired and { "No retired Piggers." } or {
-      "No Piggers yet.",
-      "Set up a turtle as a Pigger (startup.lua, pick Pigger):",
+    local lines = ui.showRetired and { "No retired Firecrests." } or {
+      "No Firecrests yet.",
+      "Set up a turtle as a Firecrest (startup.lua, pick Firecrest):",
       "it asks me for a number and shows up here.",
     }
     for i, l in ipairs(lines) do at(2, top + i, pad(l, w - 2), i == 1 and K.white or K.lightGrey) end
@@ -626,15 +631,15 @@ local function drawOverview(w, h)
     if not id then break end
     local l = live[id]
     local s = l and l.s
-    local dd = cfg.diggers[id] or { unknown = true, label = (s and s.label or "?") .. "?", num = 0 }
+    local dd = cfg.firecrests[id] or { unknown = true, label = (s and s.label or "?") .. "?", num = 0 }
     local y = top + (i - 1) * rowH
     local name = dd.label or nameOf(dd.num)
     local st, colour = stateOf(id)
     local stale = not l or os.clock() - l.seen > STALE
     local bg = (rowH == 3) and K.black or (i % 2 == 0 and K.grey or K.black)
     at(1, y, (" "):rep(w), K.white, bg)
-    at(2, y, pad(name, 10), stale and K.lightGrey or K.white, bg)
-    at(13, y, pad(st, 9), colour, bg)
+    at(2, y, pad(name, 12), stale and K.lightGrey or K.white, bg)   -- Firecrest-01 is 12 wide
+    at(15, y, pad(st, 9), colour, bg)
     -- the numbers: depth, fuel, cargo
     local bits = {}
     if s then
@@ -645,8 +650,8 @@ local function drawOverview(w, h)
       bits[#bits + 1] = ("cargo %s/16"):format(tostring(s.slots or "?"))
     end
     local arrow = w >= 56
-    local room = w - 22 - (arrow and 3 or 0)
-    if room > 4 then at(22, y, pad(table.concat(bits, "  "), room), stale and K.grey or K.lightGrey, bg) end
+    local room = w - 25 - (arrow and 3 or 0)
+    if room > 4 then at(25, y, pad(table.concat(bits, "  "), room), stale and K.grey or K.lightGrey, bg) end
     if arrow then at(w - 1, y, ">", K.cyan, bg) end
     if rowH == 3 then
       -- Line 2: what it's doing (or when it was last heard) on the left, where it is on the right
@@ -674,7 +679,7 @@ local function drawOverview(w, h)
         say((s and s.label or "It") .. ": old program. Hold Ctrl+R on it to update.", K.orange)
       end)
     else
-      hit(1, y, w, y + rowH - 1, function() ui.page, ui.id, ui.confirmRetire = "digger", id, nil end)
+      hit(1, y, w, y + rowH - 1, function() ui.page, ui.id, ui.confirmRetire = "firecrest", id, nil end)
     end
   end
 
@@ -685,7 +690,7 @@ local function drawOverview(w, h)
   if not ui.showRetired then
     x = smallButton(x, fy, "Dock all", K.red, function()
       for _, id in ipairs(digIds(false)) do order(id, "dock") end
-      say("Sent every Pigger home.", K.yellow)
+      say("Sent every Firecrest home.", K.yellow)
     end)
   end
   if retiredN > 0 or ui.showRetired then
@@ -698,8 +703,8 @@ local function drawOverview(w, h)
     x = smallButton(x, fy, "Barrels", K.cyan, function() openAssign() end)
     if active > 0 and w >= 64 then
       x = smallButton(x, fy, "Reboot all", K.purple, function()
-        for _, id in ipairs(digIds(false)) do if cfg.diggers[id] then requestReboot(id) end end
-        say("Reboot sent to every Pigger: they finish the block they're on first.", K.purple)
+        for _, id in ipairs(digIds(false)) do if cfg.firecrests[id] then requestReboot(id) end end
+        say("Reboot sent to every Firecrest: they finish the block they're on first.", K.purple)
       end, K.white)
     end
   end
@@ -715,10 +720,10 @@ local function drawOverview(w, h)
 end
 
 ---------------------------------------------------------------------------
--- One Pigger
+-- One Firecrest
 ---------------------------------------------------------------------------
 local function drawStatus(id, x, y, w, maxY)
-  local dd, l = cfg.diggers[id], live[id]
+  local dd, l = cfg.firecrests[id], live[id]
   local s = l and l.s
   local st, colour = stateOf(id)
   local function line(fn) if y <= maxY then fn(); end y = y + 1 end
@@ -799,7 +804,7 @@ end
 local function clampY(v) return math.max(Y_MIN, math.min(Y_MAX, v)) end
 local function clampR(v) return math.max(1, math.min(RING_CAP, v)) end
 
--- Pigger page: nudge the picked (not yet started) settings
+-- Firecrest page: nudge the picked (not yet started) settings
 local function adjust(dd, key, delta)
   if key == "pR1" or key == "pR2" then
     dd[key] = clampR(dd[key] + delta)
@@ -831,7 +836,7 @@ local function numRow(x, y, w, label, value, steps, fn, fieldFn, focused, buf)
 end
 
 local function drawControls(id, x, y, w, maxY)
-  local dd, l = cfg.diggers[id], live[id]
+  local dd, l = cfg.firecrests[id], live[id]
   local s = l and l.s
   local yStep = { { "-", -1 }, { "+", 1 } }
   local rStep = { { "-5", -5 }, { "+5", 5 } }
@@ -978,8 +983,8 @@ local function savePreset()
   local new = { name = e.name, minY = e.minY, maxY = e.maxY, r1 = e.r1, r2 = e.r2 }
   if e.idx and cfg.presets[e.idx] then
     local old = cfg.presets[e.idx]
-    -- Piggers that had the old version picked (not started yet) get the new one picked instead
-    for _, dd in pairs(cfg.diggers) do
+    -- Firecrests that had the old version picked (not started yet) get the new one picked instead
+    for _, dd in pairs(cfg.firecrests) do
       if isSelected(dd, old) then dd.pMin, dd.pMax, dd.pR1, dd.pR2 = new.minY, new.maxY, new.r1, new.r2 end
     end
     cfg.presets[e.idx] = new
@@ -988,7 +993,7 @@ local function savePreset()
   end
   saveCfg()
   ui.edit, ui.page = nil, "presets"
-  say(("Saved %s: pick it on a Pigger's page."):format(new.name))
+  say(("Saved %s: pick it on a Firecrest's page."):format(new.name))
 end
 
 local function deletePreset(idx)
@@ -996,7 +1001,7 @@ local function deletePreset(idx)
   if not p then return end
   table.remove(cfg.presets, idx)
   saveCfg()
-  say(("Deleted %s. Piggers keep what they're running."):format(p.name), K.orange)
+  say(("Deleted %s. Firecrests keep what they're running."):format(p.name), K.orange)
 end
 
 local function movePreset(idx, dir)
@@ -1115,7 +1120,7 @@ local function drawEdit(w, h, kind)
 end
 
 ---------------------------------------------------------------------------
--- Rules: when Piggers drink lava, what the Nether keeps, what Pigger throws away
+-- Rules: when Firecrests drink lava, what the Nether keeps, what Firecrest throws away
 ---------------------------------------------------------------------------
 local function keepList()
   local out = {}
@@ -1131,7 +1136,7 @@ local function setLava(key, v)
   v = math.max(5, math.min(95, v))
   if key == "hungryAt" then cfg.hungryAt = math.min(v, cfg.fullAt - 5) else cfg.fullAt = math.max(v, cfg.hungryAt + 5) end
   saveCfg()
-  for id in pairs(cfg.diggers) do sendNow[id] = true end
+  for id in pairs(cfg.firecrests) do sendNow[id] = true end
 end
 
 local function drawRules(w, h, kind)
@@ -1206,7 +1211,7 @@ local function drawRules(w, h, kind)
   -- Junk
   y = math.min(y, h - 1 - junkRows)
   if y <= h - 2 then
-    at(2, y, "PIGGER THROWS AWAY (underground)", K.grey); y = y + 1
+    at(2, y, "FIRECREST THROWS AWAY (underground)", K.grey); y = y + 1
     for i, l in ipairs(jlines) do
       if y > h - 1 then break end
       if y == h - 1 and i < #jlines then l = "... /unjunk <item> to take one off" end
@@ -1259,26 +1264,26 @@ local function runCommand(line)
     end
     if cmd == "junk" then cfg.junk[#cfg.junk + 1] = short end
     saveCfg()
-    for id in pairs(cfg.diggers) do sendNow[id] = true end
+    for id in pairs(cfg.firecrests) do sendNow[id] = true end
     ui.page = "rules"
-    say(cmd == "junk" and ("Pigger throws %s away now."):format(pretty(item)) or ("Pigger brings %s home now."):format(pretty(item)),
+    say(cmd == "junk" and ("Firecrest throws %s away now."):format(pretty(item)) or ("Firecrest brings %s home now."):format(pretty(item)),
       cmd == "junk" and K.orange or K.lime)
   elseif cmd == "new" or cmd == "add" then openEditor(nil, arg)
   elseif cmd == "reboot" or cmd == "restart" then
     local a = arg:lower()
-    if a == "" then say("/reboot <pigger number or name> or /reboot all", K.red); return end
+    if a == "" then say("/reboot <firecrest number or name> or /reboot all", K.red); return end
     local hits = {}
-    for id, dd in pairs(cfg.diggers) do
+    for id, dd in pairs(cfg.firecrests) do
       if not dd.retired then
         local lbl = (dd.label or nameOf(dd.num)):lower()
         if a == "all" or lbl == a or tonumber(a) == dd.num or lbl:find(a, 1, true) then hits[#hits + 1] = id end
       end
     end
-    if #hits == 0 then say("No Pigger matches " .. arg, K.red); return end
-    if a ~= "all" and #hits > 1 then say(arg .. " matches " .. #hits .. " Piggers: be more exact", K.red); return end
+    if #hits == 0 then say("No Firecrest matches " .. arg, K.red); return end
+    if a ~= "all" and #hits > 1 then say(arg .. " matches " .. #hits .. " Firecrests: be more exact", K.red); return end
     for _, id in ipairs(hits) do requestReboot(id) end
-    say(#hits == 1 and ((cfg.diggers[hits[1]].label or "Pigger") .. ": reboot sent.") or
-      ("Reboot sent to " .. #hits .. " Piggers."), K.purple)
+    say(#hits == 1 and ((cfg.firecrests[hits[1]].label or "Firecrest") .. ": reboot sent.") or
+      ("Reboot sent to " .. #hits .. " Firecrests."), K.purple)
   elseif cmd == "edit" or cmd == "delete" or cmd == "remove" or cmd == "del" then
     local idx = findPreset(arg)
     if not idx then say(arg == "" and ("/" .. cmd .. " <preset name>") or ("No preset called " .. arg), K.red); return end
@@ -1293,7 +1298,7 @@ end
 local function drawCmdBar(w, h)
   local y = h - 1
   if ui.page == "presets" or ui.page == "edit" then y = h end
-  if ui.page == "digger" and not ui.cmd then return end
+  if ui.page == "firecrest" and not ui.cmd then return end
   if ui.page == "presets" and not ui.cmd then return end
   if ui.page == "rules" and not ui.cmd then return end
   if ui.cmd then
@@ -1305,9 +1310,9 @@ local function drawCmdBar(w, h)
   end
 end
 
-local function drawPigger(w, h)
+local function drawFirecrest(w, h)
   local id = ui.id
-  local dd = cfg.diggers[id]
+  local dd = cfg.firecrests[id]
   if not dd then ui.page = "overview"; return drawOverview(w, h) end
   header(w, "< " .. (dd.label or nameOf(dd.num)), "computer #" .. id)
   hit(1, 1, math.min(w, 14), 1, function() ui.page, ui.confirmRetire = "overview", nil end)
@@ -1339,7 +1344,7 @@ local function draw()
         local w, h = d.getSize()
         if not w then return end
         d.setBackgroundColour(K.black); d.clear()
-        if ui.page == "digger" then drawPigger(w, h)
+        if ui.page == "firecrest" then drawFirecrest(w, h)
         elseif ui.page == "presets" then drawPresets(w, h)
         elseif ui.page == "edit" then drawEdit(w, h, v.kind)
         elseif ui.page == "rules" then drawRules(w, h, v.kind)
@@ -1382,7 +1387,7 @@ openAssign = function()
       return "input"
     end,
     problem = function()
-      if #cfg.docks == 0 then return "No DOCK yet: Pigger's barrel." end
+      if #cfg.docks == 0 then return "No DOCK yet: Firecrest's barrel." end
       if #cfg.outputs == 0 then return "No OUTPUT yet: nothing can go home." end
       if #cfg.stocks == 0 then return "No STOCK yet: spare buckets and fuel go home too." end
     end,
@@ -1395,13 +1400,13 @@ openAssign = function()
       key = "dock", plain = false,
       init = function(n) return { id = cfg.dockFor[n] } end,
       show = function(st)
-        local dd = st.id and cfg.diggers[st.id]
-        return "For", dd and (dd.label or nameOf(dd.num)) or "any Pigger (tap to pick one)"
+        local dd = st.id and cfg.firecrests[st.id]
+        return "For", dd and (dd.label or nameOf(dd.num)) or "any Firecrest (tap to pick one)"
       end,
-      click = function(n, st)   -- cycle: any -> each Pigger -> any
+      click = function(n, st)   -- cycle: any -> each Firecrest -> any
         local ids = {}
-        for id, dd in pairs(cfg.diggers) do if not dd.retired then ids[#ids + 1] = id end end
-        table.sort(ids, function(a, b) return cfg.diggers[a].num < cfg.diggers[b].num end)
+        for id, dd in pairs(cfg.firecrests) do if not dd.retired then ids[#ids + 1] = id end end
+        table.sort(ids, function(a, b) return cfg.firecrests[a].num < cfg.firecrests[b].num end)
         local nextId = ids[1]
         for i, id in ipairs(ids) do if id == st.id then nextId = ids[i + 1] end end
         st.id = nextId
@@ -1425,11 +1430,11 @@ end
 -- Loops
 ---------------------------------------------------------------------------
 local function sendOrder(id)
-  local dd = cfg.diggers[id]
+  local dd = cfg.firecrests[id]
   if dd.reboot and os.epoch("utc") - (dd.rebootAt or 0) > REBOOT_WAIT then
     dd.reboot, dd.rebootAt = nil, nil
     saveCfg()
-    say((dd.label or "A Pigger") .. " never confirmed its reboot: old program? Reboot it by hand once.", K.orange)
+    say((dd.label or "A Firecrest") .. " never confirmed its reboot: old program? Reboot it by hand once.", K.orange)
   end
   local list = {}
   for name in pairs(capped) do list[#list + 1] = name end
@@ -1449,7 +1454,7 @@ local function netLoop()
     return false
   end)
   if opened == 0 then
-    say("No modem! I need an ender modem to reach the Piggers.", K.red)
+    say("No modem! I need an ender modem to reach the Firecrests.", K.red)
     while true do draw(); os.sleep(5) end
   end
   local lastSend = -100
@@ -1475,7 +1480,7 @@ local function netLoop()
         os.queueEvent("nether_work")
       elseif msg.type == "status" and msg.id == from then
         live[from] = { s = msg, seen = os.clock() }
-        local dd = cfg.diggers[from]
+        local dd = cfg.firecrests[from]
         if dd and dd.reboot and msg.rebootDone == dd.reboot then
           if msg.state == "rebooting" then
             dd.rebootSeen = true
@@ -1483,11 +1488,11 @@ local function netLoop()
             -- Back up after the reboot: stop asking
             dd.reboot, dd.rebootAt, dd.rebootSeen = nil, nil, nil
             saveCfg()
-            say((dd.label or "Pigger") .. " is back up and carrying on.", K.lime)
+            say((dd.label or "Firecrest") .. " is back up and carrying on.", K.lime)
           end
         end
         if not dd and tonumber(msg.num) and not numTaken(tonumber(msg.num), from) then
-          -- A Pigger I don't know that already has a number (e.g. foreman.cfg was lost): adopt it
+          -- A Firecrest I don't know that already has a number (e.g. foreman.cfg was lost): adopt it
           dd = newEntry(tonumber(msg.num))
           dd.label = msg.label or nameOf(dd.num)
           if msg.minY then dd.minY, dd.maxY, dd.pMin, dd.pMax = msg.minY, msg.maxY, msg.minY, msg.maxY end
@@ -1498,7 +1503,7 @@ local function netLoop()
           if msg.want then dd.want = msg.want end
           if msg.seq then dd.seq = msg.seq end
           if msg.retired then dd.retired = true; cfg.retiredNums[dd.num] = dd.label end
-          cfg.diggers[from] = dd
+          cfg.firecrests[from] = dd
           cfg.nextNum = math.max(cfg.nextNum, dd.num + 1)
           saveCfg()
         elseif dd and msg.label and msg.label ~= dd.label and not dd.retired then
@@ -1512,7 +1517,7 @@ local function netLoop()
       capped = set
     end
     local all = os.clock() - lastSend >= SEND_EVERY
-    for id in pairs(cfg.diggers) do
+    for id in pairs(cfg.firecrests) do
       if all or sendNow[id] then sendOrder(id) end
     end
     sendNow = {}
@@ -1579,7 +1584,7 @@ local function inputLoop()
       local u = views[2].ui
       if u.page == "overview" then u.scroll = u.scroll + a
       elseif u.page == "presets" then u.lscroll = u.lscroll + a
-      elseif u.page == "digger" then u.pscroll = u.pscroll + a
+      elseif u.page == "firecrest" then u.pscroll = u.pscroll + a
       elseif u.page == "rules" then u.kscroll = (u.kscroll or 1) + a end
       draw()
     elseif e == "char" or e == "key" or e == "paste" then
@@ -1603,7 +1608,7 @@ local function inputLoop()
   end
 end
 
--- Barrels: every TICK seconds (sooner when a Pigger asks for something)
+-- Barrels: every TICK seconds (sooner when a Firecrest asks for something)
 local function workerLoop()
   while true do
     if not paused then

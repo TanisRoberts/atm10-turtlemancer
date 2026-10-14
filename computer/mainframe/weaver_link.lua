@@ -1,12 +1,12 @@
--- rigger_link.lua  --  base-side radio link for Rigger the builder (runs from startup.lua)
+-- weaver_link.lua  --  base-side radio link for Weaver the builder (runs from startup.lua)
 --
--- Passes orders from chat (island rigger build/stop/test/clear) to Rigger and keeps his status
+-- Passes orders from chat (island weaver build/stop/test/clear) to Weaver and keeps his status
 -- for the alerts. The Architect computer can order him too: whichever order is newest wins (seqs
 -- are epochs), and this link takes over an Architect order it hears so it doesn't repeat an old one. The storage computer hears his material requests directly and fills his
--- supply barrel; if storage has gone quiet, this tells Rigger so he just checks the barrel.
+-- supply barrel; if storage has gone quiet, this tells Weaver so he just checks the barrel.
 
 local PROTOCOL   = "tanis-rigger"
-local CONFIG     = "rigger_link.cfg"
+local CONFIG     = "weaver_link.cfg"
 local SEND_EVERY = 3
 
 local cfg = { want = "idle", seq = 0 }
@@ -32,7 +32,7 @@ while true do
   local _, msg = rednet.receive(PROTOCOL, 1)
   if type(msg) == "table" then
     if msg.type == "status" then
-      _G.RIGGER_STATUS, _G.RIGGER_SEEN = msg, os.clock()
+      _G.WEAVER_STATUS, _G.WEAVER_SEEN = msg, os.clock()
     elseif msg.type == "cmd" and type(msg.seq) == "number" and msg.seq > (tonumber(cfg.seq) or 0) then
       cfg.want, cfg.seq = msg.want, msg.seq   -- someone else (the Architect) gave a newer order
       saveCfg()
@@ -44,14 +44,14 @@ while true do
   end
 
   -- New order from chat
-  local c = _G.RIGGER_CMD
+  local c = _G.WEAVER_CMD
   if c and type(c.seq) == "number" and c.seq > (tonumber(cfg.seq) or 0) then
     cfg.want, cfg.seq = c.want, c.seq
     saveCfg()
     lastSend = -100
   end
 
-  -- Storage computer silent: tell Rigger so he just checks the barrel (you can fill it by hand)
+  -- Storage computer silent: tell Weaver so he just checks the barrel (you can fill it by hand)
   local storageQuiet = not _G.STORAGE_SEEN or os.clock() - _G.STORAGE_SEEN > 20
   if pendingReq and storageQuiet and os.clock() - pendingReq.at > 2 then
     rednet.broadcast({ type = "supplied", seq = pendingReq.seq, got = {}, missing = pendingReq.items }, PROTOCOL)

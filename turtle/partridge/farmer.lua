@@ -1,8 +1,8 @@
--- farmer.lua  --  Figger, the crop farmer (CC:Tweaked, ATM10 / MC 1.21.1)
+-- farmer.lua  --  Partridge, the crop farmer (CC:Tweaked, ATM10 / MC 1.21.1)
 --
 -- Needs: a turtle with a diamond hoe and a wireless or ender modem. GPS towers make him unlosable
 --        (optional: without them he finds his way from his map, like before).
--- Farm:  Figger flies one block above the crops. Mark the farm's edge with slabs at crop height
+-- Farm:  Partridge flies one block above the crops. Mark the farm's edge with slabs at crop height
 --        (one block above the farmland), so the slabs sit right under him at the edge.
 --        Start him inside the farm at flying height next to his dock barrel, or ON TOP of a dock
 --        barrel built into the slab ring, facing into the farm.
@@ -15,9 +15,9 @@
 --   * picks up whatever lands on the ground (ATM10's right-click harvest drops crops there)
 --   * unloads at the dock (keeps KEEP_SEEDS of each seed), refuels; unloads mid-round if full
 --   * re-maps the farm every RESURVEY_EVERY rounds, so an extended field is picked up by itself
--- Control: the Farmhand computer, chat (island figger rounds|survey|stop|go|found), or here:
+-- Control: the Farmhand computer, chat (island partridge rounds|survey|stop|go|found), or here:
 --   farmer rounds | survey (new map from where he stands) | stop | go | found
--- Settings: figger.env (edit live, or from the Farmhand).
+-- Settings: partridge.env (edit live, or from the Farmhand).
 
 local B = dofile("farmbot.lua")
 local S              -- B.S once running
@@ -467,7 +467,7 @@ local R = {
 }
 
 local args = { ... }
-B.run({ name = "Figger", role = "farmer", prog = "farmer",
-        env = { file = "figger.env", title = "Figger (crop farmer)", defaults = DEFAULTS },
+B.run({ name = "Partridge", role = "farmer", prog = "farmer",
+        env = { file = "partridge.env", title = "Partridge (crop farmer)", defaults = DEFAULTS },
         state = "farmer.state", zone = "farmer.zone", onLoad = function(st) S = st end },
       R, args)
