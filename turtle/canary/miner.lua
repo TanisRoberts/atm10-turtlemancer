@@ -24,6 +24,8 @@
 --   * comes home through the shaft when full or low on fuel, unloads, refuels, goes back
 --   * dumps junk (cobble, deepslate ...) underground once storage has 20 stacks of it
 --   * saves its position after every move, so it resumes after chunk unloads / restarts
+--   * never digs another turtle (waits for it) or a cable, pipe, modem or computer (goes under or
+--     over it), so storage cables can run right through its mining area
 -- Hold Ctrl+T to stop the program (the turtle stays where it is).
 -- REBOOT from the Foreman: it finishes the block it's on (never mid-move or mid-turn), reboots,
 -- pulls the latest files and carries on exactly where it was.
@@ -163,12 +165,31 @@ local function dirOf(dx, dz)
   if dz < 0 then return 0 elseif dx > 0 then return 1 elseif dz > 0 then return 2 elseif dx < 0 then return 3 end
 end
 
--- Is this block a turtle or computer? ComputerCraft lets a turtle mine another turtle (it ends up
--- as an item in the canary's bag), so another Canary crossing my tunnel or shaft is never dug:
--- I wait for it to move on instead.
-local function isMachine(ok, d)
-  return ok == true and type(d) == "table" and type(d.name) == "string" and d.name:find("^computercraft:") ~= nil
+-- Blocks I never dig. ComputerCraft lets a turtle mine another turtle (it ends up as an item in
+-- my bag), and a pickaxe happily breaks storage cables, so:
+--   * another turtle in my way: I wait for it to move on (isTurtle)
+--   * a cable, pipe, modem or computer (anything isProtected): it isn't going anywhere, so I go
+--     round it, one block under it (or over, if under won't work), and never dig it
+local KEEP_MODS = { "computercraft:", "refinedstorage:", "pipez:", "laserio:", "integrateddynamics:",
+  "integratedtunnels:", "xnet:", "prettypipes:", "modularrouters:" }
+local KEEP_WORDS = { "cable", "pipe", "conduit", "transporter", "duct", "pressurized_tube", "conductor" }
+local function blockName(ok, d)
+  if ok == true and type(d) == "table" and type(d.name) == "string" then return d.name end
 end
+local function isTurtle(ok, d)
+  local n = blockName(ok, d)
+  return n ~= nil and n:find("^computercraft:turtle") ~= nil
+end
+local function isProtected(ok, d)
+  local n = blockName(ok, d)
+  if not n then return false end
+  for _, p in ipairs(KEEP_MODS) do if n:sub(1, #p) == p then return true end end
+  -- AE2: everything placed (cables, buses, drives ...), but not meteorites or certus quartz
+  if n:sub(1, 4) == "ae2:" and not (n:find("quartz") or n:find("sky_stone") or n:find("mysterious")) then return true end
+  for _, w in ipairs(KEEP_WORDS) do if n:find(w, 1, true) then return true end end
+  return false
+end
+local isMachine = isProtected -- old name
 
 -- Which way am I facing? Step one block (turning to find a free side), ask GPS, step back.
 -- allowDig: may dig the block in front (only underground).
@@ -218,8 +239,9 @@ local OPS = {
 }
 
 local TURTLE_WAIT = 120 -- seconds to wait for another turtle to get out of my way before giving up
+local CABLE = "Cable in the way" -- move() refused: a protected block (isProtected) is there
 
--- Move one block, digging/attacking whatever is in the way (never another turtle: see isMachine).
+-- Move one block, digging/attacking whatever is in the way (never a turtle or cable: see isProtected).
 -- The fuel level before the move is saved, so after a crash we can tell if the move happened.
 local function move(kind)
   local op = OPS[kind]
@@ -238,8 +260,12 @@ local function move(kind)
       return true
     end
     S.pending = nil
-    if op.detect() and isMachine(op.inspect()) then
-      -- Another turtle (or a computer) is in the way: let it pass, don't dig it
+    local okI, info = op.inspect()
+    if op.detect() and isProtected(okI, info) and not isTurtle(okI, info) then
+      -- A cable/pipe/modem/computer: never dig it, the caller goes round it
+      unwait(); save(); return false, CABLE
+    elseif op.detect() and isTurtle(okI, info) then
+      -- Another turtle is in the way: let it pass, don't dig it
       if not waitUntil then
         waitUntil = os.clock() + TURTLE_WAIT
         was, wasMsg = S.status, S.msg
@@ -279,33 +305,77 @@ local function face(h)
   if d == 1 then turnRight() elseif d == 2 then turnRight(); turnRight() elseif d == 3 then turnLeft() end
 end
 
+-- A cable is right in front of me: pass under it (or over it) and come up 2 blocks further on,
+-- at the same height. Never digs the cable. False if there's no way round.
+local function hopCable()
+  for _, v in ipairs({ "d", "u" }) do
+    local back = v == "d" and "u" or "d"
+    if not isProtected(OPS[v].inspect()) and move(v) then
+      if move("f") then
+        if move("f") and move(back) then return true end
+        return false, "Can't get round a cable"
+      end
+      move(back) -- the way under (over) is blocked too: back up and try the other side
+    end
+  end
+  return false, "Can't get round a cable"
+end
+
+-- A cable is right above/below me (k = "u"/"d"): step to a free side, go 2 blocks up/down, step back.
+local function climbCable(k)
+  for h = 0, 3 do
+    face(h)
+    if not isProtected(turtle.inspect()) and move("f") then
+      if move(k) then
+        if move(k) then
+          face((h + 2) % 4)
+          if move("f") then return true end
+        end
+        return false, "Can't get round a cable"
+      end
+      face((h + 2) % 4); move("f")
+    end
+  end
+  return false, "Can't get round a cable"
+end
+
 -- Walk to (tx, tz) on the current level, x first (or z first), calling onStep after each block.
-local function goToXZ(tx, tz, onStep, zFirst)
-  local function walkX()
-    while S.x ~= tx do
-      face(tx > S.x and 1 or 3)
-      local ok, why = move("f"); if not ok then return false, why end
+-- Cables on the way are hopped (never dug). If (tx, tz) IS a cable, returns false, CABLE.
+local function goToXZ(tx, tz, onStep, zFirst, retried)
+  local function walk(axis, target, plus, minus)
+    while S[axis] ~= target do
+      face(target > S[axis] and plus or minus)
+      local ok, why = move("f")
+      if not ok and why == CABLE then
+        if math.abs(target - S[axis]) == 1 then return false, CABLE end -- that cell is the cable
+        ok, why = hopCable()
+      end
+      if not ok then return false, why end
       if onStep then onStep() end
     end
     return true
   end
-  local function walkZ()
-    while S.z ~= tz do
-      face(tz > S.z and 2 or 0)
-      local ok, why = move("f"); if not ok then return false, why end
-      if onStep then onStep() end
-    end
-    return true
-  end
+  local function walkX() return walk("x", tx, 1, 3) end
+  local function walkZ() return walk("z", tz, 2, 0) end
   local a, b = walkX, walkZ
   if zFirst then a, b = walkZ, walkX end
-  local ok, why = a(); if not ok then return false, why end
-  return b()
+  local ok, why = a()
+  if ok then ok, why = b() end
+  if not ok and why == CABLE and not retried then
+    -- A cable at a corner: try the other way round (the final cell itself can't be reached)
+    return goToXZ(tx, tz, onStep, not zFirst, true)
+  end
+  return ok, why
 end
 
 local function goY(ty)
   while S.y ~= ty do
-    local ok, why = move(S.y < ty and "u" or "d")
+    local k = S.y < ty and "u" or "d"
+    local ok, why = move(k)
+    if not ok and why == CABLE then
+      if math.abs(ty - S.y) == 1 then return false, CABLE end
+      ok, why = climbCable(k)
+    end
     if not ok then return false, why end
   end
   return true
@@ -373,7 +443,7 @@ end
 local VALUE_TAGS = { "c:ores", "c:raw_materials", "c:gems", "c:dusts", "c:nuggets", "c:ingots",
   "minecraft:coals", "c:coal" }
 -- "computercraft:" = a turtle/computer picked up by an older Canary: always brought home, never dumped
-local VALUE_NAMES = { "computercraft:", "raw_", "_ore", "diamond", "emerald", "lapis", "redstone", "coal", "quartz",
+local VALUE_NAMES = { "computercraft:", "cable", "raw_", "_ore", "diamond", "emerald", "lapis", "redstone", "coal", "quartz",
   "amethyst_shard", "ancient_debris", "netherite", "nugget", "ingot", "gem", "crystal", "dust" }
 local valuableCache = {}
 local function isValuable(slot)
@@ -602,7 +672,9 @@ local function mineRegion()
       end
       while S.y ~= cy do
         checkpoint()
-        local ok, why = move(S.y > cy and "d" or "u")
+        local k = S.y > cy and "d" or "u"
+        local ok, why = move(k)
+        if not ok and why == CABLE and math.abs(cy - S.y) > 1 then ok, why = climbCable(k) end
         if not ok then error("Shaft blocked at Y " .. (S.dockY + S.y) .. ": " .. tostring(why), 0) end
       end
     end
@@ -633,8 +705,8 @@ local function mineRegion()
       for i = S.step or 1, #cells do
         S.step = i
         checkpoint()
-        local ok = goToXZ(cells[i][1], cells[i][2], checkUpDown)
-        if not ok then blocked = true; break end
+        local ok, why = goToXZ(cells[i][1], cells[i][2], checkUpDown)
+        if not ok and why ~= CABLE then blocked = true; break end -- a cable cell is just skipped
       end
       if blocked then break end
       S.step = 1
