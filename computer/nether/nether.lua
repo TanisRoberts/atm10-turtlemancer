@@ -29,17 +29,17 @@ local TEXT_SCALE = 0.5
 local TICK       = 2     -- seconds between barrel passes
 local HOLD_FOR   = 90    -- seconds a dock stays untouched while its Firecrest takes his supplies
 
-local RING_CAP   = 100   -- furthest ring a Firecrest will mine (matches miner.lua's Firecrest)
-local DEF_R2     = 24    -- default outer ring (49x49: about 3x3 chunks)
+local RING_CAP   = 16    -- furthest CHUNK ring (33x33 chunks; matches miner.lua)
+local DEF_R2     = 1     -- default outer chunk ring (3x3 chunks)
 local Y_MIN, Y_MAX = 6, 120
 local NAME_MAX   = 16
 
 -- First-run presets (absolute Y). Ancient debris is commonest around Y 15; the lava sea is at Y 31.
 local DEFAULT_PRESETS = {
-  { name = "Debris",      minY = 12, maxY = 17, r1 = 1, r2 = DEF_R2 },
-  { name = "Debris deep", minY =  8, maxY = 22, r1 = 1, r2 = DEF_R2 },
-  { name = "Above lava",  minY = 33, maxY = 44, r1 = 1, r2 = DEF_R2 },
-  { name = "High quartz", minY = 60, maxY = 74, r1 = 1, r2 = DEF_R2 },
+  { name = "Debris",      minY = 12, maxY = 17, r1 = 0, r2 = DEF_R2 },
+  { name = "Debris deep", minY =  8, maxY = 22, r1 = 0, r2 = DEF_R2 },
+  { name = "Above lava",  minY = 33, maxY = 44, r1 = 0, r2 = DEF_R2 },
+  { name = "High quartz", minY = 60, maxY = 74, r1 = 0, r2 = DEF_R2 },
 }
 -- What the Nether keeps by default (the rest goes home), and what Firecrest throws away underground
 local DEFAULT_KEEP = {
@@ -76,6 +76,7 @@ local function loadCfg()
       for _, dd in pairs(cfg.firecrests) do dd.label = rename(dd.label) end
       for n, l in pairs(cfg.retiredNums) do cfg.retiredNums[n] = rename(l) end
       cfg.presets = type(t.presets) == "table" and t.presets or nil
+      cfg.chunkRings = t.chunkRings
       for _, k in ipairs({ "docks", "outputs", "stocks", "inputs", "ignored", "names", "dockFor", "keep",
                           "junk", "hungryAt", "fullAt", "sent" }) do cfg[k] = t[k] end
     end
@@ -96,6 +97,19 @@ local function loadCfg()
     dd.r1, dd.r2 = dd.r1 or 1, dd.r2 or DEF_R2
     dd.pR1, dd.pR2 = dd.pR1 or dd.r1, dd.pR2 or dd.r2
   end
+  -- Oct 2026: rings are CHUNK rings now (miners work chunk by chunk: ring 0 = the dock's chunk).
+  -- Saved block rings are converted once (50 blocks -> 3 chunk rings, "from ring 1" -> 0).
+  if not cfg.chunkRings then
+    local function toC(r) return math.max(0, math.min(RING_CAP, math.floor((tonumber(r) or 0) / 16))) end
+    local function fix(t, a, b)
+      local x, y = toC(t[a]), toC(t[b])
+      if (tonumber(t[a]) or 1) <= 1 then x = 0 end
+      t[a], t[b] = math.min(x, y), y
+    end
+    for _, p in ipairs(cfg.presets) do fix(p, "r1", "r2") end
+    for _, dd in pairs(cfg.firecrests) do fix(dd, "r1", "r2"); fix(dd, "pR1", "pR2") end
+    cfg.chunkRings = true
+  end
 end
 local function saveCfg()
   local f = fs.open(CONFIG, "w"); f.write(textutils.serialize(cfg)); f.close()
@@ -103,7 +117,7 @@ end
 
 local function newEntry(num)
   return { num = num, want = "dock", minY = 12, maxY = 17, pMin = 12, pMax = 17,
-           r1 = 1, r2 = DEF_R2, pR1 = 1, pR2 = DEF_R2, seq = os.epoch("utc") }
+           r1 = 0, r2 = DEF_R2, pR1 = 0, pR2 = DEF_R2, seq = os.epoch("utc") }
 end
 local function numTaken(num, exceptId)
   if cfg.retiredNums[num] then return true end
@@ -459,9 +473,9 @@ local function rangeText(a, b, r1, r2)
 end
 local function sq(r) return 2 * r + 1 end
 local function ringText(r1, r2)
-  r1, r2 = r1 or 1, r2 or DEF_R2
-  if r1 <= 1 then return ("rings 1-%d, %dx%d"):format(r2, sq(r2), sq(r2)) end
-  return ("rings %d-%d, %dx%d"):format(r1, r2, sq(r2), sq(r2))
+  r1, r2 = r1 or 0, r2 or DEF_R2
+  if r1 <= 0 then return ("chunk rings 0-%d, %dx%d chunks"):format(r2, sq(r2), sq(r2)) end
+  return ("chunk rings %d-%d, %dx%d chunks"):format(r1, r2, sq(r2), sq(r2))
 end
 local function isSelected(dd, p)
   return dd.pMin == p.minY and dd.pMax == p.maxY and dd.pR1 == p.r1 and dd.pR2 == p.r2
@@ -755,11 +769,23 @@ local function drawStatus(id, x, y, w, maxY)
   line(function()
     lr(x, y, w, "Drunk", s and (fmtNum(s.lavaScoops or 0) .. " scoops") or "-", K.grey, K.grey)
   end)
+  line(function()
+    -- Chunk controller (keeps his own chunk loaded) and shulker box (extra room)
+    local txt, warn = "-", false
+    if s then
+      local bits = {}
+      if s.chunky then bits[#bits + 1] = "loader" end
+      if s.box == "ok" then bits[#bits + 1] = "box" elseif s.box == "full" then bits[#bits + 1] = "box FULL"; warn = true end
+      txt = #bits > 0 and table.concat(bits, " + ") or "none"
+      if s.chunkyNote then txt, warn = s.chunkyNote, true end
+    end
+    lr(x, y, w, "Gear", txt, K.grey, warn and K.orange or K.grey)
+  end)
   line(function() lr(x, y, w, "Cargo", s and ((s.slots or "?") .. "/16") or "-") end)
   line(function() bar(x, y, w, s and ((s.slots or 0) / 16) or 0, (s and (s.slots or 0) >= 14) and K.orange or K.lightBlue) end)
   line(function() lr(x, y, w, "Layer", s and s.layer and s.layers and (math.min(s.layer, s.layers) .. "/" .. s.layers) or "-") end)
   line(function()
-    lr(x, y, w, "Ring", s and s.ring and ("%s of %d-%d"):format(s.ring, s.minRing or 1, s.maxRing or DEF_R2) or "-")
+    lr(x, y, w, "Chunk", s and s.chunk and s.chunks and ("%d of %d, ring %s"):format(s.chunk, s.chunks, tostring(s.ring)) or "-")
   end)
   line(function() lr(x, y, w, "Range", s and s.minY and (s.minY .. ".." .. s.maxY) or "-") end)
   y = y + 1
@@ -802,7 +828,7 @@ local function drawHaul(id, x, y, w, maxY)
 end
 
 local function clampY(v) return math.max(Y_MIN, math.min(Y_MAX, v)) end
-local function clampR(v) return math.max(1, math.min(RING_CAP, v)) end
+local function clampR(v) return math.max(0, math.min(RING_CAP, v)) end
 
 -- Firecrest page: nudge the picked (not yet started) settings
 local function adjust(dd, key, delta)
@@ -839,8 +865,7 @@ local function drawControls(id, x, y, w, maxY)
   local dd, l = cfg.firecrests[id], live[id]
   local s = l and l.s
   local yStep = { { "-", -1 }, { "+", 1 } }
-  local rStep = { { "-5", -5 }, { "+5", 5 } }
-  if w < 24 then rStep = { { "-", -5 }, { "+", 5 } } end
+  local rStep = { { "-", -1 }, { "+", 1 } }
 
   -- How tall can things be? Everything below the preset list needs `fixed` rows.
   local room = maxY - y + 1
@@ -868,7 +893,7 @@ local function drawControls(id, x, y, w, maxY)
     at(x + 1, y, p.name:sub(1, w - 2), fg, bg)
     if w >= 20 then
       local r = p.minY .. ".." .. p.maxY
-      if w >= 30 then r = r .. "  r" .. (p.r1 > 1 and (p.r1 .. "-") or "") .. p.r2 end
+      if w >= 30 then r = r .. "  c" .. (p.r1 > 0 and (p.r1 .. "-") or "") .. p.r2 end
       if #p.name + #r + 3 <= w then at(x + w - #r - 1, y, r, sel and K.black or K.lightGrey, bg) end
     end
     hit(x, y, x + w - 1, y, function()
@@ -889,8 +914,10 @@ local function drawControls(id, x, y, w, maxY)
   numRow(x, y, w, "Max Y", dd.pMax, yStep, function(dv) adjust(dd, "pMax", dv) end); y = y + 1
   numRow(x, y, w, w >= 26 and "From ring" or "Ring>", dd.pR1, rStep, function(dv) adjust(dd, "pR1", dv) end); y = y + 1
   numRow(x, y, w, w >= 26 and "To ring" or "Ring<", dd.pR2, rStep, function(dv) adjust(dd, "pR2", dv) end); y = y + 1
-  local hint, hc = ("Area %dx%d"):format(sq(dd.pR2), sq(dd.pR2)), K.grey
-  if dd.pR1 > 1 then hint = hint .. (", skips middle %dx%d"):format(sq(dd.pR1 - 1), sq(dd.pR1 - 1)) end
+  local hint, hc = ("Area %dx%d chunks"):format(sq(dd.pR2), sq(dd.pR2)), K.grey
+  if dd.pR1 > 0 then hint = hint .. (", skips middle %dx%d"):format(sq(dd.pR1 - 1), sq(dd.pR1 - 1)) end
+  -- A force-loaded dock keeps the 8 chunks round it running too; further out needs a chunk controller
+  if dd.pR2 > 1 and s and not s.chunky then hint, hc = "Past ring 1: needs a chunk controller", K.orange end
   if s and s.seq ~= dd.seq then hint, hc = "Sending...", K.yellow
   elseif s and s.offPath then hint, hc = "START/DOCK: send it home", K.orange
   elseif dd.want == "run" and (dd.minY ~= dd.pMin or dd.maxY ~= dd.pMax or dd.r1 ~= dd.pR1 or dd.r2 ~= dd.pR2) then
@@ -938,7 +965,7 @@ local function findPreset(name)
 end
 
 local function openEditor(idx, name)
-  local p = idx and cfg.presets[idx] or { name = name or "", minY = -59, maxY = -48, r1 = 1, r2 = DEF_R2 }
+  local p = idx and cfg.presets[idx] or { name = name or "", minY = -59, maxY = -48, r1 = 0, r2 = DEF_R2 }
   ui.edit = { idx = idx, name = p.name, minY = p.minY, maxY = p.maxY, r1 = p.r1, r2 = p.r2,
               focus = (idx == nil and (name or "") == "") and "name" or nil, buf = "", err = nil, confirmDel = false }
   if ui.edit.focus == "name" then ui.edit.buf = "" end
@@ -1073,7 +1100,7 @@ local function drawEdit(w, h, kind)
   end)
   y = y + 2
   local yS = cw >= 36 and { { "-5", -5 }, { "-1", -1 }, { "+1", 1 }, { "+5", 5 } } or { { "-", -1 }, { "+", 1 } }
-  local rS = cw >= 36 and { { "-10", -10 }, { "-1", -1 }, { "+1", 1 }, { "+10", 10 } } or { { "-", -1 }, { "+", 1 } }
+  local rS = { { "-", -1 }, { "+", 1 } }
   local rows = {
     { "Min Y", "minY", yS }, { "Max Y", "maxY", yS }, { "From ring", "r1", rS }, { "To ring", "r2", rS },
   }
@@ -1094,10 +1121,10 @@ local function drawEdit(w, h, kind)
   do local c = e.maxY - 1; while c + 1 >= e.minY and c >= Y_MIN do passes = passes + 1; c = c - 3 end end
   local info = {
     { ("Mines Y %d..%d: %d pass%s of 3 levels"):format(e.minY, e.maxY, passes, passes == 1 and "" or "es"), K.lightGrey },
-    { e.r1 > 1 and ("Square %dx%d, skipping the middle %dx%d"):format(sq(e.r2), sq(e.r2), sq(e.r1 - 1), sq(e.r1 - 1))
-        or ("Square %dx%d around the shaft"):format(sq(e.r2), sq(e.r2)), K.lightGrey },
+    { e.r1 > 0 and ("%dx%d chunks, skipping the middle %dx%d"):format(sq(e.r2), sq(e.r2), sq(e.r1 - 1), sq(e.r1 - 1))
+        or ("%dx%d chunks round the dock's chunk"):format(sq(e.r2), sq(e.r2)), K.lightGrey },
   }
-  if e.r2 > 24 then info[#info + 1] = { "Is all of that force-loaded? Unloaded = he stops.", K.orange } end
+  if e.r2 > 1 then info[#info + 1] = { "Past ring 1: needs a chunk controller", K.orange } end
   if e.err then info[#info + 1] = { e.err, K.red } end
   for _, l in ipairs(info) do
     if y <= h - 2 then at(x, y, pad(l[1], w - 2), l[2]) end
@@ -1440,7 +1467,8 @@ local function sendOrder(id)
   for name in pairs(capped) do list[#list + 1] = name end
   rednet.send(id, {
     type = "cmd", to = id, want = dd.retired and "dock" or dd.want, minY = dd.minY, maxY = dd.maxY,
-    r1 = dd.r1 or 1, r2 = dd.r2 or DEF_R2, seq = dd.seq, reboot = dd.reboot, retired = dd.retired == true, capped = list,
+    c1 = dd.r1 or 0, c2 = dd.r2 or DEF_R2, r1 = math.max(1, (dd.r1 or 0) * 16), r2 = (dd.r2 or DEF_R2) * 16 + 8,
+    seq = dd.seq, reboot = dd.reboot, retired = dd.retired == true, capped = list,
     junk = cfg.junk, hungryAt = cfg.hungryAt, fullAt = cfg.fullAt,
   }, PROTOCOL)
 end
@@ -1497,7 +1525,7 @@ local function netLoop()
           dd.label = msg.label or nameOf(dd.num)
           if msg.minY then dd.minY, dd.maxY, dd.pMin, dd.pMax = msg.minY, msg.maxY, msg.minY, msg.maxY end
           if msg.maxRing then
-            dd.r1, dd.r2 = msg.minRing or 1, msg.maxRing
+            dd.r1, dd.r2 = msg.minRing or 0, msg.maxRing
             dd.pR1, dd.pR2 = dd.r1, dd.r2
           end
           if msg.want then dd.want = msg.want end

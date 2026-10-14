@@ -17,16 +17,20 @@
 -- if he was carried somewhere he notices, works out which way he faces, and waits for an order;
 -- then he digs down, tunnels to his shaft and comes up it. Without GPS he counts his moves.
 --
--- What he does, once you press START on the Foreman:
---   * digs a shaft straight down from the dock to the chosen Y range
---   * mines expanding squares around the shaft, 3 levels per pass, ring by ring between the
---     Foreman's "from ring" and "to ring" (ring 1 = 3x3, ring 50 = 101x101):
---     he walks the middle level and digs the block above/below only if it's an ore
---   * on each new level he first walks out from the shaft N/E/S/W through open tunnel (never digging)
---     until he meets a block, then starts at the ring after the shortest of the four, so a level
---     that's already mined out doesn't get walked ring by ring again
---   * drops 3 levels and repeats until the range is done
---   * comes home through the shaft when full or low on fuel, unloads, refuels, goes back
+-- What he does, once you press START on the Foreman (CHUNK BY CHUNK, "CBC"):
+--   * his area is chunk rings around his dock's chunk, set on the Foreman: ring 0 = that chunk,
+--     ring 1 = the 8 around it (3x3 chunks), ring 5 = 11x11 chunks ...
+--   * digs a shaft straight down from the dock to the chosen Y range, then works ONE CHUNK at a time,
+--     every level of it, before moving on: down through the levels in one chunk, up in the next.
+--     Each level is a snake over the chunk's 16x16, 3 levels per pass: he walks the middle one and
+--     digs the block above/below only if it's an ore
+--   * with a chunk controller (Advanced Peripherals) in his bag he keeps his own chunk loaded: he
+--     swaps it onto his modem's side for a moment in every new chunk (and every 45 s), so only the
+--     chunk he's in is force-loaded. Without one: keep his area loaded (or stay near it)
+--   * with a shulker box in his bag (any kind; Sophisticated Storage ones upgrade to huge) he puts
+--     his ore in it when his slots run out, and only comes home when the box is full too
+--   * comes home through the shaft when full or low on fuel, unloads (and unpacks the box), refuels,
+--     goes back to the same chunk, level and block
 --   * saves his position after every move, so he resumes after chunk unloads / restarts
 --   * never digs another turtle (waits for it), or a cable, pipe, modem, computer, barrel, hopper,
 --     ender chest or storage block (goes under or over it), so storage can run right through his area
@@ -40,16 +44,18 @@
 local STATE_FILE   = "miner.state"
 local STATUS_EVERY = 3      -- seconds between status broadcasts
 
--- Who I am, by dimension (see the top). r2 = outer ring when the Foreman doesn't say, cap = furthest
--- ring allowed, reserve = spare fuel kept on top of the trip home, floor = lowest Y a level may reach.
+-- Who I am, by dimension (see the top). r2 = outer CHUNK ring when the Foreman doesn't say (ring 0 =
+-- the dock's chunk, ring 3 = 7x7 chunks), reserve = spare fuel kept on top of the trip home,
+-- floor = lowest Y a level may reach.
 local MODES = {
   canary    = { name = "Canary",    protocol = "tanis-miner",  boss = "the Foreman",
-                r2 = 50, cap = 150, reserve = 60,  floor = -64 },
+                r2 = 3, reserve = 60,  floor = -64 },
   firecrest = { name = "Firecrest", protocol = "tanis-nether", boss = "the Nether Foreman", nether = true,
-                r2 = 24, cap = 100, reserve = 200, floor = 5 },   -- 24 rings = 49x49, about 3x3 chunks
+                r2 = 1, reserve = 200, floor = 5 },
   starling  = { name = "Starling",  protocol = "tanis-miner",  boss = "the Foreman", isEnd = true,
-                r2 = 50, cap = 150, reserve = 60,  floor = 0 },   -- the End: void under Y 0
+                r2 = 3, reserve = 60,  floor = 0 },   -- the End: void under Y 0
 }
+local RING_CAP = 16   -- furthest chunk ring (33x33 chunks)
 local function modeFor(dim)
   local d = tostring(dim or ""):lower():gsub("^minecraft:", "")
   if d == "the_nether" or d == "nether" then return "firecrest" end
@@ -58,7 +64,7 @@ local function modeFor(dim)
 end
 -- Set by setMode() once the dimension is known (canary until then)
 local MODE, MODE_KEY = MODES.canary, "canary"
-local PROTOCOL, DEFAULT_R2, RING_CAP, FUEL_RESERVE = "tanis-miner", 50, 150, 60
+local PROTOCOL, DEFAULT_R2, FUEL_RESERVE = "tanis-miner", 3, 60
 
 -- Firecrest's lava
 local NETHER_FLOOR = 5      -- lowest Y he mines in the Nether (bedrock below)
@@ -156,7 +162,7 @@ end
 local function setMode()
   MODE_KEY = modeFor(S.dim)
   MODE = MODES[MODE_KEY]
-  PROTOCOL, DEFAULT_R2, RING_CAP, FUEL_RESERVE = MODE.protocol, MODE.r2, MODE.cap, MODE.reserve
+  PROTOCOL, DEFAULT_R2, FUEL_RESERVE = MODE.protocol, MODE.r2, MODE.reserve
   if MODE.nether then setJunk(S.junk) else loadJunk() end
 end
 
@@ -315,6 +321,9 @@ local TURTLE_WAIT = 120 -- seconds to wait for another turtle to get out of my w
 local CABLE = "Cable in the way" -- move() refused: a protected block (isProtected) is there
 local CHEST_FULL = "Chest in the way, I'm full" -- move() refused: a chest I couldn't empty all of
 local lootAt -- lootAt(kind): empty the container on that side; false if I'm too full (Inventory section)
+local inArea -- inArea(x, z): inside my chunk area? (Mining plan section)
+local stash -- stash(): put my ore in my shulker box (Shulker box section)
+local refreshChunk = function() end -- keeps my chunk loaded if I carry a chunk controller (Chunk loader section)
 
 -- Move one block, digging/attacking whatever is in the way (never a turtle or cable: see isProtected).
 -- The fuel level before the move is saved, so after a crash we can tell if the move happened.
@@ -332,6 +341,7 @@ local function move(kind)
       S.pending = nil
       save()
       unwait()
+      refreshChunk()   -- a new chunk (or time's up): load it before anything else
       return true
     end
     S.pending = nil
@@ -348,6 +358,7 @@ local function move(kind)
       end
       if os.clock() >= waitUntil then unwait(); save(); return false, "Another turtle in the way" end
       tries = tries - 1 -- waiting doesn't use up the dig attempts
+      refreshChunk()
       os.sleep(1)
     elseif op.detect() then
       -- A chest: take everything out first (a dug chest spills its loot on the floor)
@@ -503,6 +514,17 @@ local function emptySlots()
   return n
 end
 
+-- Gear: things I carry for myself and never unload, stash or throw away
+local CHUNKY_ITEM = "advancedperipherals:chunk_controller"
+local function isBox(name) return type(name) == "string" and name:find("shulker_box", 1, true) ~= nil end
+local function isModemItem(name)
+  return name == "computercraft:wireless_modem_advanced" or name == "computercraft:wireless_modem_normal"
+end
+local function isGear(name) return name == CHUNKY_ITEM or isModemItem(name) or isBox(name) end
+local function freeSlot()
+  for s = 1, 16 do if turtle.getItemCount(s) == 0 then return s end end
+end
+
 local function dropAway()
   if not turtle.detectDown() then return turtle.dropDown() end
   if not turtle.detectUp() then return turtle.dropUp() end
@@ -534,6 +556,7 @@ local function isValuable(slot)
   local d = turtle.getItemDetail(slot)
   if not d then return false end
   if S.loot and S.loot[d.name] then return true end -- out of a chest: always comes home
+  if isGear(d.name) then return true end
   local v = valuableCache[d.name]
   if v ~= nil then return v end
   if KEEP[d.name] or d.name == BUCKET or d.name == LAVA_BUCKET then valuableCache[d.name] = true; return true end
@@ -583,7 +606,7 @@ local function burnInventoryFuel(target)
   for s = 1, 16 do
     if fuel() >= target then break end
     local d = turtle.getItemDetail(s)
-    if d and not JUNK[d.name] then
+    if d and not JUNK[d.name] and not isGear(d.name) then
       turtle.select(s)
       if turtle.refuel(0) then turtle.refuel() end
     end
@@ -668,10 +691,6 @@ local function scoop(kind)
   return true
 end
 
-local function inRings(x, z)
-  local r = S.r2 or DEFAULT_R2
-  return math.abs(x) <= r and math.abs(z) <= r
-end
 
 -- Found lava while hungry: drink the whole pool. Walks only into cells he has just scooped, on his
 -- own level and inside his rings, and comes back out the way he went in.
@@ -686,7 +705,7 @@ local function drinkPool()
       if not hungry() then break end
       if scoop("f") then
         local nx, nz = S.x + DX[S.h], S.z + DZ[S.h]
-        if not seen[nx .. "," .. nz] and inRings(nx, nz) then open[#open + 1] = S.h end
+        if not seen[nx .. "," .. nz] and inArea(nx, nz) then open[#open + 1] = S.h end
       end
       turnRight()
     end
@@ -741,7 +760,7 @@ end
 -- is marked as loot (always comes home, never thrown away). True when it's empty; false if I filled up first (after making
 -- room by throwing junk away).
 lootAt = function(kind)
-  local took, roomMade = 0, false
+  local took, roomMade, stashed = 0, false, false
   turtle.select(1)
   while true do
     local before = countsBySlot()
@@ -766,6 +785,10 @@ lootAt = function(kind)
       return true
     elseif not roomMade then
       makeRoom(); roomMade = true
+    elseif not stashed and stash then
+      -- Into the shulker box with what I've got (it won't go where the chest is: up/down/behind)
+      stashed = true
+      if stash() then roomMade, stashed = false, false end
     else
       setStatus(S.status or "mining", "Full, with a chest still to empty")
       return false
@@ -788,6 +811,139 @@ local function checkUpDown()
 end
 
 ---------------------------------------------------------------------------
+-- Chunk loader (Advanced Peripherals' chunk controller, the "Chunky Turtle" upgrade)
+-- With one in my bag I swap it onto my modem's side for a moment whenever I cross into a new chunk,
+-- and every REFRESH_EVERY seconds anyway. While it's on it force-loads the chunk I'm in; taken off,
+-- that chunk stays loaded until the mod's timeout (chunkLoadValidTime, 600 s by default, never under
+-- 60 s), so I only ever hold ONE chunk. Equipping it in a new chunk releases the old one at once.
+-- No controller: no swaps (keep me inside loaded chunks: my dock and area, or near a player).
+---------------------------------------------------------------------------
+local REFRESH_EVERY = 45
+local chunkyAt, chunkyKey = -1e9, nil
+local EQUIP = { left = turtle.equipLeft, right = turtle.equipRight }
+local function sideOfType(t)
+  for _, sd in ipairs({ "left", "right" }) do
+    local types = { peripheral.getType(sd) }
+    for _, x in ipairs(types) do if x == t then return sd end end
+  end
+end
+local function chunkySlot()
+  for s = 1, 16 do local d = turtle.getItemDetail(s); if d and d.name == CHUNKY_ITEM then return s end end
+end
+local function haveChunky() return chunkySlot() ~= nil or sideOfType("chunky") ~= nil end
+local function chunkKey()
+  local x, _, z = absPos()
+  if not x then return nil end
+  return math.floor(x / 16) .. "," .. math.floor(z / 16)
+end
+
+refreshChunk = function(force)
+  if not S.chunky then return end
+  local key = chunkKey()
+  if not force and key == chunkyKey and os.clock() - chunkyAt < REFRESH_EVERY then return end
+  if sideOfType("chunky") then
+    os.sleep(0.1) -- worn all the time (no modem swap): it reloads my chunk by itself every tick
+  else
+    local slot, side = chunkySlot(), sideOfType("modem")
+    if not (slot and side) then
+      S.chunkyNote = slot and "No modem to swap with" or "Chunk controller missing"
+      return
+    end
+    local prev = turtle.getSelectedSlot()
+    turtle.select(slot)
+    S.swapSide = side; save()            -- if I'm unloaded mid-swap, boot puts the modem back
+    if EQUIP[side]() then
+      os.sleep(0.15)                       -- at least one server tick with it on: loads + touches this chunk
+      turtle.select(slot)
+      EQUIP[side]()                        -- modem back on; the controller goes back into that slot
+    end
+    S.swapSide = nil; save()
+    turtle.select(prev)
+    pcall(rednet.open, side)
+    S.swaps = (S.swaps or 0) + 1
+  end
+  S.chunkyNote = nil
+  chunkyAt, chunkyKey = os.clock(), key
+end
+
+-- Boot: a swap that was cut short leaves the modem in my bag and the controller on. Put it back.
+local function restoreRadio()
+  if sideOfType("modem") then S.swapSide = nil; return end
+  local ms
+  for s = 1, 16 do local d = turtle.getItemDetail(s); if d and isModemItem(d.name) then ms = s end end
+  local side = sideOfType("chunky") or S.swapSide
+  if ms and side then
+    turtle.select(ms); EQUIP[side](); turtle.select(1)
+    print("Put my modem back on (a chunk swap was cut short).")
+  end
+  S.swapSide = nil
+  save()
+end
+
+---------------------------------------------------------------------------
+-- Shulker box: carried along as extra cargo space. Running out of slots, I put it down (above, below
+-- or behind me), put my ore in, and dig it back up (it keeps what's in it). At the dock I unpack it.
+-- Any shulker box works; Sophisticated Storage ones can be upgraded (bigger, stack upgrades).
+---------------------------------------------------------------------------
+local BOXPLACE = { f = turtle.place, u = turtle.placeUp, d = turtle.placeDown }
+local BOXDROP  = { f = turtle.drop,  u = turtle.dropUp,  d = turtle.dropDown }
+local BOXDIG   = { f = turtle.dig,   u = turtle.digUp,   d = turtle.digDown }
+local BOXDET   = { f = turtle.detect, u = turtle.detectUp, d = turtle.detectDown }
+local function boxSlot()
+  for s = 1, 16 do local d = turtle.getItemDetail(s); if d and isBox(d.name) then return s end end
+end
+-- Things that stay in my slots: gear, and Firecrest's bucket
+local function isKept(name)
+  return isGear(name) or (MODE.nether and (name == BUCKET or name == LAVA_BUCKET))
+end
+
+-- Pick the box back up (also after a restart mid-stash: S.boxAt says where it is)
+local function pickUpBox()
+  local k = S.boxAt
+  if not k then return true end
+  if k == "f" and S.boxH then face(S.boxH) end
+  local fs = freeSlot()
+  if fs then turtle.select(fs) end
+  local ok = BOXDIG[k]()
+  turtle.select(1)
+  if ok or not BOXDET[k]() then S.boxAt, S.boxH = nil, nil; save() end
+  return S.boxAt == nil
+end
+
+stash = function()
+  local bs = boxSlot()
+  if not bs or S.boxFull then return false end
+  local oh, k = S.h, nil
+  if not BOXDET.u() then k = "u" elseif not BOXDET.d() then k = "d" end
+  if not k then
+    face((S.h + 2) % 4)                    -- the cell I just came from is open
+    if not BOXDET.f() then k = "f" end
+  end
+  if not k then face(oh); return false end
+  turtle.select(bs)
+  if not BOXPLACE[k]() then turtle.select(1); face(oh); return false end
+  S.boxAt, S.boxH = k, S.h; save()
+  local full, moved = false, 0
+  for s = 1, 16 do
+    local d = turtle.getItemDetail(s)
+    if d and not isKept(d.name) and isValuable(s) then
+      turtle.select(s)
+      while turtle.getItemCount(s) > 0 do
+        if not BOXDROP[k]() then full = true; break end
+      end
+      moved = moved + 1
+    end
+  end
+  pickUpBox()
+  face(oh)
+  if full then S.boxFull = true end
+  S.boxStacks = (S.boxStacks or 0) + moved
+  setStatus(S.status or "mining", full and "Shulker box full" or ("Put %d stacks in my shulker box"):format(moved))
+  save()
+  return moved > 0
+end
+
+---------------------------------------------------------------------------
 -- Commands from the panel
 ---------------------------------------------------------------------------
 local function applyCtrl()
@@ -796,11 +952,14 @@ local function applyCtrl()
   if ctrl.seq == S.seq then return end
   S.seq = ctrl.seq
   if ctrl.want == "run" then
-    local r1 = math.max(1, math.min(RING_CAP, math.floor(tonumber(ctrl.r1) or 1)))
-    local r2 = math.max(r1, math.min(RING_CAP, math.floor(tonumber(ctrl.r2) or DEFAULT_R2)))
-    local changed = ctrl.minY ~= S.minY or ctrl.maxY ~= S.maxY or r1 ~= (S.r1 or 1) or r2 ~= (S.r2 or DEFAULT_R2)
+    -- Chunk rings (c1/c2: 0 = the dock's chunk). An older Foreman only sends block rings: convert.
+    local c1, c2 = tonumber(ctrl.c1), tonumber(ctrl.c2)
+    if not c2 then c1, c2 = 0, math.floor(((tonumber(ctrl.r2) or 48) + 8) / 16) end
+    local r1 = math.max(0, math.min(RING_CAP, math.floor(c1 or 0)))
+    local r2 = math.max(r1, math.min(RING_CAP, math.floor(c2)))
+    local changed = ctrl.minY ~= S.minY or ctrl.maxY ~= S.maxY or r1 ~= S.r1 or r2 ~= S.r2
     if changed or S.done then
-      S.layerIdx, S.k, S.step, S.done, S.probedLayer = 1, r1, 1, false, nil
+      S.ci, S.cl, S.step, S.done = 1, 1, 1, false
       if changed and S.want == "run" then S.regionChanged = true end
     end
     S.minY, S.maxY, S.r1, S.r2, S.want = ctrl.minY, ctrl.maxY, r1, r2, "run"
@@ -830,7 +989,13 @@ local function checkpoint()
   maybeReboot()
   if S.want ~= "run" then abort("stop", "Stop requested") end
   if S.regionChanged then S.regionChanged = nil; abort("region") end
+  refreshChunk()
   dumpJunk(MODE.nether == true)   -- Firecrest: the Nether Foreman's junk is thrown away, never carried home
+  -- Nearly full: into the shulker box with the ore (if I have one with room)
+  if emptySlots() <= 2 and boxSlot() and not S.boxFull then
+    makeRoom()
+    if emptySlots() <= 3 then stash() end
+  end
   if emptySlots() <= 1 then
     makeRoom()
     if emptySlots() <= 1 then
@@ -849,6 +1014,7 @@ local function waitCtrl(seconds)
   while os.clock() < t do
     if ctrl and ctrl.seq ~= S.seq then return end
     maybeReboot()
+    refreshChunk()
     os.sleep(1)
   end
 end
@@ -869,6 +1035,7 @@ local function layerList()
 end
 
 local function ringCells(k)
+  if k == 0 then return { { 0, 0 } } end
   local c = {}
   for z = -k, k do c[#c + 1] = { k, z } end
   for x = k - 1, -k, -1 do c[#c + 1] = { x, k } end
@@ -877,109 +1044,99 @@ local function ringCells(k)
   return c
 end
 
+-- Chunk by chunk (CBC). The area is chunk rings around my dock's chunk (ring 0 = that chunk, ring 1 =
+-- the 8 round it ...). I finish one chunk, every level, before the next: down through the levels in
+-- one chunk, up through them in the next, so I never climb back for nothing. Each level is a snake
+-- over the chunk's 16x16, walking the middle of 3 levels and digging ores above/below.
+local function dockChunk() return math.floor(S.home.x / 16), math.floor(S.home.z / 16) end
+local function chunkList()
+  local cx, cz = dockChunk()
+  local out = {}
+  for k = S.r1 or 0, S.r2 or DEFAULT_R2 do
+    for _, c in ipairs(ringCells(k)) do out[#out + 1] = { cx + c[1], cz + c[2], ring = k } end
+  end
+  return out
+end
+-- World X/Z -> my dock-relative x/z
+local function relOf(ax, az) return rot(ax - S.home.x, az - S.home.z, 4 - S.facing) end
+-- The 16x16 of chunk (cx, cz) as a snake; reversed on even passes so each pass starts where the last ended
+local function snake(cx, cz, reversed)
+  local cells = {}
+  for r = 0, 15 do
+    for i = 0, 15 do
+      local x = (r % 2 == 0) and i or (15 - i)
+      cells[#cells + 1] = { cx * 16 + x, cz * 16 + r }
+    end
+  end
+  if reversed then
+    local rev = {}
+    for i = #cells, 1, -1 do rev[#rev + 1] = cells[i] end
+    cells = rev
+  end
+  return cells
+end
+-- Inside my whole area? (Firecrest's lava pools stay inside it)
+inArea = function(x, z)
+  local ax, az = rot(x, z, S.facing)
+  local cx, cz = dockChunk()
+  local r = S.r2 or DEFAULT_R2
+  return math.abs(math.floor((S.home.x + ax) / 16) - cx) <= r and math.abs(math.floor((S.home.z + az) / 16) - cz) <= r
+end
+
 local function fuelToStart()
   local layers = layerList()
-  local y = layers[S.layerIdx or 1] or layers[1] or S.dockY
-  return 2 * (S.dockY - y) + 4 * (S.k or 1) + 500
+  local y = layers[1] or S.dockY
+  return 2 * (S.dockY - y) + 64 * ((S.chunkRing or 0) + 1) + 500
 end
 
--- A fresh level: how far out is it already mined? From the shaft, walk each way (N, E, S, W)
--- through open space only (air: water, lava and anything else count as unmined), stop at the first
--- block (or at the outer ring), walk back.
--- After the first direction, the others only go as far as the shortest so far.
--- Returns the shortest open run: rings 1..n are already open in every direction.
-local function probeMined(r2)
-  if S.x ~= 0 or S.z ~= 0 then
-    local ok, why = goToXZ(0, 0)
-    if not ok then error("Can't reach the shaft: " .. tostring(why), 0) end
+local function toLevel(cy)
+  if S.y == cy then return end
+  while S.y ~= cy do
+    checkpoint()
+    local k = S.y > cy and "d" or "u"
+    local ok, why = move(k)
+    if not ok and why == CHEST_FULL and math.abs(cy - S.y) <= 1 then abort("full", "Full: a chest to finish emptying") end
+    if not ok and (why == CABLE or why == CHEST_FULL) and math.abs(cy - S.y) > 1 then ok, why = climbCable(k) end
+    if not ok then error("Blocked at Y " .. (S.dockY + S.y) .. ": " .. tostring(why), 0) end
+    lookForLava()   -- the Nether's shaft often goes through the lava sea
   end
-  local best = r2
-  for h = 0, 3 do
-    if best == 0 then break end
-    face(h)
-    local n = 0
-    while n < best do
-      checkpoint()
-      local okI, dI = turtle.inspect()
-      if okI and dI.name ~= "minecraft:air" and dI.name ~= "minecraft:cave_air" and dI.name ~= "minecraft:void_air" then break end
-      if turtle.detect() or not move("f") then break end
-      n = n + 1
-    end
-    best = math.min(best, n)
-    if S.x ~= 0 or S.z ~= 0 then
-      local ok, why = goToXZ(0, 0)
-      if not ok then error("Can't get back to the shaft: " .. tostring(why), 0) end
-    end
-  end
-  return best
 end
 
-local function mineRegion()
+local function mineChunks()
   local layers = layerList()
-  S.layerCount = #layers
+  local chunks = chunkList()
+  S.layerCount, S.chunkCount = #layers, #chunks
   if #layers == 0 then
     S.done = true; save()
     setStatus("error", "Range must be below the dock")
     return
   end
-  for li = S.layerIdx or 1, #layers do
-    S.layerIdx, S.layerY = li, layers[li]
-    local cy = layers[li] - S.dockY
-    setStatus("mining", ("Y %d"):format(layers[li]))
-    -- Travel to the layer via the shaft
-    if S.y ~= cy then
-      if S.x ~= 0 or S.z ~= 0 then
-        local ok, why = goToXZ(0, 0)
-        if not ok then error("Can't reach the shaft: " .. tostring(why), 0) end
-      end
-      while S.y ~= cy do
-        checkpoint()
-        local k = S.y > cy and "d" or "u"
-        local ok, why = move(k)
-        if not ok and why == CHEST_FULL and math.abs(cy - S.y) <= 1 then abort("full", "Full: a chest to finish emptying") end
-        if not ok and (why == CABLE or why == CHEST_FULL) and math.abs(cy - S.y) > 1 then ok, why = climbCable(k) end
-        if not ok then error("Shaft blocked at Y " .. (S.dockY + S.y) .. ": " .. tostring(why), 0) end
-        lookForLava()   -- the Nether's shaft often goes through the lava sea
-      end
-    end
-    -- Expanding squares
-    local blocked = false
-    local r1, r2 = S.r1 or 1, S.r2 or DEFAULT_R2
-    -- New level (not resuming partway through it): skip the rings that are already mined out
-    if S.probedLayer ~= li then
-      if (S.k or r1) <= r1 and (S.step or 1) == 1 then
-        setStatus("mining", ("Y %d: checking how far it's mined"):format(layers[li]))
-        local open = probeMined(r2)
-        if open >= r2 then
-          S.probeNote = ("Y %d: mined out to ring %d, next level"):format(layers[li], r2)
-        elseif open + 1 > r1 then
-          S.probeNote = ("Y %d: mined to ring %d, starting at %d"):format(layers[li], open, open + 1)
-        else
-          S.probeNote = nil
-        end
-        S.k, S.step = math.max(r1, open + 1), 1
-        if S.probeNote then setStatus("mining", S.probeNote) end
-      end
-      S.probedLayer = li
-      save()
-    end
-    for k = math.max(S.k or r1, r1), r2 do
-      S.k = k
-      local cells = ringCells(k)
+  for ci = S.ci or 1, #chunks do
+    S.ci = ci
+    local ch = chunks[ci]
+    S.chunkRing = ch.ring
+    for cl = S.cl or 1, #layers do
+      S.cl = cl
+      local li = (ci % 2 == 1) and cl or (#layers + 1 - cl)   -- down in odd chunks, up in even ones
+      S.layerIdx, S.layerY = cl, layers[li]
+      setStatus("mining", ("Chunk %d of %d, Y %d"):format(ci, #chunks, layers[li]))
+      -- From the dock: down my shaft first; elsewhere straight up/down where I am
+      toLevel(layers[li] - S.dockY)
+      local cells = snake(ch[1], ch[2], cl % 2 == 0)
       for i = S.step or 1, #cells do
         S.step = i
         checkpoint()
-        local ok, why = goToXZ(cells[i][1], cells[i][2], checkUpDown)
+        local rx, rz = relOf(cells[i][1], cells[i][2])
+        local ok, why = goToXZ(rx, rz, checkUpDown)
         -- That cell is a chest and I'm full: home to unload, then back to this very cell for the rest
         if not ok and why == CHEST_FULL then abort("full", "Full: a chest to finish emptying") end
-        if not ok and why ~= CABLE then blocked = true; break end -- a cable cell is just skipped
+        -- Anything else (a cable cell, bedrock, unbreakable): skip that cell and carry on from here
       end
-      if blocked then break end
       S.step = 1
+      save()
     end
-    if blocked then setStatus("mining", ("Hit unbreakable blocks at Y %d, next layer"):format(layers[li])) end
-    S.k, S.step = S.r1 or 1, 1
-    S.layerIdx = li + 1
+    S.cl = 1
+    S.chunksDone = (S.chunksDone or 0) + 1
     save()
   end
   S.done = true
@@ -1048,6 +1205,46 @@ local function gpsFixHome()
   end
 end
 
+-- Anything in my slots that isn't gear (or Firecrest's bucket)?
+local function cargoLeft()
+  for s = 1, 16 do
+    local d = turtle.getItemDetail(s)
+    if d and not isKept(d.name) then return true end
+  end
+  return false
+end
+
+-- Empty my shulker box at the dock: put it down below me (the top of my shaft), take a bagful out,
+-- unload it with unload(), repeat. False if the barrel wouldn't take it all (the box then stays put
+-- until the next try).
+local function unpackBox(unload)
+  if not S.boxAt then
+    local bs = boxSlot()
+    if not bs then return true end
+    if BOXDET.d() then return true end       -- no room below (never mined): nothing was stashed anyway
+    turtle.select(bs)
+    if not BOXPLACE.d() then turtle.select(1); return true end
+    S.boxAt, S.boxH = "d", nil; save()
+  end
+  setStatus("docked", "Unpacking my shulker box")
+  while true do
+    local got = false
+    while true do
+      local fs = freeSlot()
+      if not fs then break end
+      turtle.select(fs)
+      if turtle.suckDown() then got = true else break end
+    end
+    turtle.select(1)
+    if not unload() then return false end
+    if not got then break end
+  end
+  pickUpBox()
+  S.boxFull, S.boxStacks = nil, 0
+  save()
+  return true
+end
+
 -- Canary / Starling: DUMP barrel (storage input) and FUEL barrel
 local function dockServiceCanary()
   setStatus("docked", "Unloading")
@@ -1055,29 +1252,33 @@ local function dockServiceCanary()
   loadJunk()            -- pick up any edits to junk.txt
   valuableCache = {}
   local haul = {}
-  for s = 1, 16 do
-    local d = turtle.getItemDetail(s)
-    if d then
-      turtle.select(s)
-      if not JUNK[d.name] then haul[d.name] = (haul[d.name] or 0) + d.count end
-      local tries = 0
-      while turtle.getItemCount(s) > 0 do
-        if not dropTo(S.dumpDir) then
-          tries = tries + 1
-          setStatus("waiting", "Dump barrel full, waiting")
-          os.sleep(3)
-          if tries > 10 then break end -- give up for now; the main loop waits at the dock
+  local function unload()
+    for s = 1, 16 do
+      local d = turtle.getItemDetail(s)
+      if d and not isKept(d.name) then
+        turtle.select(s)
+        if not JUNK[d.name] then haul[d.name] = (haul[d.name] or 0) + d.count end
+        local tries = 0
+        while turtle.getItemCount(s) > 0 do
+          if not dropTo(S.dumpDir) then
+            tries = tries + 1
+            setStatus("waiting", "Dump barrel full, waiting")
+            os.sleep(3)
+            if tries > 10 then return false end -- give up for now; the main loop waits at the dock
+          end
         end
       end
     end
+    return true
   end
+  local ok = unload() and unpackBox(unload)
   if next(haul) then
     S.lastHaul = haul
     S.totals = S.totals or {}
     for n, c in pairs(haul) do S.totals[n] = (S.totals[n] or 0) + c end
   end
   S.ores = 0
-  if emptySlots() < 16 then face(0); save(); return false end -- couldn't unload everything
+  if not ok or cargoLeft() then face(0); save(); return false end -- couldn't unload everything
   S.loot = nil          -- the loot's in storage now
   maybeLinkBarrels() -- before refuelling, while the fuel barrel still has something in it
 
@@ -1085,7 +1286,8 @@ local function dockServiceCanary()
   local limit = fuelLimit()
   if limit ~= math.huge then
     setStatus("docked", "Refuelling")
-    turtle.select(1)
+    local fs = freeSlot() or 1
+    turtle.select(fs)
     for _ = 1, 40 do
       if fuel() >= limit - 80 then break end
       if not suckFrom(S.fuelDir) then break end
@@ -1096,19 +1298,20 @@ local function dockServiceCanary()
         local per = fuel() - before
         if per > 0 then
           local n = math.floor((limit - fuel()) / per)
-          if n > 0 then turtle.refuel(math.min(n, turtle.getItemCount(1))) end
+          if n > 0 then turtle.refuel(math.min(n, turtle.getItemCount(fs))) end
         end
       end
-      if turtle.getItemCount(1) > 0 then
+      if turtle.getItemCount(fs) > 0 then
         if turtle.refuel(0) then dropTo(S.fuelDir); returned = true -- leftover fuel goes back
         else dropTo(S.dumpDir) end                                -- empty buckets etc. to storage
       end
       if returned then break end
     end
   end
+  turtle.select(1)
   face(0)
   save()
-  return emptySlots() == 16 -- false if the dump barrel wouldn't take everything
+  return not cargoLeft() -- false if the dump barrel wouldn't take everything
 end
 
 ---------------------------------------------------------------------------
@@ -1140,6 +1343,7 @@ local function unloadAll()
     local d = turtle.getItemDetail(s)
     if d then
       local keep = (s == keepSlot) and 1 or 0
+      if isGear(d.name) then keep = d.count end
       if d.count > keep then
         turtle.select(s)
         if not JUNK[d.name] and d.name ~= BUCKET and d.name ~= LAVA_BUCKET then
@@ -1164,8 +1368,8 @@ local function unloadAll()
     for n, c in pairs(haul) do S.totals[n] = (S.totals[n] or 0) + c end
   end
   for s = 1, 16 do
-    local c = turtle.getItemCount(s)
-    if c > ((s == keepSlot) and 1 or 0) then return false end
+    local d = turtle.getItemDetail(s)
+    if d and not isGear(d.name) and d.count > ((s == keepSlot) and 1 or 0) then return false end
   end
   return true
 end
@@ -1211,7 +1415,7 @@ local function dockServiceNether(needStart)
   drinkHeld()
   dumpJunk(true)   -- junk picked up on the way home goes down the shaft, not into the dock
   S.ores = 0
-  if not unloadAll() then face(0); save(); return false end
+  if not (unloadAll() and unpackBox(unloadAll)) then face(0); save(); return false end
   S.loot = nil     -- the loot's with the Nether Foreman now
 
   local limit = fuelLimit()
@@ -1240,6 +1444,7 @@ end
 
 -- needStart: fuel needed to head out (Firecrest asks the dock for it; Canaries just refuel)
 local function dockService(needStart)
+  S.chunky = haveChunky() or nil   -- picked one up (or lost it) since last time?
   if MODE.nether then return dockServiceNether(needStart) end
   return dockServiceCanary()
 end
@@ -1300,7 +1505,7 @@ end
 local function setupDock()
   term.clear(); term.setCursorPos(1, 1)
   title("MINER SETUP")
-  S = { x = 0, y = 0, z = 0, h = 0, want = "dock", seq = nil }
+  S = { x = 0, y = 0, z = 0, h = 0, want = "dock", seq = nil, cbc = true }
   print("Which dimension am I in?")
   S.dim = askDimension()
   setMode()
@@ -1380,6 +1585,9 @@ local function setupDock()
     printError("No bucket on me: put an empty bucket")
     print("in me, or in a Nether stock barrel.")
   end
+  if haveChunky() then print("Chunk controller: I'll keep my chunk loaded.")
+  else print("No chunk controller: keep my area loaded.") end
+  if boxSlot() then print("Shulker box: extra room for ore.") end
   save()
   print(("Setup done. %s gives me a"):format((MODE.boss:gsub("^t", "T"))))
   print("number; pick my layers and press")
@@ -1411,7 +1619,7 @@ local function lostFlow()
   print("then press Enter here.")
   read()
   S.x, S.y, S.z, S.h, S.lost = 0, 0, 0, 0, nil
-  S.k, S.step = S.r1 or 1, 1
+  S.step = 1   -- redo this level of this chunk from its start
   save()
 end
 
@@ -1507,7 +1715,7 @@ local function runOnce()
     end
   end
   setStatus("mining", "")
-  local ok, err = pcall(mineRegion)
+  local ok, err = pcall(mineChunks)
   if ok then return end
   if type(err) == "table" and err.abort then
     if err.abort == "region" then return end
@@ -1578,7 +1786,10 @@ local function statusMsg()
     kind = MODE_KEY, bird = MODE.name, chests = S.chests or 0,
     fuel = f, fuelLimit = l, slots = used,
     y = S.dockY and (S.dockY + (S.y or 0)), x = S.x, z = S.z,
-    layer = S.layerIdx, layers = S.layerCount, ring = S.k, minRing = S.r1 or 1, maxRing = S.r2 or DEFAULT_R2,
+    layer = S.layerIdx, layers = S.layerCount, ring = S.chunkRing, minRing = S.r1 or 0, maxRing = S.r2 or DEFAULT_R2,
+    cbc = true, chunk = S.ci, chunks = S.chunkCount, chunksDone = S.chunksDone, cell = S.step,
+    chunky = S.chunky == true, chunkyNote = S.chunkyNote, swaps = S.swaps,
+    box = boxSlot() and (S.boxFull and "full" or "ok") or "none", boxStacks = S.boxStacks,
     minY = S.minY, maxY = S.maxY, want = S.want, rebootDone = S.rebootDone, done = S.done, ores = S.ores, haul = haul,
   }
   if MODE.nether then
@@ -1659,6 +1870,20 @@ end
 load()
 if not S.dockY then setupDock() else recover() end
 setMode()
+-- Chunk by chunk since Oct 2026: progress from the old ring miner means nothing now. Start the
+-- Foreman's order afresh (forgetting its seq makes the next order count as new).
+if not S.cbc then
+  S.cbc, S.ci, S.cl, S.step, S.k, S.probedLayer, S.r1, S.r2, S.seq = true, 1, 1, 1, nil, nil, nil, nil, nil
+  save()
+end
+restoreRadio()
+pickUpBox()
+S.chunky = haveChunky() or nil
+save()
+if S.chunky then
+  print("Chunk controller on board: I keep my own chunk loaded.")
+  refreshChunk(true)   -- claim this chunk straight away (after a server restart AP restores it anyway)
+end
 fixLabel()
 print(("I'm a %s (%s)."):format(MODE.name, tostring(S.dim or "overworld")))
 setStatus("docked", "Starting")

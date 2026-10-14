@@ -18,7 +18,7 @@ ComputerCraft (CC:Tweaked + Advanced Peripherals) scripts for Tanis's ATM10 isla
 | Computer | Mainframe | `mainframe` | Chat commands, alerts, island strip, status board for every machine, the butler (`$dump`, torch top-ups, warnings, welcomes, visitors, storage lock) |
 | Computer | Storage | `storage` | Sorts input chests, touch screen, fuels the turtles, fills Weaver's barrel, does the smelter's item moves |
 | Computer | Smelter | `smelter` | Auto-smelting rules (`smelt.txt`), fastest furnace tiers first, training furnace for new recipes; asks storage to move the items |
-| Computer | Foreman | `foreman` | Mining control: overview of every Canary, tap one for its layers / START / DOCK / position / retire; hands out Canary numbers; layer presets (Y range + rings) edited on the Presets page or with `/presets` on its screen; Reboot / Reboot all / `/reboot` (a Canary finishes its block, reboots, updates and carries on) |
+| Computer | Foreman | `foreman` | Mining control: overview of every Canary, tap one for its layers / START / DOCK / position / retire; hands out Canary numbers; layer presets (Y range + chunk rings) edited on the Presets page or with `/presets` on its screen; Reboot / Reboot all / `/reboot` (a Canary finishes its block, reboots, updates and carries on) |
 | Computer | Nether Foreman | `nether` | In the Nether by Firecrest's dock: Firecrest cards (layers / START / DOCK / reboot / retire), the Nether barrels (`/assign`: dock, output home, stock, input), Rules for what stays in the Nether, what Firecrest throws away and when he drinks lava |
 | Computer | Farmhand | `farmhand` | Control screen for the farm turtles: overview of Partridge, Woodpecker and friends, tap one for ROUNDS NOW / PAUSE / RE-MAP / FOUND / REBOOT, live settings, position, last haul and running totals |
 | Computer | Architect | `architect` | Weaver's control screen (no monitor, the computer's own screen): what he's doing, a map of the layer he's on (done / to do / gaps / him / his next block), the island from the side, materials left vs storage, where the test markers went, a log, and build / stop / test / clear / reboot orders (typed or clicked) |
@@ -204,6 +204,29 @@ barrels, so a Starling doesn't try to link them: fill his fuel barrel by hand, a
 Nether way (barrel > hopper > ender chest). Lowest level he'll mine: Y -63 (Canary), Y 6 (Firecrest, bedrock under
 Y 5), Y 1 (Starling, void under Y 0).
 
+## Chunk by chunk (CBC), chunk controllers and shulker boxes (Oct 2026)
+
+Every miner works **one chunk at a time**: all the levels of a chunk (down through them in one chunk, up
+through them in the next), a snake over its 16x16 on each level, then the next chunk. His area is **chunk
+rings** round his dock's chunk, set on his Foreman page (and in presets): ring 0 = the dock's chunk, ring 1
+= the 3x3 round it, ring 5 = 11x11 chunks. Saved block rings were converted once (50 blocks -> ring 3).
+
+- **No chunk controller:** force-load his dock's chunk (FTB Chunks). A force-loaded chunk keeps the 8 chunks
+  round it running too, so rings 0-1 (3x3 chunks) work off that one chunk. Further out he'd stop as soon as
+  he left them, so the Foreman warns "Past ring 1: needs a chunk controller".
+- **With a chunk controller** (Advanced Peripherals, `advancedperipherals:chunk_controller`: iron, redstone,
+  an eye of ender) in his bag: whenever he steps into a new chunk, and every 45 s, he swaps it onto his
+  modem's side for a moment. That force-loads the chunk he's in and drops the last one, so he only ever
+  holds **one** chunk, and it stays loaded after he swaps back (the mod keeps it ~10 min). It survives server
+  restarts. Any area size, no FTB chunks needed (still force-load his dock and the Foreman so you can reach them).
+  Needs `enableChunkyTurtle` on in the server's Advanced Peripherals config (it is by default).
+- **With a shulker box** in his bag (vanilla, or a Sophisticated Storage one: those upgrade to huge, with
+  stack upgrades): when he's down to 2 free slots he puts it down above, below or behind him, puts his ore in
+  and digs it back up. He only comes home when the box is full too. At the dock he unpacks it into the barrel
+  (it goes in the top of his shaft for that). Backpacks can't do this: turtles can't sneak to place them.
+- His gear (controller, modem, box, Firecrest's bucket) never gets unloaded, stashed or thrown away.
+- The Foreman page shows `Chunk 3 of 49, ring 1` and `Gear  loader + box` (or `box FULL`).
+
 ## Chests underground
 
 Every miner empties a chest (dungeon, mineshaft corridor, fortress, bastion, stronghold, end city...) **before**
@@ -234,7 +257,7 @@ Firecrest mines the Nether and his haul comes home through a linked ender chest.
 - **What goes where:** everything Firecrest brings (and anything in an input) goes to stock if the Rules keep some of it and stock is short of that; the rest goes home. Stock above its keep count goes home too. Defaults keep 4 buckets, 16 lava buckets and some coal / charcoal / coal blocks / blaze rods for emergencies. `/keep <item> <count>` (0 = stop), or the - / + / x buttons on the Rules page.
 - **Fuel:** under **25%** he scoops every lava source he sees with his bucket and drinks it (1,000 each); finding one, he drinks the whole pool around him (only the lava cells, on his own level, inside his rings) until he's over **75%**, then leaves lava alone. Both numbers are on the Rules page. Running low with no lava about, he comes home and the dock gives him lava buckets / coal from stock. No bucket? The dock gives him one from stock.
 - **Junk:** the Rules page lists what he throws away underground (netherrack, basalt, blackstone...); everything else comes home. `/junk <item>`, `/unjunk <item>`.
-- **Chunk loading:** force-load Firecrest's dock, his whole dig area and the Nether Foreman's chunk (FTB Chunks). Keep his rings inside it: ring 24 (the default) is 49x49, about 3x3 chunks around the dock. An unloaded Firecrest just stops and carries on when it loads again. Force-load the island base too if you want storage sorting while you're away.
+- **Chunk loading:** force-load Firecrest's dock and the Nether Foreman's chunk (FTB Chunks). That's enough for chunk rings 0-1 (3x3 chunks, the default). For more, give him a chunk controller (see Chunk by chunk). An unloaded Firecrest just stops and carries on when it loads again. Force-load the island base too if you want storage sorting while you're away.
 - **The mainframe** hears Firecrests through its ender modem: they show on the status board, in `island miner` and in the alerts like Canaries.
 
 ## Renamed turtles (Oct 2026)
