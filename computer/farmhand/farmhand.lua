@@ -3,14 +3,16 @@
 -- Needs: an advanced computer with a wireless or ENDER modem (ender reaches farms anywhere) and an
 -- advanced monitor touching it (any size; the computer's own screen works too, click with the mouse).
 --
--- Overview: one card per farm turtle: what it's doing, fuel, its last round, when the next one is.
--- Tap one to open it:
+-- Laid out for any monitor; tuned for a 3 wide x 2 tall one (57x24 at text scale 0.5).
+-- Overview: one tile per farm turtle: what it's doing, fuel, when the next round is, its last round,
+-- and its farm drawn small with an arrow where it is right now. Tap one to open it: the map on the
+-- left (or the Info / Haul / Settings tab), what it's doing and the order buttons on the right:
 --   ROUNDS NOW, PAUSE / GO, RE-MAP (walk the farm again: new rows, moved paths), FOUND (after you've
 --   carried a lost turtle home), REBOOT (it finishes what it's doing, restarts and updates)
 --   Settings, changed live: how often it does rounds, how many seeds/saplings it keeps, how often it
 --   re-maps. They're written into the turtle's own .env file.
 --   Its exact position (with GPS), last haul and everything it has brought in since it started.
---   MAP: the farm from above (north up once it's pinned to GPS): border, dock, every plot by crop
+--   Map tab: the farm from above (north up once it's pinned to GPS): border, dock, every plot by crop
 --   (capital letter = harvested last round, small = growing, red dot = empty) or every tree spot
 --   (sapling / just replanted / empty), and an arrow where the turtle is right now, live. Big farms
 --   follow the turtle; the arrow buttons (or the mouse wheel) pan. Tap a block to see what's there.
@@ -189,7 +191,7 @@ end
 ---------------------------------------------------------------------------
 -- Screens: monitor + the computer's own screen, each with its own page
 ---------------------------------------------------------------------------
-local function newUi() return { page = "overview", id = nil, scroll = 1, notice = nil, confirm = nil, follow = true } end
+local function newUi() return { page = "overview", id = nil, tab = "map", scroll = 1, notice = nil, confirm = nil, follow = true, visible = {} } end
 local function findMonitor()
   for _, side in ipairs(rs.getSides()) do
     if peripheral.hasType(side, "monitor") then return peripheral.wrap(side), side end
@@ -255,247 +257,7 @@ local function say(text, colour)
 end
 
 ---------------------------------------------------------------------------
--- Overview
----------------------------------------------------------------------------
-local function drawOverview(w, h)
-  local list = ids()
-  if radioOK == false and not (ui.notice and os.clock() < ui.notice.untilT) then
-    ui.notice = { text = "No wireless/ender modem on me: the turtles can't hear me", colour = K.red, untilT = os.clock() + 1e9 }
-  end
-  local nProb = problems()
-  header(w, "FARMHAND", ("%d turtle%s%s"):format(#list, #list == 1 and "" or "s",
-    nProb > 0 and ("  " .. nProb .. " need" .. (nProb == 1 and "s" or "") .. " you") or "  all fine"))
-  local top, bottom = 3, h - 2
-  local rowH = (h >= 16) and 3 or 1
-  local per = math.max(1, math.floor((bottom - top + 1) / rowH))
-  local pages = math.max(1, math.ceil(#list / per))
-  ui.scroll = math.max(1, math.min(ui.scroll, pages))
-
-  if #list == 0 then
-    local lines = { "No farm turtles heard yet.", "Set up a turtle as Partridge (crops) or Woodpecker (trees):",
-                    "it shows up here as soon as it's on the air." }
-    for i, l in ipairs(lines) do at(2, top + i, pad(l, w - 2), i == 1 and K.white or K.lightGrey) end
-  end
-
-  for i = 1, per do
-    local id = list[(ui.scroll - 1) * per + i]
-    if not id then break end
-    local l = live[id]
-    local s = l and l.s
-    local y = top + (i - 1) * rowH
-    local st, colour = stateOf(id)
-    local stale = not l or os.clock() - l.seen > STALE
-    local bg = (rowH == 3) and K.black or (i % 2 == 0 and K.grey or K.black)
-    at(1, y, (" "):rep(w), K.white, bg)
-    at(2, y, pad(nameOf(id), 10), stale and K.lightGrey or K.white, bg)
-    at(13, y, pad(st, 10), colour, bg)
-    local bits = {}
-    if s then
-      bits[#bits + 1] = ROLE_NAME[s.role] or s.role or "?"
-      if type(s.fuel) == "number" and type(s.fuelLimit) == "number" and s.fuelLimit > 0 then
-        bits[#bits + 1] = ("fuel %d%%"):format(math.floor(s.fuel / s.fuelLimit * 100))
-      end
-      local nt = nextText(s)
-      if nt ~= "" then bits[#bits + 1] = nt end
-    end
-    local arrow = w >= 56
-    local room = w - 24 - (arrow and 3 or 0)
-    if room > 4 then at(24, y, pad(table.concat(bits, "  "), room), stale and K.grey or K.lightGrey, bg) end
-    if arrow then at(w - 1, y, ">", K.cyan, bg) end
-    if rowH == 3 then
-      local left
-      if stale then
-        left = l and ("not heard for " .. fmtAgo(math.floor(os.clock() - l.seen))) or "never heard from"
-      elseif s.state == "docked" and s.lastRound then
-        left = "Last round: " .. lastRoundText(s)
-      else
-        left = tostring(s.msg or "")
-      end
-      local where = s and s.pos and posText(s) or ""
-      local roomL = w - 5 - #where - 2
-      at(4, y + 1, pad(left, roomL), stale and K.grey or (s and (s.state == "error" or s.state == "lost") and K.orange or K.lightGrey))
-      if #where > 0 then at(w - #where, y + 1, where, K.grey) end
-    end
-    hit(1, y, w, y + rowH - 1, function() ui.page, ui.id, ui.confirm = "turtle", id, nil end)
-  end
-
-  local fy = h
-  at(1, fy, (" "):rep(w))
-  local x = 2
-  if #list > 0 then
-    x = smallButton(x, fy, "Rounds all", K.lime, function()
-      for _, id in ipairs(ids()) do order(id, "rounds") end
-      say("Every farm turtle is off on its rounds.")
-    end)
-    x = smallButton(x, fy, "Pause all", K.orange, function()
-      for _, id in ipairs(ids()) do order(id, "stop") end
-      say("Every farm turtle will stay docked (Go to start again).", K.orange)
-    end)
-    if w >= 50 then
-      x = smallButton(x, fy, "Reboot all", K.purple, function()
-        for _, id in ipairs(ids()) do requestReboot(id) end
-        say("Reboot sent: each finishes what it's doing, then restarts.", K.purple)
-      end, K.white)
-    end
-  end
-  if pages > 1 then
-    local label = ("%d/%d"):format(ui.scroll, pages)
-    local px = w - #label - 9
-    if px > x then
-      smallButton(px, fy, "<", ui.scroll > 1 and K.cyan or K.grey, function() ui.scroll = ui.scroll - 1 end)
-      at(px + 4, fy, label, K.lightGrey)
-      smallButton(w - 3, fy, ">", ui.scroll < pages and K.cyan or K.grey, function() ui.scroll = ui.scroll + 1 end)
-    end
-  end
-end
-
----------------------------------------------------------------------------
--- One turtle
----------------------------------------------------------------------------
-local function drawStatus(id, x, y, w, maxY)
-  local l = live[id]
-  local s = l and l.s
-  local st, colour = stateOf(id)
-  local function line(fn) if y <= maxY then fn() end y = y + 1 end
-  line(function() at(x, y, pad(st, w), colour) end)
-  line(function() at(x, y, pad(s and s.msg or "Waiting to hear from it", w), K.lightGrey) end)
-  line(function() at(x, y, pad(l and ("Seen " .. fmtAgo(math.floor(os.clock() - l.seen)) .. " ago") or "Never heard", w), K.grey) end)
-  y = y + 1
-  local f, lim = s and s.fuel, s and s.fuelLimit
-  local frac = (type(f) == "number" and type(lim) == "number" and lim > 0) and f / lim or 1
-  line(function() lr(x, y, w, "Fuel", type(f) == "number" and fmtNum(f) or (f or "-")) end)
-  line(function() bar(x, y, w, s and frac or 0, frac < 0.1 and K.red or K.lime) end)
-  if s and s.role == "lumberjack" then
-    line(function() lr(x, y, w, "Zone", s.mapped and ("%s blocks, %s trees"):format(fmtNum(s.cells), fmtNum(s.spots)) or "not mapped") end)
-    line(function() lr(x, y, w, "Saplings", fmtNum(s.saplings)) end)
-  else
-    line(function()
-      local crop = s and s.crop and pretty(tostring(s.crop):gsub("_seeds$", ""):gsub("^.-:", "")) or nil
-      lr(x, y, w, "Farm", s and s.mapped and (fmtNum(s.plots) .. " plots" .. (crop and (", " .. crop) or "")) or "not mapped")
-    end)
-    line(function() lr(x, y, w, "Seeds", s and fmtNum(s.seeds) or "-") end)
-  end
-  line(function() lr(x, y, w, "Last round", s and lastRoundText(s) or "-") end)
-  line(function() lr(x, y, w, "Next", s and (nextText(s) ~= "" and nextText(s) or "-") or "-") end)
-  line(function() lr(x, y, w, "Rounds done", s and fmtNum(s.rounds) or "-") end)
-  y = y + 1
-  line(function() lr(x, y, w, "At", posText(s), K.lightGrey, K.white) end)
-  line(function() lr(x, y, w, s and s.facing and ("facing " .. s.facing) or "", s and s.home and ("home %d, %d, %d"):format(s.home.x, s.home.y, s.home.z) or "", K.lightGrey, K.lightGrey) end)
-  line(function()
-    local txt = not s and "-" or s.anchored and "pinned to GPS: never lost" or s.gps and "GPS seen, not pinned yet" or "no GPS: counting moves"
-    lr(x, y, w, "GPS", txt, K.grey, s and not s.anchored and K.orange or K.grey)
-  end)
-  return y
-end
-
-local function drawHaul(id, x, y, w, maxY)
-  local l = live[id]
-  local s = l and l.s
-  local function list(title, items)
-    if y > maxY then return end
-    at(x, y, pad(title, w), K.grey); y = y + 1
-    if (not items or #items == 0) and y <= maxY then at(x, y, pad("Nothing yet", w), K.grey); y = y + 1 end
-    for _, e in ipairs(items or {}) do
-      if y > maxY then break end
-      lr(x, y, w, pretty(e[1]), fmtNum(e[2]), K.white, K.cyan)
-      y = y + 1
-    end
-    y = y + 1
-  end
-  list("LAST HAUL", s and s.lastHaul)
-  list("BROUGHT IN SO FAR", s and s.totals)
-  return y
-end
-
-local function drawControls(id, x, y, w, maxY)
-  local l = live[id]
-  local s = l and l.s
-  local t = cfg.turtles[id] or {}
-  local bh = (maxY - y >= 22) and 3 or 1
-  local gap = bh == 3 and 1 or 0
-  local function big(label, bg, fn, fg)
-    if y + bh - 1 > maxY then return end
-    button(x, y, w, bh, label, bg, fn, fg); y = y + bh + gap
-  end
-  big("ROUNDS NOW", K.lime, function() order(id, "rounds"); say(nameOf(id) .. " is off on its rounds.") end)
-  if s and s.paused then
-    big("GO", K.lime, function() order(id, "go"); say(nameOf(id) .. " is back on its timer.") end)
-  else
-    big("PAUSE", K.orange, function() order(id, "stop"); say(nameOf(id) .. " will stay docked.", K.orange) end)
-  end
-  big("RE-MAP", K.lightBlue, function() order(id, "survey"); say(nameOf(id) .. " will walk its farm again.", K.lightBlue) end)
-  if s and s.state == "lost" then
-    big("FOUND", K.yellow, function()
-      order(id, "found"); say("Put " .. nameOf(id) .. " on its home spot first: it works out the rest.", K.yellow)
-    end)
-  end
-  local pendingReboot = t.reboot ~= nil
-  big(pendingReboot and "REBOOTING..." or "REBOOT", K.purple, function()
-    requestReboot(id); say(nameOf(id) .. " reboots once it's finished what it's doing.", K.purple)
-  end, K.white)
-
-  -- Settings
-  if y + 1 > maxY then return end
-  y = y + (gap > 0 and 0 or 1)
-  at(x, y, pad("SETTINGS", w), K.grey); y = y + 1
-  for _, def in ipairs(SETTINGS[s and s.role or ""] or {}) do
-    if y > maxY then break end
-    local k, label, unit, step, mn, mx = def[1], def[2], def[3], def[4], def[5], def[6]
-    local v, pending = settingValue(id, k)
-    local val = (v == nil) and "?" or (tostring(v) .. (unit ~= "" and (" " .. unit) or ""))
-    if k == "RESURVEY_EVERY" and v == 0 then val = "never" end
-    local bx = x + w - 3
-    local vx = bx - 1 - #val
-    local mxL = vx - 4 - x - 1                 -- room left for the label
-    if #label > mxL then label = label:gsub("^Rounds every", "Every"):gsub("^Re%-map every", "Re-map"):gsub("^Keep ", "") end
-    at(x, y, pad(label:sub(1, math.max(0, mxL)), w), K.lightGrey)
-    at(math.max(x, vx - 4), y, " - ", K.black, (v and v > mn) and K.cyan or K.grey)
-    hit(math.max(x, vx - 4), y, math.max(x, vx - 4) + 2, y, function()
-      if type(v) == "number" then changeSetting(id, k, math.max(mn, v - step)) end
-    end)
-    at(vx, y, val, pending and K.yellow or K.white)
-    at(bx, y, " + ", K.black, (v and v < mx) and K.cyan or K.grey)
-    hit(bx, y, bx + 2, y, function()
-      if type(v) == "number" then changeSetting(id, k, math.min(mx, v + step)) end
-    end)
-    y = y + 1
-  end
-  if y <= maxY then at(x, y, pad("Yellow = sent, not confirmed yet", w), K.grey) end
-end
-
-local function drawTurtle(w, h)
-  local id = ui.id
-  if not cfg.turtles[id] then ui.page = "overview"; return drawOverview(w, h) end
-  header(w, "< " .. nameOf(id), "computer #" .. id)
-  hit(1, 1, math.min(w, 16), 1, function() ui.page = "overview" end)
-  if w >= 44 then
-    local cw = math.floor((w - 3) / 2)
-    local y = drawStatus(id, 2, 3, cw, h - 1)
-    drawHaul(id, 2, y + 1, cw, h - 1)
-    drawControls(id, cw + 3, 3, w - cw - 3, h - 2)
-  else
-    local y = drawStatus(id, 1, 3, w, h - 1)
-    drawControls(id, 1, y + 1, w, h - 2)
-  end
-  local l = live[id]
-  local stale = not l or os.clock() - l.seen > 120
-  local x = 2
-  if stale then
-    if ui.confirm == "forget" then
-      x = smallButton(x, h, "Sure? Forget it", K.red, function()
-        cfg.turtles[id] = nil; live[id] = nil; saveCfg(); ui.page, ui.confirm = "overview", nil
-        say("Forgotten. If it talks again it comes back.", K.orange)
-      end, K.white)
-    else
-      x = smallButton(x, h, "Forget", K.grey, function() ui.confirm = "forget" end, K.white)
-    end
-  end
-  smallButton(w - 15, h, "Map", K.cyan, function() ui.page, ui.confirm, ui.follow = "map", nil, true; mapAskedAt[id] = nil end)
-  smallButton(w - 7, h, "Back", K.grey, function() ui.page, ui.confirm = "overview", nil end, K.white)
-end
-
----------------------------------------------------------------------------
--- Map page: the farm from above, what's planted where, and where the turtle is right now
+-- Maps: the farm from above, what's planted where, and where the turtle is right now
 ---------------------------------------------------------------------------
 local HEX = "0123456789abcdef"
 local BLIT = {}
@@ -576,78 +338,126 @@ local function mapStats(m)
   return n, perCrop
 end
 
-local function drawMap(w, h)
-  local id = ui.id
-  if not cfg.turtles[id] then ui.page = "overview"; return drawOverview(w, h) end
-  local m = maps[id]
+
+local function turtleCell(id, m)
+  local l = live[id]
+  local s = l and l.s
+  if m and s and s.mp and s.mapStamp then return s.mp.x - m.x0 + 1, s.mp.z - m.z0 + 1, s.mp.h or 0 end
+end
+
+-- When a map is shrunk to fit, each screen cell stands for a block of cells: show the one that
+-- matters most (an empty spot beats a crop beats a lane), so sparse tree spots don't vanish.
+local PRIORITY = { [" "] = -1, ["."] = 0, ["%"] = 1, ["#"] = 2, [","] = 3, ["&"] = 4, ["*"] = 5, ["+"] = 5, ["!"] = 5, ["@"] = 9 }
+local function priority(ch, st)
+  local p = PRIORITY[ch] or 5                      -- crop letters
+  if p == 5 and st == "e" then p = 8 end
+  return p
+end
+local shrinkCache = {}   -- id -> { key, rows = { { ch, st }... } }
+local function shrunk(id, m, k, dw, dh)
+  local key = ("%s/%s/%d/%d"):format(tostring(m.stamp), tostring(k), dw, dh)
+  local c = shrinkCache[id]
+  if c and c.key == key then return c.grid end
+  local grid = {}
+  for j = 1, dh do
+    grid[j] = {}
+    local r1, r2 = math.floor((j - 1) * k) + 1, math.min(m.h, math.floor(j * k))
+    for i = 1, dw do
+      local c1, c2 = math.floor((i - 1) * k) + 1, math.min(m.w, math.floor(i * k))
+      local best, bc, bs = -2, " ", " "
+      for r = r1, math.max(r1, r2) do
+        local row, srow = m.rows[r] or "", m.states[r] or ""
+        for cc = c1, math.max(c1, c2) do
+          local ch, st = row:sub(cc, cc), srow:sub(cc, cc)
+          if ch == "" then ch = " " end
+          local p = priority(ch, st)
+          if p > best then best, bc, bs = p, ch, st end
+        end
+      end
+      grid[j][i] = { bc, bs }
+    end
+  end
+  shrinkCache[id] = { key = key, grid = grid }
+  return grid
+end
+
+-- Draw a turtle's map in the box (x, y, bw, bh).
+--   fit = true: shrunk to fit the box (overview tiles).
+--   otherwise 1:1 (2 characters per cell when it fits), scrolled by ui.mapC / ui.mapR, following the
+--   turtle while ui.follow, and a tap on a block says what's there. Returns true if it all fits.
+local function drawMapBox(id, m, x, y, bw, bh, fit)
+  if bw < 3 or bh < 2 then return true end
   local l = live[id]
   local s = l and l.s
   local stale = not l or os.clock() - l.seen > STALE
-  local sub = m and not m.none and (m.north and "north is up" or "up = way it faced when mapped") or ""
-  header(w, "< " .. nameOf(id) .. " - map", sub)
-  hit(1, 1, math.min(w, 24), 1, function() ui.page = "turtle" end)
-  local function footer()
-    at(1, h, (" "):rep(w))
-    smallButton(w - 7, h, "Back", K.grey, function() ui.page = "turtle" end, K.white)
-  end
-  if not m or m.none then
-    at(2, 4, pad(not m and "Asking " .. nameOf(id) .. " for its map..." or "It hasn't mapped its farm yet.", w - 2), K.lightGrey)
-    if not m and s and s.mapStamp == nil then
-      at(2, 6, pad("No map from it yet: reboot it once so it gets the new program.", w - 2), K.orange)
-    end
-    footer()
-    return
-  end
-
-  -- Layout: map on the left, key on the right if there's room for both, else the key goes below
-  local side = 22
-  local top, bottom = 3, h - 2
-  local cw = 2
-  local useSide = w - 2 >= m.w * 2 + side or (w - 2 >= m.w + side and w >= 60)
-  local areaW = useSide and (w - side - 2) or (w - 2)
-  if m.w * 2 > areaW then cw = 1 end
-  local keyRows = useSide and 0 or 2
-  local areaH = bottom - top + 1 - keyRows
-  local cols, rows = math.floor(areaW / cw), areaH
+  local tc, tr, th = turtleCell(id, m)
+  local cw = (m.w * 2 <= bw) and 2 or 1
+  local cols, rows = math.floor(bw / cw), bh
   local fitsX, fitsY = m.w <= cols, m.h <= rows
-
-  -- Where the turtle is on the map (it reports its spot in the map's own frame)
-  local tc, tr
-  if s and s.mp and s.mapStamp then
-    tc, tr = s.mp.x - m.x0 + 1, s.mp.z - m.z0 + 1
+  local function cellAt(ch, st, isTurtle)
+    if isTurtle then return ARROW[th] or "@", K.white, stale and K.grey or K.magenta end
+    return cellLook(m, ch, st)
   end
-  -- Scroll: centre on the turtle while following, otherwise where the arrows left it
-  if ui.follow or ui.mapC == nil then
+  local function blitRow(px, py, cells)
+    local txt, fg, bg = {}, {}, {}
+    for _, c in ipairs(cells) do
+      local ch, f, b = c[1], c[2], c[3]
+      for n = 1, cw do
+        txt[#txt + 1] = (n == 1 or ch == "\127") and ch or " "
+        fg[#fg + 1] = BLIT[f]; bg[#bg + 1] = BLIT[b]
+      end
+    end
+    d.setCursorPos(px, py)
+    d.blit(table.concat(txt), table.concat(fg), table.concat(bg))
+  end
+
+  if fit and not (fitsX and fitsY) then
+    cw = 1
+    local k = math.max(m.w / bw, m.h / bh)
+    local dw, dh = math.max(1, math.ceil(m.w / k)), math.max(1, math.ceil(m.h / k))
+    dw, dh = math.min(dw, bw), math.min(dh, bh)
+    local grid = shrunk(id, m, k, dw, dh)
+    local ti = tc and math.min(dw, math.floor((tc - 1) / k) + 1)
+    local tj = tr and math.min(dh, math.floor((tr - 1) / k) + 1)
+    local ox, oy = x + math.floor((bw - dw) / 2), y + math.floor((bh - dh) / 2)
+    for j = 1, dh do
+      local cells = {}
+      for i = 1, dw do
+        local g = grid[j][i]
+        local ch, f, b = cellAt(g[1], g[2], ti == i and tj == j)
+        cells[i] = { ch, f, b }
+      end
+      blitRow(ox, oy + j - 1, cells)
+    end
+    return true
+  end
+
+  if fit then
+    ui.mapC, ui.mapR = 1, 1
+  elseif ui.follow or ui.mapC == nil then
     ui.mapC = tc and (tc - math.floor(cols / 2)) or 1
     ui.mapR = tr and (tr - math.floor(rows / 2)) or 1
   end
-  ui.mapC = fitsX and 1 or math.max(1, math.min(ui.mapC, m.w - cols + 1))
-  ui.mapR = fitsY and 1 or math.max(1, math.min(ui.mapR, m.h - rows + 1))
-  local ox = 2 + (fitsX and math.floor((cols - m.w) / 2) * cw or 0)
-  local oy = top + (fitsY and math.floor((rows - m.h) / 2) or 0)
-
-  for r = 0, math.min(rows, m.h) - 1 do
-    local mr = ui.mapR + r
+  local c0 = fitsX and 1 or math.max(1, math.min(ui.mapC, m.w - cols + 1))
+  local r0 = fitsY and 1 or math.max(1, math.min(ui.mapR, m.h - rows + 1))
+  if not fit then ui.mapC, ui.mapR = c0, r0 end
+  local ox = x + (fitsX and math.floor((cols - m.w) / 2) * cw or 0)
+  local oy = y + (fitsY and math.floor((rows - m.h) / 2) or 0)
+  local shownC, shownR = math.min(cols, m.w), math.min(rows, m.h)
+  for r = 0, shownR - 1 do
+    local mr = r0 + r
     local row, srow = m.rows[mr] or "", m.states[mr] or ""
-    local txt, fg, bg = {}, {}, {}
-    for c = 0, math.min(cols, m.w) - 1 do
-      local mc = ui.mapC + c
-      local ch, f, b = cellLook(m, row:sub(mc, mc), srow:sub(mc, mc))
-      if tc and mc == tc and mr == tr then
-        ch, f, b = ARROW[s.mp.h or 0] or "@", K.white, stale and K.grey or K.magenta
-      end
-      for _ = 1, cw do
-        txt[#txt + 1] = ch; fg[#fg + 1] = BLIT[f]; bg[#bg + 1] = BLIT[b]
-        if ch ~= "\127" then ch = " " end    -- 2-wide cells: the symbol once, then a blank
-      end
+    local cells = {}
+    for c = 0, shownC - 1 do
+      local mc = c0 + c
+      local ch, st = row:sub(mc, mc), srow:sub(mc, mc)
+      cells[#cells + 1] = { cellAt(ch ~= "" and ch or " ", st, tc and mc == tc and mr == tr) }
     end
-    d.setCursorPos(ox, oy + r)
-    d.blit(table.concat(txt), table.concat(fg), table.concat(bg))
+    blitRow(ox, oy + r, cells)
   end
-  -- Tap a cell: say what's there
-  local shownW, shownH = math.min(cols, m.w) * cw, math.min(rows, m.h)
-  hit(ox, oy, ox + shownW - 1, oy + shownH - 1, function(x, y)
-    local mc, mr = ui.mapC + math.floor((x - ox) / cw), ui.mapR + (y - oy)
+  if fit then return true end
+  hit(ox, oy, ox + shownC * cw - 1, oy + shownR - 1, function(px, py)
+    local mc, mr = c0 + math.floor((px - ox) / cw), r0 + (py - oy)
     local ch = (m.rows[mr] or ""):sub(mc, mc)
     local st = (m.states[mr] or ""):sub(mc, mc)
     local what = ({ ["#"] = "the slab border", ["@"] = "the dock barrel", ["%"] = "something solid",
@@ -660,86 +470,401 @@ local function drawMap(w, h)
     end
     if tc and mc == tc and mr == tr then what = nameOf(id) .. " is here" end
     local wx, wz
-    if tc and s.pos and m.north then                   -- world coords from its own position
-      wx, wz = s.pos.x + (mc - tc), s.pos.z + (mr - tr)
-    end
+    if tc and s.pos and m.north then wx, wz = s.pos.x + (mc - tc), s.pos.z + (mr - tr) end
     say((wx and ("%d, %d: "):format(wx, wz) or "") .. (what or "?"), K.white)
   end)
+  return fitsX and fitsY
+end
 
-  -- Key
+-- The key: { glyph, fg, bg, long text, colour, short text }
+local function mapKey(id, m)
+  local l = live[id]
+  local s = l and l.s
+  local stale = not l or os.clock() - l.seen > STALE
   local n, perCrop = mapStats(m)
   local lines = {}
   local function add(ch, f, b, text, colour, short) lines[#lines + 1] = { ch, f, b, text, colour, short } end
+  local tc = turtleCell(id, m)
   add(ARROW[s and s.mp and s.mp.h or 0], K.white, stale and K.grey or K.magenta,
-    nameOf(id) .. (stale and " (not heard)" or (tc and "" or " (off the map)")), stale and K.grey or K.white)
+    stale and "not heard" or (tc and "here" or "off the map"), stale and K.grey or K.white)
   if m.role == "lumberjack" then
-    add(SPADE, K.yellow, K.green, ("chopped+replanted %d"):format(n["+h"] or 0), nil, ("replanted %d"):format(n["+h"] or 0))
+    add(SPADE, K.yellow, K.green, ("replanted %d"):format(n["+h"] or 0))
     add(SPADE, K.lime, K.green, ("saplings %d"):format(n["+g"] or 0))
-    add("+", K.red, K.green, ("empty spots %d"):format(n["+e"] or 0), (n["+e"] or 0) > 0 and K.orange or nil,
-      ("empty %d"):format(n["+e"] or 0))
-    if (n["+ "] or 0) > 0 then add("+", K.lightGrey, K.green, ("not visited %d"):format(n["+ "]), nil, "unvisited") end
-    if (n["!"] or 0) > 0 then add(SPADE, K.lime, K.brown, ("wild trees %d"):format(n["!"]), nil, "wild") end
-    add(" ", K.green, K.green, "lane")
+    if (n["+e"] or 0) > 0 then add("+", K.red, K.green, ("empty %d"):format(n["+e"]), K.orange) end
+    if (n["+ "] or 0) > 0 then add("+", K.lightGrey, K.green, ("unvisited %d"):format(n["+ "])) end
+    if (n["!"] or 0) > 0 then add(SPADE, K.lime, K.brown, ("wild %d"):format(n["!"])) end
   else
     for i, name in ipairs(m.crops or {}) do
-      local pc = perCrop[i] or { all = 0, h = 0, g = 0, e = 0 }
-      add(cropName(name):sub(1, 1):upper(), cropColour(name, i), K.brown,
-        ("%s %d"):format(cropName(name), pc.all) .. ((pc.e or 0) > 0 and (" (" .. pc.e .. " empty)") or ""),
-        (pc.e or 0) > 0 and K.orange or nil, cropName(name))
+      local pc = perCrop[i] or { all = 0, e = 0 }
+      add(cropName(name):sub(1, 1):upper(), cropColour(name, i), K.brown, ("%s %d"):format(cropName(name), pc.all))
     end
-    add("A", K.white, K.brown, "capital = harvested", nil, "harvested")
-    add("a", K.white, K.brown, "small = growing", nil, "growing")
-    add(".", K.red, K.brown, "empty (no seeds)", nil, "empty")
-    if (n[","] or 0) > 0 then add("~", K.lightBlue, K.blue, "water / path", nil, "water") end
-    if (n["&"] or 0) > 0 then add("o", K.orange, K.brown, "pumpkin/melon spot", nil, "gourd") end
+    add("A", K.white, K.brown, "harvested")
+    add("a", K.white, K.brown, "growing")
+    local empty = 0
+    for _, pc in pairs(perCrop) do empty = empty + (pc.e or 0) end
+    add(".", K.red, K.brown, ("empty %d"):format(empty), empty > 0 and K.orange or nil)
+    if (n[","] or 0) > 0 then add("~", K.lightBlue, K.blue, "water") end
+    if (n["&"] or 0) > 0 then add("o", K.orange, K.brown, "gourd") end
   end
   add("D", K.black, K.yellow, "dock")
-  add(" ", K.grey, K.grey, "slab border", nil, "border")
-  if (n["%"] or 0) > 0 then add("\127", K.grey, K.black, "blocked") end
-  local ago = m.roundAt and fmtAgo(math.max(0, math.floor((os.epoch("utc") - m.roundAt) / 1000))) or nil
-  if useSide then
-    local kx, y = w - side + 1, top
-    for _, e in ipairs(lines) do
-      if y > bottom then break end
-      at(kx, y, e[1], e[2], e[3]); at(kx + 1, y, " " .. pad(e[4], side - 3), e[5] or K.lightGrey)
+  return lines
+end
+-- Lay the key out in rows of width w; draw = false just counts the rows
+local function drawKey(lines, x, y, w, maxRows, draw)
+  local row, cx = 1, x
+  for _, e in ipairs(lines) do
+    local len = #e[4] + 3
+    if cx + len - 1 > x + w and cx > x then row, cx = row + 1, x end
+    if row > maxRows then break end
+    if draw then at(cx, y + row - 1, e[1], e[2], e[3]); at(cx + 1, y + row - 1, " " .. e[4]:sub(1, w - 2), e[5] or K.lightGrey) end
+    cx = cx + len
+  end
+  return math.min(row, maxRows)
+end
+
+---------------------------------------------------------------------------
+-- Overview: a tile per farm turtle, with its farm drawn small and where it is right now
+---------------------------------------------------------------------------
+local function fuelPct(s)
+  if s and type(s.fuel) == "number" and type(s.fuelLimit) == "number" and s.fuelLimit > 0 then
+    return s.fuel / s.fuelLimit
+  end
+end
+
+local function drawTile(id, x, y, w, h)
+  local l = live[id]
+  local s = l and l.s
+  local stale = not l or os.clock() - l.seen > STALE
+  local st, colour = stateOf(id)
+  -- Name bar
+  at(x, y, (" "):rep(w), K.white, K.grey)
+  at(x + 1, y, pad(nameOf(id), w - #st - 3), stale and K.lightGrey or K.white, K.grey)
+  at(x + w - #st - 1, y, st, colour == K.grey and K.lightGrey or colour, K.grey)
+  local yy = y + 1
+  local function line(text, fg) if yy < y + h then at(x, yy, pad(text, w), fg or K.lightGrey) end; yy = yy + 1 end
+  -- What it's doing
+  local msg
+  if stale then msg = l and ("not heard for " .. fmtAgo(math.floor(os.clock() - l.seen))) or "never heard from"
+  else msg = tostring(s.msg or "") end
+  line(" " .. msg, stale and K.grey or ((s and (s.state == "error" or s.state == "lost" or s.state == "waiting")) and K.orange or K.lightGrey))
+  -- Fuel bar, then the next round (or how far through this one it is)
+  if yy < y + h then
+    local frac = fuelPct(s)
+    local pct = frac and (math.floor(frac * 100) .. "%") or "-"
+    at(x + 1, yy, "Fuel", K.grey)
+    bar(x + 6, yy, w - 8 - #pct, frac or 0, frac and frac < 0.1 and K.red or K.lime)
+    at(x + w - 1 - #pct, yy, pct, K.white)
+    yy = yy + 1
+  end
+  local nt = s and nextText(s) or ""
+  if nt ~= "" and yy < y + h - 1 then
+    at(x + 1, yy, pad(nt:gsub("^%l", string.upper), w - 2), s.state == "working" and K.lime or K.lightGrey)
+    yy = yy + 1
+  end
+  -- The farm, small
+  local m = maps[id]
+  local mapRows = (y + h - 1) - yy        -- leave the last row for the last round
+  if mapRows >= 3 then
+    if m and not m.none then
+      drawMapBox(id, m, x + 1, yy, w - 2, mapRows, true)
+    else
+      local t = (m and m.none) and "not mapped yet" or (s and s.mapStamp == nil) and "reboot it once for the map" or "asking for its map..."
+      at(x + 1, yy + math.floor(mapRows / 2), pad(t, w - 2), K.grey)
+    end
+    yy = yy + mapRows
+  end
+  if yy <= y + h - 1 then
+    local lr_ = s and s.lastRound and ("Last: " .. lastRoundText(s)) or ""
+    at(x, yy, pad(" " .. lr_, w), K.grey)
+  end
+  hit(x, y, x + w - 1, y + h - 1, function() ui.page, ui.id, ui.tab, ui.confirm, ui.follow = "turtle", id, "map", nil, true end)
+end
+
+local function drawOverview(w, h)
+  local list = ids()
+  if radioOK == false and not (ui.notice and os.clock() < ui.notice.untilT) then
+    ui.notice = { text = "No wireless/ender modem on me: the turtles can't hear me", colour = K.red, untilT = os.clock() + 1e9 }
+  end
+  local nProb = problems()
+  header(w, "FARMHAND", ("%d turtle%s%s"):format(#list, #list == 1 and "" or "s",
+    nProb > 0 and ("  " .. nProb .. " need" .. (nProb == 1 and "s" or "") .. " you") or "  all fine"))
+  local top, bottom = 3, h - 2
+  local availH = bottom - top + 1
+  ui.visible = {}
+  if #list == 0 then
+    local lines = { "No farm turtles heard yet.", "Set up a turtle as Partridge (crops) or Woodpecker (trees):",
+                    "it shows up here as soon as it's on the air." }
+    for i, l in ipairs(lines) do at(2, top + i, pad(l, w - 2), i == 1 and K.white or K.lightGrey) end
+  end
+  -- Tiles: two across on wide screens, as many rows as fit (at least 5 lines each)
+  local cols = (w >= 46 and #list >= 2) and 2 or 1
+  local tileW = math.floor((w - 1 - (cols - 1)) / cols)
+  local maxRows = math.max(1, math.floor((availH + 1) / 6))
+  local tileRows = math.max(1, math.min(maxRows, math.ceil(#list / cols)))
+  local tileH = math.floor((availH + 1) / tileRows) - 1
+  local per = cols * tileRows
+  local pages = math.max(1, math.ceil(#list / per))
+  ui.scroll = math.max(1, math.min(ui.scroll, pages))
+  for i = 1, per do
+    local id = list[(ui.scroll - 1) * per + i]
+    if not id then break end
+    ui.visible[#ui.visible + 1] = id
+    local c, r = (i - 1) % cols, math.floor((i - 1) / cols)
+    drawTile(id, 1 + c * (tileW + 1) + (cols == 1 and 0 or 0), top + r * (tileH + 1), cols == 1 and w or tileW, tileH)
+  end
+
+  local fy = h
+  at(1, fy, (" "):rep(w))
+  local x = 2
+  if #list > 0 then
+    x = smallButton(x, fy, "Rounds all", K.lime, function()
+      for _, id in ipairs(ids()) do order(id, "rounds") end
+      say("Every farm turtle is off on its rounds.")
+    end)
+    x = smallButton(x, fy, "Pause all", K.orange, function()
+      for _, id in ipairs(ids()) do order(id, "stop") end
+      say("Every farm turtle will stay docked (Go to start again).", K.orange)
+    end)
+    if w >= 50 then
+      x = smallButton(x, fy, "Reboot all", K.purple, function()
+        for _, id in ipairs(ids()) do requestReboot(id) end
+        say("Reboot sent: each finishes what it's doing, then restarts.", K.purple)
+      end, K.white)
+    end
+  end
+  if pages > 1 then
+    local label = ("%d/%d"):format(ui.scroll, pages)
+    local px = w - #label - 9
+    if px > x then
+      smallButton(px, fy, "<", ui.scroll > 1 and K.cyan or K.grey, function() ui.scroll = ui.scroll - 1 end)
+      at(px + 4, fy, label, K.lightGrey)
+      smallButton(w - 3, fy, ">", ui.scroll < pages and K.cyan or K.grey, function() ui.scroll = ui.scroll + 1 end)
+    end
+  end
+end
+
+---------------------------------------------------------------------------
+-- One turtle: its map (or info / haul / settings) on the left, what it's doing + orders on the right
+---------------------------------------------------------------------------
+local function wrap(text, w)
+  local out, line = {}, ""
+  for word in tostring(text):gmatch("%S+") do
+    if line == "" then line = word
+    elseif #line + 1 + #word <= w then line = line .. " " .. word
+    else out[#out + 1] = line; line = word end
+  end
+  if line ~= "" then out[#out + 1] = line end
+  return out
+end
+
+local function drawStatus(id, x, y, w, maxY)
+  local l = live[id]
+  local s = l and l.s
+  local function line(fn) if y <= maxY then fn() end y = y + 1 end
+  line(function() lr(x, y, w, "Seen", l and (fmtAgo(math.floor(os.clock() - l.seen)) .. " ago") or "never", K.lightGrey, K.grey) end)
+  local f = s and s.fuel
+  line(function() lr(x, y, w, "Fuel", type(f) == "number" and (fmtNum(f) .. " / " .. fmtNum(s.fuelLimit)) or (f or "-")) end)
+  if s and s.role == "lumberjack" then
+    line(function() lr(x, y, w, "Zone", s.mapped and ("%s blocks, %s trees"):format(fmtNum(s.cells), fmtNum(s.spots)) or "not mapped") end)
+    line(function() lr(x, y, w, "Saplings", fmtNum(s.saplings)) end)
+  else
+    line(function()
+      local crop = s and s.crop and pretty(tostring(s.crop):gsub("_seeds$", ""):gsub("^.-:", "")) or nil
+      lr(x, y, w, "Farm", s and s.mapped and (fmtNum(s.plots) .. " plots" .. (crop and (", " .. crop) or "")) or "not mapped")
+    end)
+    line(function() lr(x, y, w, "Seeds", s and fmtNum(s.seeds) or "-") end)
+  end
+  line(function() lr(x, y, w, "Last round", s and lastRoundText(s) or "-") end)
+  line(function() lr(x, y, w, "Next", s and (nextText(s) ~= "" and nextText(s) or "-") or "-") end)
+  line(function() lr(x, y, w, "Rounds done", s and fmtNum(s.rounds) or "-") end)
+  y = y + 1
+  line(function() lr(x, y, w, "At", posText(s), K.lightGrey, K.white) end)
+  line(function() lr(x, y, w, "Facing", s and s.facing or "?") end)
+  line(function() lr(x, y, w, "Home", s and s.home and ("%d, %d, %d"):format(s.home.x, s.home.y, s.home.z) or "?") end)
+  line(function()
+    local txt = not s and "-" or s.anchored and "pinned: never lost" or s.gps and "seen, not pinned yet" or "none: counting moves"
+    lr(x, y, w, "GPS", txt, K.lightGrey, s and not s.anchored and K.orange or K.grey)
+  end)
+  line(function() lr(x, y, w, "Computer", "#" .. id, K.lightGrey, K.grey) end)
+  return y
+end
+
+local function drawHaul(id, x, y, w, maxY)
+  local l = live[id]
+  local s = l and l.s
+  local function list(title, items)
+    if y > maxY then return end
+    at(x, y, pad(title, w), K.grey); y = y + 1
+    if (not items or #items == 0) and y <= maxY then at(x, y, pad("Nothing yet", w), K.grey); y = y + 1 end
+    for _, e in ipairs(items or {}) do
+      if y > maxY then break end
+      lr(x, y, w, pretty(e[1]), fmtNum(e[2]), K.white, K.cyan)
       y = y + 1
     end
     y = y + 1
-    if y <= bottom then at(kx, y, pad(("%dx%d, %d blocks"):format(m.w, m.h, n.cells), side - 1), K.grey); y = y + 1 end
-    if y <= bottom then at(kx, y, pad(ago and ("last round " .. ago .. " ago") or "no round yet", side - 1), K.grey); y = y + 1 end
-    if y <= bottom and s and s.progress then at(kx, y, pad("round " .. s.progress .. " (live)", side - 1), K.lime) end
-  else
-    -- Compact: the most useful entries across two rows
-    local y, x = bottom - 1, 2
-    for i, e in ipairs(lines) do
-      local text = i == 1 and (stale and "(not heard)" or "here") or (e[6] or e[4])
-      local len = #text + 3
-      if x + len > w then y = y + 1; x = 2 end
-      if y > bottom then break end
-      at(x, y, e[1], e[2], e[3]); at(x + 1, y, " " .. text, e[5] or K.lightGrey)
-      x = x + len
-    end
   end
+  list("LAST HAUL", s and s.lastHaul)
+  list("BROUGHT IN SO FAR", s and s.totals)
+  return y
+end
 
-  -- Footer: panning when the map is bigger than the screen
+local function drawSettings(id, x, y, w, maxY)
+  local l = live[id]
+  local s = l and l.s
+  at(x, y, pad("SETTINGS (changed live)", w), K.grey); y = y + 2
+  for _, def in ipairs(SETTINGS[s and s.role or ""] or {}) do
+    if y > maxY then break end
+    local k, label, unit, step, mn, mx = def[1], def[2], def[3], def[4], def[5], def[6]
+    local v, pending = settingValue(id, k)
+    local val = (v == nil) and "?" or (tostring(v) .. (unit ~= "" and (" " .. unit) or ""))
+    if k == "RESURVEY_EVERY" and v == 0 then val = "never" end
+    local bx = x + w - 3
+    local vx = bx - 1 - #val
+    local mxL = vx - 4 - x - 1
+    if #label > mxL then label = label:gsub("^Rounds every", "Every"):gsub("^Re%-map every", "Re-map"):gsub("^Keep ", "") end
+    at(x, y, pad(label:sub(1, math.max(0, mxL)), w), K.lightGrey)
+    at(math.max(x, vx - 4), y, " - ", K.black, (v and v > mn) and K.cyan or K.grey)
+    hit(math.max(x, vx - 4), y, math.max(x, vx - 4) + 2, y, function()
+      if type(v) == "number" then changeSetting(id, k, math.max(mn, v - step)) end
+    end)
+    at(vx, y, val, pending and K.yellow or K.white)
+    at(bx, y, " + ", K.black, (v and v < mx) and K.cyan or K.grey)
+    hit(bx, y, bx + 2, y, function()
+      if type(v) == "number" then changeSetting(id, k, math.min(mx, v + step)) end
+    end)
+    y = y + 2
+  end
+  for _, t in ipairs(wrap("Yellow = sent, waiting for the turtle to confirm. Written into its own .env file.", w)) do
+    if y > maxY then break end
+    at(x, y, pad(t, w), K.grey); y = y + 1
+  end
+end
+
+local function drawMapTab(id, x, y, w, maxY)
+  local m = maps[id]
+  local l = live[id]
+  local s = l and l.s
+  if not m or m.none then
+    local t = (m and m.none) and "It hasn't mapped its farm yet."
+      or (s and s.mapStamp == nil) and "No map from it: reboot it once so it gets the new program."
+      or "Asking " .. nameOf(id) .. " for its map..."
+    for i, line in ipairs(wrap(t, w)) do at(x, y + i, pad(line, w), K.lightGrey) end
+    return
+  end
+  local key = mapKey(id, m)
+  local keyRows = drawKey(key, x, 0, w, 3, false)
+  local panRow = maxY
+  local mapH = maxY - y + 1 - keyRows - 1
+  -- Try without the pan row first: if it all fits, no pan buttons
+  local fits = m.w <= ((m.w * 2 <= w) and math.floor(w / 2) or w) and m.h <= mapH + 1
+  if fits then mapH = mapH + 1 end
+  drawMapBox(id, m, x, y, w, mapH, false)
+  drawKey(key, x, y + mapH, w, keyRows, true)
+  if not fits then
+    local step = math.max(2, math.floor(math.min(w, mapH) / 3))
+    local function pan(dc, dr) return function() ui.follow = false; ui.mapC, ui.mapR = (ui.mapC or 1) + dc, (ui.mapR or 1) + dr end end
+    local bx = x
+    bx = smallButton(bx, panRow, "\17", K.cyan, pan(-step, 0))
+    bx = smallButton(bx, panRow, "\30", K.cyan, pan(0, -step))
+    bx = smallButton(bx, panRow, "\31", K.cyan, pan(0, step))
+    bx = smallButton(bx, panRow, "\16", K.cyan, pan(step, 0))
+    smallButton(bx, panRow, "Follow", ui.follow and K.lime or K.grey, function() ui.follow = true end, ui.follow and K.black or K.white)
+  end
+end
+
+-- Right column: what it's doing, fuel, and the order buttons
+local function drawSide(id, x, y, w, maxY)
+  local l = live[id]
+  local s = l and l.s
+  local t = cfg.turtles[id] or {}
+  local st, colour = stateOf(id)
+  at(x, y, pad(st, w), colour); y = y + 1
+  local msg = s and s.msg or "Waiting to hear from it"
+  for i, line in ipairs(wrap(msg, w)) do
+    if i > 2 then break end
+    at(x, y, pad(line, w), K.lightGrey); y = y + 1
+  end
+  local frac = fuelPct(s)
+  at(x, y, "Fuel", K.grey)
+  local pct = frac and (math.floor(frac * 100) .. "%") or "-"
+  bar(x + 5, y, w - 6 - #pct, frac or 0, frac and frac < 0.1 and K.red or K.lime)
+  at(x + w - #pct, y, pct, K.white); y = y + 1
+  lr(x, y, w, "Next", s and (nextText(s) ~= "" and nextText(s) or "-") or "-"); y = y + 1
+  if s and s.role == "lumberjack" then lr(x, y, w, "Saplings", fmtNum(s.saplings))
+  elseif s then lr(x, y, w, "Seeds", fmtNum(s.seeds)) end
+  y = y + 2
+
+  local btns = {
+    { "ROUNDS NOW", K.lime, function() order(id, "rounds"); say(nameOf(id) .. " is off on its rounds.") end },
+    s and s.paused and { "GO", K.lime, function() order(id, "go"); say(nameOf(id) .. " is back on its timer.") end }
+      or { "PAUSE", K.orange, function() order(id, "stop"); say(nameOf(id) .. " will stay docked.", K.orange) end },
+    { "RE-MAP", K.lightBlue, function() order(id, "survey"); say(nameOf(id) .. " will walk its farm again.", K.lightBlue) end },
+  }
+  if s and s.state == "lost" then
+    btns[#btns + 1] = { "FOUND", K.yellow, function()
+      order(id, "found"); say("Put " .. nameOf(id) .. " on its home spot first: it works out the rest.", K.yellow)
+    end }
+  end
+  btns[#btns + 1] = { t.reboot and "REBOOTING..." or "REBOOT", K.purple, function()
+    requestReboot(id); say(nameOf(id) .. " reboots once it's finished what it's doing.", K.purple)
+  end, K.white }
+  local n, avail = #btns, maxY - y + 1
+  local bh, gap = 1, 0
+  for _, try in ipairs({ { 3, 1 }, { 2, 1 }, { 1, 1 }, { 1, 0 } }) do
+    if n * try[1] + (n - 1) * try[2] <= avail then bh, gap = try[1], try[2]; break end
+  end
+  for _, b in ipairs(btns) do
+    if y + bh - 1 > maxY then break end
+    button(x, y, w, bh, b[1], b[2], b[3], b[4]); y = y + bh + gap
+  end
+end
+
+local TABS = { { "map", "Map" }, { "info", "Info" }, { "haul", "Haul" }, { "settings", "Settings" } }
+
+local function drawTurtle(w, h)
+  local id = ui.id
+  if not cfg.turtles[id] then ui.page = "overview"; return drawOverview(w, h) end
+  ui.tab = ui.tab or "map"
+  local st, colour = stateOf(id)
+  local m = maps[id]
+  header(w, "< " .. nameOf(id), (ui.tab == "map" and m and not m.none) and (m.north and "north is up" or "up = way it faced") or nil)
+  hit(1, 1, math.min(w, #nameOf(id) + 4), 1, function() ui.page = "overview" end)
+
+  local side = w >= 44
+  local sw = side and math.max(18, math.min(24, math.floor(w * 0.36))) or 0
+  local px, pw = 2, side and (w - sw - 3) or (w - 2)
+  local top, bottom = 3, h - 1
+  if side then drawSide(id, w - sw, top, sw, bottom) end
+  if not side and ui.tab == "do" then drawSide(id, px, top, pw, bottom)
+  elseif ui.tab == "info" then
+    local y = drawStatus(id, px, top, pw, bottom)
+    local l = live[id]
+    if (not l or os.clock() - l.seen > 120) and y + 1 <= bottom then
+      if ui.confirm == "forget" then
+        smallButton(px, y + 1, "Sure? Forget it", K.red, function()
+          cfg.turtles[id] = nil; live[id] = nil; maps[id] = nil; saveCfg(); ui.page, ui.confirm = "overview", nil
+          say("Forgotten. If it talks again it comes back.", K.orange)
+        end, K.white)
+      else
+        smallButton(px, y + 1, "Forget this turtle", K.grey, function() ui.confirm = "forget" end, K.white)
+      end
+    end
+  elseif ui.tab == "haul" then drawHaul(id, px, top, pw, bottom)
+  elseif ui.tab == "settings" then drawSettings(id, px, top, pw, bottom)
+  else drawMapTab(id, px, top, pw, bottom) end
+
+  -- Footer: tabs + Back
   at(1, h, (" "):rep(w))
   local x = 2
-  if not (fitsX and fitsY) then
-    local step = math.max(2, math.floor(math.min(cols, rows) / 3))
-    local function pan(dc, dr) return function()
-      ui.follow = false
-      ui.mapC, ui.mapR = ui.mapC + dc, ui.mapR + dr
-    end end
-    x = smallButton(x, h, "\17", K.cyan, pan(-step, 0))
-    x = smallButton(x, h, "\30", K.cyan, pan(0, -step))
-    x = smallButton(x, h, "\31", K.cyan, pan(0, step))
-    x = smallButton(x, h, "\16", K.cyan, pan(step, 0))
-    x = smallButton(x, h, ui.follow and "Following" or "Follow", ui.follow and K.lime or K.grey,
-      function() ui.follow = true end, ui.follow and K.black or K.white)
-  elseif w >= 40 then
-    at(x, h, "Tap a block to see what's there", K.grey)
+  local tabs = TABS
+  if not side then tabs = { { "map", "Map" }, { "do", "Do" }, { "info", "Info" }, { "settings", "Set" } } end
+  for _, tb in ipairs(tabs) do
+    local on = ui.tab == tb[1]
+    if x + #tb[2] + 1 <= w - 7 then
+      x = smallButton(x, h, tb[2], on and K.cyan or K.grey, function() ui.tab, ui.confirm = tb[1], nil end, on and K.black or K.white) - 1
+    end
   end
-  smallButton(w - 7, h, "Back", K.grey, function() ui.page = "turtle" end, K.white)
+  smallButton(w - 7, h, "Back", K.grey, function() ui.page, ui.confirm = "overview", nil end, K.white)
 end
 
 local function draw()
@@ -753,9 +878,8 @@ local function draw()
         local w, h = d.getSize()
         if not w then return end
         d.setBackgroundColour(K.black); d.clear()
-        if ui.page == "turtle" then drawTurtle(w, h)
-        elseif ui.page == "map" then drawMap(w, h)
-        else drawOverview(w, h) end
+        if ui.page == "map" then ui.page, ui.tab = "turtle", "map" end
+        if ui.page == "turtle" then drawTurtle(w, h) else drawOverview(w, h) end
       end)
       v.hits = hits
       if not ok and v.kind == "monitor" then mon, monSide = findMonitor() end
@@ -824,16 +948,19 @@ local function netLoop()
     if type(msg) == "table" and msg.type == "map" and cfg.turtles[tonumber(msg.id) or from] then
       maps[tonumber(msg.id) or from] = msg
     end
-    -- Maps: only fetched while someone's looking at one, and again whenever the turtle says it changed
+    -- Maps: fetched for the turtles on screen (overview tiles, or the one open), and again whenever
+    -- a turtle says its map changed (it does during rounds, so the arrow and marks stay live)
+    local want = {}
     for _, v in ipairs(views) do
-      local mid = v.ui.page == "map" and v.ui.id
-      if mid then
-        local l, m = live[mid], maps[mid]
-        local changed = not m or (l and l.s.mapStamp and l.s.mapStamp ~= m.stamp)
-        if changed and os.clock() - (mapAskedAt[mid] or -100) >= 5 then
-          rednet.send(mid, { type = "mapreq", to = mid }, PROTOCOL)
-          mapAskedAt[mid] = os.clock()
-        end
+      if v.ui.page == "turtle" and v.ui.id then want[v.ui.id] = true
+      else for _, vid in ipairs(v.ui.visible or {}) do want[vid] = true end end
+    end
+    for mid in pairs(want) do
+      local l, m = live[mid], maps[mid]
+      local changed = not m or (l and l.s.mapStamp and l.s.mapStamp ~= m.stamp)
+      if l and l.s.mapStamp and changed and os.clock() - (mapAskedAt[mid] or -100) >= 5 then
+        rednet.send(mid, { type = "mapreq", to = mid }, PROTOCOL)
+        mapAskedAt[mid] = os.clock()
       end
     end
     local all = os.clock() - lastSend >= SEND_EVERY
@@ -854,7 +981,7 @@ local function inputLoop()
     elseif e == "mouse_scroll" then
       local u = views[2].ui
       if u.page == "overview" then u.scroll = u.scroll + a
-      elseif u.page == "map" then u.follow = false; u.mapR = (u.mapR or 1) + a * 3 end
+      elseif u.page == "turtle" and (u.tab or "map") == "map" then u.follow = false; u.mapR = (u.mapR or 1) + a * 3 end
       draw()
     elseif e == "peripheral" or e == "peripheral_detach" or e == "monitor_resize" then
       mon, monSide = findMonitor(); draw()
