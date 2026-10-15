@@ -7,6 +7,7 @@ local demo = { depth = 40, paused = false, pending = false, reboots = 0, forgott
 _G.demo = demo
 
 local views = { ui.view(term.current()) }
+demo.view = views[1]
 local mon = peripheral.wrap("right")
 if mon then views[#views + 1] = ui.view(mon, { side = "right" }) end
 

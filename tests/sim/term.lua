@@ -63,6 +63,7 @@ Term.setPaletteColor, Term.getPaletteColor = Term.setPaletteColour, Term.getPale
 
 function Term:write(s)
   s = tostring(s)
+  self.writes = (self.writes or 0) + 1
   local y = self.cy
   if y >= 1 and y <= self.h then
     for i = 1, #s do
@@ -76,6 +77,7 @@ function Term:write(s)
 end
 
 function Term:blit(s, fgs, bgs)
+  self.writes = (self.writes or 0) + 1
   if #s ~= #fgs or #s ~= #bgs then error("Arguments must be the same length", 2) end
   local y = self.cy
   if y >= 1 and y <= self.h then
@@ -91,7 +93,7 @@ function Term:blit(s, fgs, bgs)
   self.cx = self.cx + #s
 end
 
-function Term:clear() for y = 1, self.h do self:_blankRow(y) end end
+function Term:clear() self.clears = (self.clears or 0) + 1; for y = 1, self.h do self:_blankRow(y) end end
 function Term:clearLine() if self.cy >= 1 and self.cy <= self.h then self:_blankRow(self.cy) end end
 
 function Term:scroll(n)

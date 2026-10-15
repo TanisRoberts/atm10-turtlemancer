@@ -338,3 +338,22 @@ T.test("farmhand: no colour: still draws and works", function()
   click(w, fh, 6, 4)
   T.contains(fh.screen:line(1), "[PARTRIDGE-01]")
 end)
+
+T.test("farmhand: a busy radio does not make the screens flicker", function()
+  local w, fh, mon = farm({ monitor = { 57, 24 } })
+  local noisy = w:computer{ id = 30, label = "Noisy" }
+  noisy:attach("top", cc.wireless{ ender = true })
+  noisy:writeFile("n.lua", [[
+    peripheral.find("modem", function(n) rednet.open(n); return false end)
+    while true do rednet.broadcast({ type = "status", role = "miner", id = 99, n = os.clock() }, "tanis-dig"); sleep(0.05) end
+  ]])
+  noisy:run("n")
+  w:run(5)
+  local m0, t0 = mon.writes, fh.screen.writes
+  w:run(10)
+  T.eq(mon.clears or 0, 0, "the monitor is never cleared"); T.eq(fh.screen.clears or 0, 0, "nor the computer's own screen")
+  -- Only the 'seen Ns ago' / countdown rows change, once a second or so: about 20 radio messages a second must
+  -- not turn into 20 screen rewrites a second
+  T.truthy(mon.writes - m0 <= 10 * 12, "monitor writes in 10 s: " .. (mon.writes - m0))
+  T.truthy(fh.screen.writes - t0 <= 10 * 12, "terminal writes in 10 s: " .. (fh.screen.writes - t0))
+end)

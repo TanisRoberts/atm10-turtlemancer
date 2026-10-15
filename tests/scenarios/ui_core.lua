@@ -387,3 +387,42 @@ T.test("ui: resize redraws at the new size class", function()
   T.eq(c.screen.ch[2][39], RULE)
   T.truthy(inRow(c.screen, 13, " < "), "footer moved to the new last row")
 end)
+
+---------------------------------------------------------------------------------------------------------
+-- Flicker: the computer runs alongside the game, so a screen that is cleared and repainted can be seen blank.
+-- The kit draws into a buffer and sends only the rows that changed; it never clears the screen.
+T.test("ui: never clears the screen; a frame that changed nothing writes nothing", function()
+  local world, c = demo(51, 19)
+  local scr = c.screen
+  T.eq(scr.clears or 0, 0, "the kit never clears the screen")
+  local w0 = scr.writes
+  T.truthy(w0 and w0 <= 19, "the first frame is one blit per row")
+  world:run(10)                                         -- ten idle seconds: nothing changed, so nothing is sent
+  T.eq(scr.writes, w0, "an unchanged screen is not rewritten")
+  tap(world, c, 4, 4)                                   -- Pause: only the rows that differ are sent
+  T.truthy(scr.writes - w0 <= 3, "a tap rewrote only the rows that changed, not the screen (" .. (scr.writes - w0) .. ")")
+  T.eq(scr.clears or 0, 0)
+end)
+
+T.test("ui: a flood of unrelated events does not redraw the screen over and over", function()
+  local world, c = demo(51, 19)
+  local scr, v = c.screen, c.env._G.demo.view
+  local frames0, writes0 = v.frames, scr.writes
+  for i = 1, 300 do c:queue("rednet_message", 99, "chatter " .. i, "somebody-elses-protocol") end
+  world:run(1)
+  T.truthy(v.frames - frames0 <= 6, "300 radio messages in a second gave " .. (v.frames - frames0) .. " frames")
+  T.eq(scr.writes, writes0, "and none of them changed the picture, so nothing was written")
+  T.eq(scr.clears or 0, 0)
+  -- input is still shown at once
+  local f1 = v.frames
+  tap(world, c, 4, 4)
+  T.truthy(v.frames > f1 and c.env._G.demo.paused, "a tap redraws immediately")
+end)
+
+T.test("ui: a resize shows every row again", function()
+  local world, c = demo(51, 19)
+  c:resize(39, 13); world:run(0.3)
+  T.contains(c.screen:line(1), "DEMO")
+  T.contains(c.screen:line(13), "<")
+  T.eq(c.screen.clears or 0, 0)
+end)

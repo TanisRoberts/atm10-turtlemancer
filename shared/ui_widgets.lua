@@ -9,8 +9,6 @@ local fit = ui.text.fit
 local K = keys
 
 local function clamp(n, lo, hi) return max(lo, min(hi, n)) end
-local function log2(c) local n = 0; while c > 1 do c = c / 2; n = n + 1 end; return n end
-local function hex(slot) return ("0123456789abcdef"):sub(log2(slot) + 1, log2(slot) + 1) end
 
 -- Frame state added by this module is forgotten at the start of every frame.
 local begin = View.begin
@@ -380,16 +378,12 @@ end
 -- v:cells(x, y, { { char, fg, bg }, ... }) draws one row of coloured cells in a single call (blit). Without colour
 -- the character carries the meaning, and a blank cell on a coloured background becomes a dot.
 function View:cells(x, y, cells)
-  if self.colour then
-    local chs, fgs, bgs = {}, {}, {}
-    for i, c in ipairs(cells) do chs[i], fgs[i], bgs[i] = c[1], hex(self:slot(c[2])), hex(self:slot(c[3])) end
-    self.t.setCursorPos(x, y)
-    self.t.blit(table.concat(chs), table.concat(fgs), table.concat(bgs))
-  else
-    local chs = {}
-    for i, c in ipairs(cells) do chs[i] = (c[1] == " " and c[3] ~= "bg") and "." or c[1] end
-    self:put(x, y, table.concat(chs), "fg", "bg")
+  local chs, fgs, bgs = {}, {}, {}
+  for i, c in ipairs(cells) do
+    chs[i] = (not self.colour and c[1] == " " and c[3] ~= "bg") and "." or c[1]
+    fgs[i], bgs[i] = ui.hex(self:slot(c[2])), ui.hex(self:slot(c[3]))
   end
+  self:_write(x, y, table.concat(chs), table.concat(fgs), table.concat(bgs))
 end
 
 -- v:map({ get = fn(x, z) -> role or { role, char, text, fgRole }, at = { x =, z =, facing = 0..3 (N E S W) or "^>v<",

@@ -146,10 +146,50 @@ function ui.view(t, opts)
   return v
 end
 
+-- Drawing goes into a buffer (one character, text colour and background per cell). flush() then sends the rows
+-- that differ from what the screen already shows, with one blit each. The screen is never cleared and an unchanged
+-- frame writes nothing, so redrawing often cannot flicker (the computer runs alongside the game: a clear that is
+-- repainted a moment later can be seen blank).
+local HEXD = "0123456789abcdef"
+local function hexOf(slot)
+  local n = 0
+  while slot > 1 do slot = slot / 2; n = n + 1 end
+  return HEXD:sub(n + 1, n + 1)
+end
+ui.hex = hexOf
+
 function View:measure()
   self.W, self.H = self.t.getSize()
   self.wc, self.hc = ui.layout.classes(self.W, self.H)
+  self.shown = {}                                   -- the screen's size changed or is new: show every row again
+  self:blank()
 end
+-- Clear the buffer (not the screen).
+function View:blank()
+  self.bc, self.bf, self.bb = {}, {}, {}
+  local f, b = hexOf(self:slot("fg")), hexOf(self:slot("bg"))
+  for y = 1, self.H do
+    local c, ff, bb = {}, {}, {}
+    for x = 1, self.W do c[x], ff[x], bb[x] = " ", f, b end
+    self.bc[y], self.bf[y], self.bb[y] = c, ff, bb
+  end
+end
+-- Send the rows that changed since the last flush.
+function View:flush()
+  local t = self.t
+  for y = 1, self.H do
+    local c, f, b = table.concat(self.bc[y]), table.concat(self.bf[y]), table.concat(self.bb[y])
+    local key = c .. "|" .. f .. "|" .. b
+    if self.shown[y] ~= key then
+      t.setCursorPos(1, y)
+      t.blit(c, f, b)
+      self.shown[y] = key
+    end
+  end
+  self.frames = (self.frames or 0) + 1
+end
+-- Force every row to be sent again at the next flush (something else wrote on the screen).
+function View:invalidate() self.shown = {} end
 function View:rect(inputRow) return ui.layout.content(self.W, self.H, inputRow) end
 
 -- Put the stock palette back (call when the program ends and the screen goes back to the shell).
@@ -168,31 +208,41 @@ function View:slot(x)
   return C.white
 end
 
--- Write text at x,y clipped to the screen.
+-- Write into the buffer at x,y, clipped to the screen: s is the text, f and b the text and background colour as
+-- blit digits (one digit for the whole string, or one per character).
+function View:_write(x, y, s, f, b)
+  local n = #s
+  if y < 1 or y > self.H or x > self.W or n == 0 then return end
+  local i0 = 1
+  if x < 1 then i0 = 2 - x; x = 1 end
+  local last = math.min(n, i0 + self.W - x)
+  local c, ff, bb = self.bc[y], self.bf[y], self.bb[y]
+  local fone, bone = #f == 1, #b == 1
+  for i = i0, last do
+    local cx = x + i - i0
+    c[cx] = s:sub(i, i)
+    ff[cx] = fone and f or f:sub(i, i)
+    bb[cx] = bone and b or b:sub(i, i)
+  end
+end
+
+-- Write text at x,y clipped to the screen. Returns the first column after it.
 function View:put(x, y, s, fg, bg)
-  if y < 1 or y > self.H or x > self.W then return x + #s end
-  if x < 1 then s = s:sub(2 - x); x = 1 end
-  if x + #s - 1 > self.W then s = s:sub(1, self.W - x + 1) end
-  local t = self.t
-  t.setCursorPos(x, y)
-  t.setBackgroundColour(self:slot(bg or "bg"))
-  t.setTextColour(self:slot(fg or "fg"))
-  t.write(s)
+  self:_write(x, y, s, hexOf(self:slot(fg or "fg")), hexOf(self:slot(bg or "bg")))
   return x + #s
 end
 function View:fill(x, y, w, bg, ch)
   if w > 0 then self:put(x, y, (ch or " "):rep(w), "fg", bg) end
 end
 
--- Start a frame: forget last frame's hit boxes and focus list, blank the screen.
+-- Start a frame: forget last frame's hit boxes and focus list, blank the buffer.
 function View:begin()
   expire({ self })
   self.boxes, self.foc, self.hot, self.backfn, self.noticeDrawn = {}, {}, {}, nil, false
-  local t = self.t
-  t.setBackgroundColour(self:slot("bg"))
-  t.clear()
+  self:blank()
 end
-function View:frame(draw) self:begin(); draw(self) end
+-- One frame: draw into the buffer, then show what changed.
+function View:frame(draw) self:begin(); draw(self); self:flush() end
 
 -- Register a hit box. `drawn` is {x1,y1,x2,y2}; `target` defaults to the drawn cells. o: fn, id, enabled,
 -- confirm, focus (join the Tab order), stepper (a record with dec/inc functions).
@@ -479,16 +529,25 @@ function ui.run(views, draw, opts)
   quit = false
   local shift = false
   local timer
+  local MIN = opts.min_interval or 0.25
+  local lastFrame, pending = -1e9, false
   local function redraw()
     for _, v in ipairs(views) do v:frame(draw) end
+    lastFrame, pending = os.clock(), false
   end
   local function rearm()
     local at = opts.tick and (os.clock() + opts.tick)
     local function soon(t) if t and (not at or t < at) then at = t end end
     if ui.notice then soon(ui.notice.expires) end
     for _, v in ipairs(views) do if v.armed then soon(v.armed.at + CONFIRM_S) end end
-    timer = at and os.startTimer(math.max(at - os.clock(), 0.05)) or nil
+    if pending then soon(lastFrame + MIN) end
+    if timer then os.cancelTimer(timer); timer = nil end
+    if at then timer = os.startTimer(math.max(at - os.clock(), 0.05)) end
   end
+  -- Input is shown at once; anything else (a message on the radio, a timer) at most every MIN seconds. The screen
+  -- only changes where the picture changed (View:flush), so a busy radio cannot make it flicker.
+  local INPUT = { mouse_click = true, monitor_touch = true, key = true, char = true, mouse_scroll = true,
+                  term_resize = true, monitor_resize = true }
   redraw(); rearm()
   while not quit do
     local ev = table.pack(os.pullEvent())
@@ -514,7 +573,9 @@ function ui.run(views, draw, opts)
     end
     if name ~= "key_up" and name ~= "mouse_up" then
       expire(views)
-      if not quit then redraw() end
+      if not quit then
+        if INPUT[name] or os.clock() - lastFrame >= MIN - 0.001 then redraw() else pending = true end
+      end
       rearm()
     end
   end
