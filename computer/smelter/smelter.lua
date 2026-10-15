@@ -49,12 +49,15 @@ local TRAIN_TIMEOUT = 40      -- seconds with fuel in and nothing cooked = it do
 local FIND_TIME     = 60      -- seconds "Find it" waits for an item to be dropped in
 local CHUNK         = 8       -- work is handed out 8 items (one coal) at a time
 local TOPUP_AT      = 32      -- a busy furnace gets more of the same once it's down to this
-local FACTORY_BUFFER = 3     -- batches per process kept queued at a factory (feed barrel + its inputs)
-local FALLBACK_AFTER = 300   -- seconds every factory can be down before ore goes to the furnaces again
-local STUCK_AFTER    = 120   -- seconds with ore waiting and nothing moving = that factory is stuck
-local TRIAL_REFUSE   = 20    -- seconds a new ore can sit untouched in the feed before it counts as refused
-local TRIAL_TIMEOUT  = 90    -- seconds to wait for a new ore's dust
-local LEFTOVER_WAIT  = 600   -- an odd few ore (less than a batch) go to the furnaces after this long
+-- The factory code keeps its names in one table: CC's Lua (Cobalt) counts a file's top-level
+-- locals together with each function's, and stops at 200
+local FX = {}
+FX.FACTORY_BUFFER = 3     -- batches per process kept queued at a factory (feed barrel + its inputs)
+FX.FALLBACK_AFTER = 300   -- seconds every factory can be down before ore goes to the furnaces again
+FX.STUCK_AFTER    = 120   -- seconds with ore waiting and nothing moving = that factory is stuck
+FX.TRIAL_REFUSE   = 20    -- seconds a new ore can sit untouched in the feed before it counts as refused
+FX.TRIAL_TIMEOUT  = 90    -- seconds to wait for a new ore's dust
+FX.LEFTOVER_WAIT  = 600   -- an odd few ore (less than a batch) go to the furnaces after this long
 
 local K = colours
 
@@ -449,7 +452,7 @@ local function sendBatch(ops)
 end
 
 local function redraw() os.queueEvent("smelter_draw") end
-local notify = function() end   -- set once the screens exist: a notice on both screens
+FX.notify = function() end   -- set once the screens exist: a notice on both screens
 
 ---------------------------------------------------------------------------
 -- Factories: Mekanism enriching factories fed through a barrel (see the top of the file)
@@ -457,17 +460,16 @@ local notify = function() end   -- set once the screens exist: a notice on both 
 --   Mekanism makes that read-only), so items go in through the feed barrel's hopper upgrade and come
 --   out by auto-eject into the out barrel. I only read them (getInput/getOutput) and set eject.
 ---------------------------------------------------------------------------
-local facs = {}              -- factory index -> what I last read (see readFactory)
-local dustQueue = {}         -- dust -> output it should smelt into: waiting for the trainer to check it
-local autoTried = {}         -- dust -> when I last put one in the trainer to check it
-local leftoverSince = {}     -- ore -> since when there's been less than a batch of it
-local trialCool = {}         -- ore -> when a try gave nothing (don't try again for a while)
-local shortSince = {}        -- keep-N recipe -> since when it's been short (counts lag a few seconds,
+FX.facs = {}              -- factory index -> what I last read (see FX.readFactory)
+FX.dustQueue = {}         -- dust -> output it should smelt into: waiting for the trainer to check it
+FX.autoTried = {}         -- dust -> when I last put one in the trainer to check it
+FX.leftoverSince = {}     -- ore -> since when there's been less than a batch of it
+FX.trialCool = {}         -- ore -> when a try gave nothing (don't try again for a while)
+FX.shortSince = {}        -- keep-N recipe -> since when it's been short (counts lag a few seconds,
                              -- so ore only goes out for a shortfall that lasts)
-local factoryLine            -- (below) one line about a factory
 
 -- Could this be a factory? Mekanism machines answer getInput/getOutput/getRecipeProgress
-local function factoryLike(n)
+function FX.factoryLike(n)
   if peripheral.hasType(n, "inventory") then return false end
   local ok, m = pcall(peripheral.getMethods, n)
   if not ok or type(m) ~= "table" then return false end
@@ -477,14 +479,14 @@ local function factoryLike(n)
 end
 
 -- Raw ore or an ore block: worth trying in a factory
-local function isOreish(name)
+function FX.isOreish(name)
   return (name:find(":raw_[%w_]+$") ~= nil and not name:find("_block$")) or name:find("_ore$") ~= nil
 end
 
-local function factoryName(i) return "Factory " .. i end
-local function unitOf(i) return 3 * ((facs[i] and facs[i].procs) or 3) end   -- one batch for every process
+function FX.factoryName(i) return "Factory " .. i end
+function FX.unitOf(i) return 3 * ((FX.facs[i] and FX.facs[i].procs) or 3) end   -- one batch for every process
 
-local function readItem(it, into)
+function FX.readItem(it, into)
   if type(it) == "table" and it.name and it.name ~= "minecraft:air" and (it.count or 0) > 0 then
     into[it.name] = (into[it.name] or 0) + it.count
     return it.count
@@ -493,10 +495,10 @@ local function readItem(it, into)
 end
 
 -- Read one factory: its inputs/outputs, its feed barrel, power; works out whether it's up
-local function readFactory(i)
+function FX.readFactory(i)
   local f = cfg.factories[i]
-  local s = facs[i]
-  if not s or s.machine ~= f.machine then s = { machine = f.machine, lastMove = os.clock() }; facs[i] = s end
+  local s = FX.facs[i]
+  if not s or s.machine ~= f.machine then s = { machine = f.machine, lastMove = os.clock() }; FX.facs[i] = s end
   local why
   if not peripheral.isPresent(f.machine) then why = "can't see the factory"
   elseif not peripheral.isPresent(f.feed) then why = "can't see its feed barrel"
@@ -513,8 +515,8 @@ local function readFactory(i)
       s.procs = math.max(1, n)
     end
     for p = 0, s.procs - 1 do
-      s.insTotal = s.insTotal + readItem(call(f.machine, "getInput", p), s.ins)
-      s.outsTotal = s.outsTotal + readItem(call(f.machine, "getOutput", p), s.outs)
+      s.insTotal = s.insTotal + FX.readItem(call(f.machine, "getInput", p), s.ins)
+      s.outsTotal = s.outsTotal + FX.readItem(call(f.machine, "getOutput", p), s.outs)
     end
     local l = call(f.feed, "list")
     if type(l) == "table" then
@@ -551,7 +553,7 @@ local function readFactory(i)
     local total = s.feedTotal + s.insTotal
     if total ~= s.lastTotal or total == 0 then s.lastMove = os.clock() end
     s.lastTotal = total
-    if not why and total > 0 and os.clock() - s.lastMove > STUCK_AFTER then why = "stuck: nothing's moving" end
+    if not why and total > 0 and os.clock() - s.lastMove > FX.STUCK_AFTER then why = "stuck: nothing's moving" end
     if not why and s.ejectNote then why = s.ejectNote end
   end
   s.why = why
@@ -561,41 +563,41 @@ local function readFactory(i)
 end
 
 -- Do the factories still count? (some factory up, or not down for long)
-local function factoriesHold()
+function FX.factoriesHold()
   for i in ipairs(cfg.factories) do
-    local s = facs[i]
-    if not s or not s.downSince or os.clock() - s.downSince < FALLBACK_AFTER then return true end
+    local s = FX.facs[i]
+    if not s or not s.downSince or os.clock() - s.downSince < FX.FALLBACK_AFTER then return true end
   end
   return false
 end
 
-local function minUnit()
+function FX.minUnit()
   local u
-  for i in ipairs(cfg.factories) do u = math.min(u or 1e9, unitOf(i)) end
+  for i in ipairs(cfg.factories) do u = math.min(u or 1e9, FX.unitOf(i)) end
   return u or 9
 end
 
-local function trialFor(ore)
+function FX.trialFor(ore)
   for i in ipairs(cfg.factories) do
-    if facs[i] and facs[i].trial and facs[i].trial.input == ore then return i end
+    if FX.facs[i] and FX.facs[i].trial and FX.facs[i].trial.input == ore then return i end
   end
 end
 
 -- How many of a recipe's output one of this ore makes by way of a factory (0 = no route)
-local function enrichPer(r, ore)
+function FX.enrichPer(r, ore)
   local e = cfg.enrich[ore]
   if type(e) ~= "table" or not e.out or e.dustBad or not isInputOf(r, e.out) then return 0 end
   return (e.made / math.max(1, e.used)) * perOf(r, e.out)
 end
 
 -- Output on its way in the factories (feed barrels, inputs, dust not ejected yet), for keep-N rules
-local function pendingFor(r)
+function FX.pendingFor(r)
   local n = 0
   for i in ipairs(cfg.factories) do
-    local s = facs[i]
+    local s = FX.facs[i]
     if s and s.feed then
-      for name, c in pairs(s.feed) do n = n + c * enrichPer(r, name) end
-      for name, c in pairs(s.ins) do n = n + c * enrichPer(r, name) end
+      for name, c in pairs(s.feed) do n = n + c * FX.enrichPer(r, name) end
+      for name, c in pairs(s.ins) do n = n + c * FX.enrichPer(r, name) end
       for name, c in pairs(s.outs) do if isInputOf(r, name) then n = n + c * perOf(r, name) end end
       for name, c in pairs(s.outBarrel or {}) do if isInputOf(r, name) then n = n + c * perOf(r, name) end end
       for name, c in pairs(s.drained or {}) do if isInputOf(r, name) then n = n + c * perOf(r, name) end end
@@ -605,21 +607,21 @@ local function pendingFor(r)
 end
 
 -- A dust that already smelts into something (any recipe has it as an input)
-local function dustRecipe(dust)
+function FX.dustRecipe(dust)
   for _, k in ipairs(sortedKeys(book)) do
     if has(book[k].inputs, dust) then return book[k] end
   end
 end
 
 -- Lines for the screen and the status: every ore I know about
-local function enrichList()
+function FX.enrichList()
   local out = {}
   for _, ore in ipairs(sortedKeys(cfg.enrich)) do
     local e = cfg.enrich[ore]
     local state
     if e.no then state = "refused"
     elseif e.dustBad then state = "dust won't smelt"
-    elseif dustRecipe(e.out) then state = "on"
+    elseif FX.dustRecipe(e.out) then state = "on"
     else state = "checking dust" end
     out[#out + 1] = { ore = ore, e = e, state = state }
   end
@@ -664,7 +666,7 @@ local function smeltPass()
   end
   fstate = st
   if speedDirty and os.clock() - speedSaved > 60 then saveCfg(); speedDirty, speedSaved = false, os.clock() end
-  for i in ipairs(cfg.factories) do readFactory(i) end
+  for i in ipairs(cfg.factories) do FX.readFactory(i) end
 
   if #array == 0 then smeltNote = cfg.trainer and "Only the trainer on my cable" or "No furnaces on my cable network"; return end
   if not storageFresh() then smeltNote = "Waiting for the storage computer"; return end
@@ -717,10 +719,10 @@ local function smeltPass()
   -- 3. The factories: how much each can take this pass (whole batches; none while it's trying an ore)
   local facRoom = {}
   for i in ipairs(cfg.factories) do
-    local fs = facs[i]
+    local fs = FX.facs[i]
     if fs and fs.ok and not fs.trial then
-      local unit = unitOf(i)
-      facRoom[i] = math.max(0, math.floor((unit * FACTORY_BUFFER - fs.feedTotal - fs.insTotal) / unit) * unit)
+      local unit = FX.unitOf(i)
+      facRoom[i] = math.max(0, math.floor((unit * FX.FACTORY_BUFFER - fs.feedTotal - fs.insTotal) / unit) * unit)
     end
   end
   local feeds = {}           -- { i, item, n, job, trial }
@@ -736,7 +738,7 @@ local function smeltPass()
         if room > 0 and (not bestRoom or room > bestRoom or (room == bestRoom and i < best)) then best, bestRoom = i, room end
       end
       if not best then break end
-      local unit = unitOf(best)
+      local unit = FX.unitOf(best)
       local n = math.min(bestRoom, (roundUp and math.ceil(left / unit) or math.floor(left / unit)) * unit)
       n = math.floor(math.min(n, (have[ore] or 0) - taken) / unit) * unit
       if n <= 0 then break end
@@ -754,27 +756,27 @@ local function smeltPass()
 
   -- Try a new ore in a factory (eject off so its dust stays where I can read it)
   local function startTrial(ore)
-    if trialCool[ore] and os.clock() - trialCool[ore] < 600 then return nil end
+    if FX.trialCool[ore] and os.clock() - FX.trialCool[ore] < 600 then return nil end
     local best
     for i in ipairs(cfg.factories) do
-      local fs = facs[i]
-      if fs and fs.ok and not fs.trial and (not best or fs.feedTotal + fs.insTotal < facs[best].feedTotal + facs[best].insTotal) then
+      local fs = FX.facs[i]
+      if fs and fs.ok and not fs.trial and (not best or fs.feedTotal + fs.insTotal < FX.facs[best].feedTotal + FX.facs[best].insTotal) then
         best = i
       end
     end
     if not best then
       -- Busy trying something else: wait for it (unless no factory is up)
-      for i in ipairs(cfg.factories) do if facs[i] and facs[i].ok then return "hold" end end
+      for i in ipairs(cfg.factories) do if FX.facs[i] and FX.facs[i].ok then return "hold" end end
       return nil
     end
-    local unit = unitOf(best)
+    local unit = FX.unitOf(best)
     if (have[ore] or 0) < unit then return nil end
     for _, f in ipairs(feeds) do if f.i == best then return "hold" end end   -- already fed this pass
     local f = cfg.factories[best]
     call(f.machine, "setEjecting", "ITEM", false)
     local base = {}
-    for k, v in pairs(facs[best].outs or {}) do base[k] = v end
-    facs[best].trial = { input = ore, n = unit, t0 = os.clock(), ejectOff = call(f.machine, "isEjecting", "ITEM") == false,
+    for k, v in pairs(FX.facs[best].outs or {}) do base[k] = v end
+    FX.facs[best].trial = { input = ore, n = unit, t0 = os.clock(), ejectOff = call(f.machine, "isEjecting", "ITEM") == false,
                          seen = {}, outLast = nil, base = base }
     feeds[#feeds + 1] = { i = best, item = ore, n = unit, trial = true }
     facRoom[best] = 0
@@ -785,33 +787,33 @@ local function smeltPass()
   -- Where does this input go? "factory" (+ its route), "hold" (wait: a factory is trying it, or its
   -- dust is being checked) or nil (the furnaces, as always)
   local function enrichState(r, input)
-    if #cfg.factories == 0 or not factoriesHold() then return nil end
+    if #cfg.factories == 0 or not FX.factoriesHold() then return nil end
     local e = cfg.enrich[input]
     if type(e) == "table" and (e.no or e.dustBad) then return nil end
     if type(e) == "table" and e.out then
       if isInputOf(r, e.out) then
         local n = have[input] or 0
-        if n > 0 and n < minUnit() then
-          leftoverSince[input] = leftoverSince[input] or os.clock()
-          if os.clock() - leftoverSince[input] > LEFTOVER_WAIT then return nil end
+        if n > 0 and n < FX.minUnit() then
+          FX.leftoverSince[input] = FX.leftoverSince[input] or os.clock()
+          if os.clock() - FX.leftoverSince[input] > FX.LEFTOVER_WAIT then return nil end
         else
-          leftoverSince[input] = nil
+          FX.leftoverSince[input] = nil
         end
         return "factory", e
       end
       -- Its dust isn't known to make this yet
-      local other = dustRecipe(e.out)
+      local other = FX.dustRecipe(e.out)
       if other and outMatches(r, other.out) then return "factory", e end
       if other then return nil end                         -- the dust smelts into something else
-      if cfg.trainer then dustQueue[e.out] = r.out; return "hold" end
+      if cfg.trainer then FX.dustQueue[e.out] = r.out; return "hold" end
       -- No trainer to check it: go by the names (aluminum_dust / dust_iron -> aluminum_ingot / iron_ingot)
       local metal = shortName(e.out):gsub("_dust$", ""):gsub("^dust_", "")
       local made = shortName(r.out):gsub("_ingot$", ""):gsub("^ingot_", "")
       if metal == made then guesses[e.out] = r.out; return "hold" end
       return nil
     end
-    if isOreish(input) then
-      if trialFor(input) then return "hold" end
+    if FX.isOreish(input) then
+      if FX.trialFor(input) then return "hold" end
       return startTrial(input)
     end
     return nil
@@ -843,16 +845,16 @@ local function smeltPass()
     end
     if keepKey then
       -- Keep-N: only for a shortfall that lasts (two passes; a part batch, 10 s)
-      if amount <= 0 then shortSince[keepKey] = nil; return end
-      shortSince[keepKey] = shortSince[keepKey] or os.clock()
-      if os.clock() - shortSince[keepKey] < TICK + 1 then return end
+      if amount <= 0 then FX.shortSince[keepKey] = nil; return end
+      FX.shortSince[keepKey] = FX.shortSince[keepKey] or os.clock()
+      if os.clock() - FX.shortSince[keepKey] < TICK + 1 then return end
     end
     for _, o in ipairs(ores) do
       if amount <= 0 then break end
       local ratio = o.e.made / math.max(1, o.e.used)
       local per = job and 1 or ratio * perOf(r, o.e.out)
       local want = math.ceil(amount / per)
-      local roundUp = keepKey and os.clock() - shortSince[keepKey] >= 10
+      local roundUp = keepKey and os.clock() - FX.shortSince[keepKey] >= 10
       local taken = feedFactories(o.input, want, job, roundUp)
       amount = amount - taken * per
       -- A job's last few (less than a batch) go straight to the furnaces
@@ -904,7 +906,7 @@ local function smeltPass()
         local made = outCount(r)
         for name, c in pairs(cooked) do if outMatches(r, name) then made = made + c end end
         for name, c in pairs(busy) do if isInputOf(r, name) then made = made + c * perOf(r, name) end end
-        made = made + pendingFor(r)
+        made = made + FX.pendingFor(r)
         local want = rule.stacks * 64 - made
         serve(r, want, nil, rule.name)
       end
@@ -913,7 +915,7 @@ local function smeltPass()
 
   -- Feed barrels: things that shouldn't be there (an ore it refused, a forgotten route) go back
   for i, f in ipairs(cfg.factories) do
-    local fs = facs[i]
+    local fs = FX.facs[i]
     if fs and fs.feedSlots then
       for slot, it in pairs(fs.feedSlots) do
         local e = cfg.enrich[it.name]
@@ -973,7 +975,7 @@ local function smeltPass()
       local moved = results and tonumber(results[i]) or 0
       local short = fd.n - moved
       if fd.trial then
-        local fs = facs[fd.i]
+        local fs = FX.facs[fd.i]
         if moved <= 0 and fs and fs.trial then
           fs.trial = nil
           call(cfg.factories[fd.i].machine, "setEjecting", "ITEM", true)
@@ -992,7 +994,7 @@ local function smeltPass()
   end
   -- Dusts I couldn't check in the trainer: learn them by name
   for dust, out in pairs(guesses) do
-    if not dustRecipe(dust) then learn(dust, out, 1); notify("No trainer: guessing " .. pretty(dust) .. " smelts into " .. pretty(out), K.yellow) end
+    if not FX.dustRecipe(dust) then learn(dust, out, 1); FX.notify("No trainer: guessing " .. pretty(dust) .. " smelts into " .. pretty(out), K.yellow) end
   end
   local queued = 0
   for _, j in ipairs(smeltQueue) do queued = queued + math.max(0, j.left) end
@@ -1024,9 +1026,9 @@ local function trainFail(text)
     for ore, e in pairs(cfg.enrich) do
       if type(e) == "table" and e.out == train.input then e.dustBad = true end
     end
-    dustQueue[train.input] = nil
+    FX.dustQueue[train.input] = nil
     saveCfg()
-    notify(pretty(train.input) .. " doesn't smelt: its ore stays in the furnaces", K.orange)
+    FX.notify(pretty(train.input) .. " doesn't smelt: its ore stays in the furnaces", K.orange)
   end
   redraw()
 end
@@ -1114,7 +1116,7 @@ local function trainStep()
       train.out, train.per = s.out.name, per
       train.key, train.known = learn(train.input, s.out.name, per)
       if train.auto then
-        dustQueue[train.input] = nil
+        FX.dustQueue[train.input] = nil
         -- The ore it came from joins the same recipe (so "aluminum all" covers both), if it isn't in one yet
         for ore, e in pairs(cfg.enrich) do
           if type(e) == "table" and e.out == train.input and book[train.key] and not isInputOf(book[train.key], ore) then
@@ -1122,7 +1124,7 @@ local function trainStep()
             if hostR.modded or not isInputOf(hostR, ore) then learn(ore, s.out.name, 1) end
           end
         end
-        notify(("Checked: %s smelts into %s. Enriching from now on."):format(pretty(train.input), pretty(s.out.name)), K.lime)
+        FX.notify(("Checked: %s smelts into %s. Enriching from now on."):format(pretty(train.input), pretty(s.out.name)), K.lime)
         train = { state = "idle", giveBack = true, input = train.input, seen = true, endedAt = os.clock() }
         redraw()
         return
@@ -1141,11 +1143,15 @@ local function trainStep()
 end
 
 -- A new ore in a factory: did it go in, and what came out? (every half second while it runs)
-local function trialStep()
+function FX.trialStep()
   for i, f in ipairs(cfg.factories) do
-    local fs = facs[i]
+    local fs = FX.facs[i]
     local t = fs and fs.trial
-    if t and t.sentAt then
+    if t and not t.sentAt and os.clock() - t.t0 > 30 then
+      -- The pass that started it never sent the ore (it failed half way): call it off
+      fs.trial = nil
+      call(f.machine, "setEjecting", "ITEM", true)
+    elseif t and t.sentAt then
       local now = os.clock()
       local feedN, inN, otherIns = 0, 0, 0
       local l = call(f.feed, "list")
@@ -1157,7 +1163,7 @@ local function trialStep()
         local a = call(f.machine, "getInput", p)
         if type(a) == "table" and a.name == t.input then inN = inN + (a.count or 0)
         elseif type(a) == "table" and a.name and a.name ~= "minecraft:air" then otherIns = otherIns + (a.count or 0) end
-        readItem(call(f.machine, "getOutput", p), outs)
+        FX.readItem(call(f.machine, "getOutput", p), outs)
       end
       if not t.ejectOff then
         -- Eject wouldn't turn off: count what lands in the out barrel instead (storage leaves that
@@ -1183,13 +1189,13 @@ local function trialStep()
         fs.trial = nil
         call(f.machine, "setEjecting", "ITEM", true)
         saveCfg()
-        if text then notify(text, col) end
+        if text then FX.notify(text, col) end
         redraw()
       end
       if not t.accepted then
         if otherIns == 0 then
           t.idleSince = t.idleSince or now
-          if now - t.idleSince > TRIAL_REFUSE then
+          if now - t.idleSince > FX.TRIAL_REFUSE then
             cfg.enrich[t.input] = { no = true, at = os.epoch("utc") }
             finish(pretty(t.input) .. " doesn't go in the factory: it stays in the furnaces.", K.orange)
           end
@@ -1203,11 +1209,11 @@ local function trialStep()
         if product and left == 0 then
           if made ~= t.lastMade then t.lastMade, t.doneSince = made, now end
           if now - t.doneSince >= (t.ejectOff and 1.5 or 3) then learnIt(t.n) end
-        elseif now - t.sentAt > TRIAL_TIMEOUT then
+        elseif now - t.sentAt > FX.TRIAL_TIMEOUT then
           if product and t.n - left > 0 then learnIt(t.n - left)
           else
-            trialCool[t.input] = now
-            finish("Tried " .. pretty(t.input) .. " in " .. factoryName(i) .. ": nothing came out. Trying again later.", K.orange)
+            FX.trialCool[t.input] = now
+            finish("Tried " .. pretty(t.input) .. " in " .. FX.factoryName(i) .. ": nothing came out. Trying again later.", K.orange)
           end
         end
       end
@@ -1216,7 +1222,7 @@ local function trialStep()
 end
 
 -- Factory dust that isn't known to smelt yet: put one in the idle trainer and train it
-local function autoTrainStep()
+function FX.autoTrainStep()
   if not cfg.trainer or not trainSeen or train.state ~= "idle" or train.giveBack or train.clear then return end
   if train.autoNext then
     if trainSlots.inp and trainSlots.inp.name == train.autoNext then
@@ -1226,14 +1232,14 @@ local function autoTrainStep()
       if not ok then train.autoNext = nil end
       return dust
     end
-    if os.clock() - (autoTried[train.autoNext] or 0) > 15 then train.autoNext = nil end
+    if os.clock() - (FX.autoTried[train.autoNext] or 0) > 15 then train.autoNext = nil end
     return
   end
   if trainSlots.inp or trainSlots.out or not storageFresh() then return end
-  for _, dust in ipairs(sortedKeys(dustQueue)) do
-    if dustRecipe(dust) then dustQueue[dust] = nil
-    elseif (byName[dust] or 0) > 0 and os.clock() - (autoTried[dust] or -1e9) > 300 then
-      autoTried[dust] = os.clock()
+  for _, dust in ipairs(sortedKeys(FX.dustQueue)) do
+    if FX.dustRecipe(dust) then FX.dustQueue[dust] = nil
+    elseif (byName[dust] or 0) > 0 and os.clock() - (FX.autoTried[dust] or -1e9) > 300 then
+      FX.autoTried[dust] = os.clock()
       local res = sendBatch({ { op = "fill", fz = cfg.trainer, slot = 1, item = dust, count = 1 } })
       if res and (tonumber(res[1]) or 0) > 0 then train.autoNext = dust; train.seen = true end
       return
@@ -1271,13 +1277,13 @@ local function trainLine()
 end
 
 -- One line about a factory: what it's doing, or why it's down
-factoryLine = function(i)
-  local fs = facs[i]
+FX.factoryLine = function(i)
+  local fs = FX.facs[i]
   if not fs then return "starting" end
   if fs.trial then return "trying " .. pretty(fs.trial.input) end
   if fs.why then
     local down = fs.downSince and os.clock() - fs.downSince or 0
-    return fs.why .. (down >= FALLBACK_AFTER and " (ore to furnaces)" or "")
+    return fs.why .. (down >= FX.FALLBACK_AFTER and " (ore to furnaces)" or "")
   end
   local q = (fs.feedTotal or 0) + (fs.insTotal or 0)
   if q == 0 then return "ready" end
@@ -1288,10 +1294,10 @@ factoryLine = function(i)
 end
 
 -- For storage: the feed barrels (never storage, I fill them) and out barrels (emptied like inputs)
-local function factoryBarrels()
+function FX.factoryBarrels()
   local out = {}
   for i, f in ipairs(cfg.factories) do
-    local t = facs[i] and facs[i].trial
+    local t = FX.facs[i] and FX.facs[i].trial
     out[#out + 1] = { feed = f.feed, out = f.out, machine = f.machine, hold = (t and not t.ejectOff) and true or nil }
   end
   return out
@@ -1305,7 +1311,7 @@ local function smeltStatus()
   for _, j in ipairs(smeltQueue) do
     if j.left > 0 then lines[#lines + 1] = ("Queued: %d %s"):format(j.left, j.name) end
   end
-  for i in ipairs(cfg.factories) do lines[#lines + 1] = factoryName(i) .. ": " .. factoryLine(i) end
+  for i in ipairs(cfg.factories) do lines[#lines + 1] = FX.factoryName(i) .. ": " .. FX.factoryLine(i) end
   for _, rule in ipairs(smeltRules) do
     if rule.all then
       lines[#lines + 1] = ("Rule: all %s (%d waiting)"):format(rule.name, inputTotal(rule.r))
@@ -1397,7 +1403,7 @@ local function say(text, colour, only)
     if not only or v.ui == only then v.ui.notice = { text = text, colour = colour or K.lime, untilT = os.clock() + 6 } end
   end
 end
-notify = function(text, colour) say(text, colour) end
+FX.notify = function(text, colour) say(text, colour) end
 local function wrap(text, w)
   local out, line = {}, ""
   for word in tostring(text):gmatch("%S+") do
@@ -1431,7 +1437,7 @@ end
 -- Factories: the setups (feed barrel -> factory -> out barrel) and the ores they've learned
 ---------------------------------------------------------------------------
 -- A peripheral by name: exact, any case, or the end of it ("barrel_65")
-local function findPeripheral(word)
+function FX.findPeripheral(word)
   if not word then return nil end
   if peripheral.isPresent(word) then return word end
   local lw = word:lower()
@@ -1445,62 +1451,62 @@ local function findPeripheral(word)
   return tail or nil
 end
 
-local function usedByFactory(n)
+function FX.usedByFactory(n)
   for i, f in ipairs(cfg.factories) do
     if f.machine == n or f.feed == n or f.out == n then return i end
   end
 end
 
-local function addFactory(machine, feed, out)
+function FX.addFactory(machine, feed, out)
   cfg.factories[#cfg.factories + 1] = { machine = machine, feed = feed, out = out }
   saveCfg()
   return #cfg.factories
 end
 
-local function removeFactory(i)
-  local fs = facs[i]
+function FX.removeFactory(i)
+  local fs = FX.facs[i]
   local f = cfg.factories[i]
   if fs and fs.trial and f then call(f.machine, "setEjecting", "ITEM", true) end
   table.remove(cfg.factories, i)
-  table.remove(facs, i)
+  table.remove(FX.facs, i)
   saveCfg()
 end
 
 -- Barrel names with the newest (highest number) first: the one you just placed is near the top
-local function numLast(n) return tonumber(n:match("(%d+)$")) or -1 end
-local function barrelCandidates(skip)
+function FX.numLast(n) return tonumber(n:match("(%d+)$")) or -1 end
+function FX.barrelCandidates(skip)
   local out = {}
   for _, n in ipairs(peripheral.getNames()) do
-    if peripheral.hasType(n, "inventory") and not isFurnace(n) and n ~= cfg.trainer and not usedByFactory(n)
-       and not (skip and skip[n]) and not factoryLike(n) then
+    if peripheral.hasType(n, "inventory") and not isFurnace(n) and n ~= cfg.trainer and not FX.usedByFactory(n)
+       and not (skip and skip[n]) and not FX.factoryLike(n) then
       out[#out + 1] = n
     end
   end
   table.sort(out, function(a, b)
-    local na, nb = numLast(a), numLast(b)
+    local na, nb = FX.numLast(a), FX.numLast(b)
     if na ~= nb then return na > nb end
     return a < b
   end)
   return out
 end
-local function machineCandidates()
+function FX.machineCandidates()
   local out = {}
   for _, n in ipairs(peripheral.getNames()) do
-    if not usedByFactory(n) and factoryLike(n) then out[#out + 1] = n end
+    if not FX.usedByFactory(n) and FX.factoryLike(n) then out[#out + 1] = n end
   end
   table.sort(out)
   return out
 end
 
-local function facColour(i)
-  local fs = facs[i]
+function FX.facColour(i)
+  local fs = FX.facs[i]
   if not fs then return K.grey end
   if fs.trial then return K.yellow end
   if fs.why then return K.orange end
   return K.lime
 end
 
-local function drawFactoryCard(x, y, w, maxY)
+function FX.drawFactoryCard(x, y, w, maxY)
   at(x, y, pad("FACTORIES", w), K.cyan)
   hit(x, y, x + w - 1, y, function() go("factories") end)
   y = y + 1
@@ -1511,14 +1517,14 @@ local function drawFactoryCard(x, y, w, maxY)
   end
   for i in ipairs(cfg.factories) do
     if y > maxY then break end
-    lr(x, y, w, "F" .. i, factoryLine(i), K.white, facColour(i))
+    lr(x, y, w, "F" .. i, FX.factoryLine(i), K.white, FX.facColour(i))
     hit(x, y, x + w - 1, y, function() go("factories", { sel = i }) end)
     y = y + 1
   end
   return y + 1
 end
 
-local function drawFactories(w, h)
+function FX.drawFactories(w, h)
   header(w, "< FACTORIES", ("%d set up"):format(#cfg.factories))
   hit(1, 1, 13, 1, function() go("home") end)
   local y = 3
@@ -1537,16 +1543,16 @@ local function drawFactories(w, h)
     if y + 2 > bottom then break end
     local sel = ui.sel == i
     local bg = sel and K.grey or K.black
-    local fs = facs[i] or {}
+    local fs = FX.facs[i] or {}
     local right = fs.energy and ("%d%% power"):format(math.floor(fs.energy * 100 + 0.5)) or ""
-    lr(2, y, w - 2, factoryName(i) .. ": " .. factoryLine(i), right, facColour(i), K.lightGrey, bg)
+    lr(2, y, w - 2, FX.factoryName(i) .. ": " .. FX.factoryLine(i), right, FX.facColour(i), K.lightGrey, bg)
     lr(2, y + 1, w - 2, "  " .. shortName(f.machine), fs.procs and (fs.procs .. " processes") or nil, K.lightGrey, K.grey, bg)
     lr(2, y + 2, w - 2, ("  feed %s -> out %s"):format(shortName(f.feed), shortName(f.out)), nil, K.grey, K.grey, bg)
     hit(1, y, w, y + 2, function() ui.sel = (ui.sel == i) and nil or i; ui.confirm = nil end)
     y = y + 4
   end
   -- What it's learned about ores
-  local list = enrichList()
+  local list = FX.enrichList()
   if #list > 0 and y < bottom then
     at(2, y, pad("ORES", w - 2), K.cyan)
     y = y + 1
@@ -1567,7 +1573,7 @@ local function drawFactories(w, h)
   if ui.sel and cfg.factories[ui.sel] then
     if ui.confirm == "remove" then
       x = smallButton(x, h, "Sure? Remove F" .. ui.sel, K.red, function()
-        removeFactory(ui.sel)
+        FX.removeFactory(ui.sel)
         say("Factory removed. Storage stops treating its barrels specially in a few seconds.", K.orange)
         ui.sel, ui.confirm = nil, nil
       end, K.white)
@@ -1578,7 +1584,7 @@ local function drawFactories(w, h)
   smallButton(w - 7, h, "Back", K.grey, function() go("home") end, K.white)
 end
 
-local function drawFactoryAdd(w, h)
+function FX.drawFactoryAdd(w, h)
   local step = ui.step or "machine"
   local n = step == "machine" and 1 or (step == "feed" and 2 or 3)
   header(w, "< ADD A FACTORY", ("step %d/3"):format(n))
@@ -1592,7 +1598,7 @@ local function drawFactoryAdd(w, h)
   local chosen = {}
   if ui.pickM then chosen[ui.pickM] = true end
   if ui.pickF then chosen[ui.pickF] = true end
-  local list = step == "machine" and machineCandidates() or barrelCandidates(chosen)
+  local list = step == "machine" and FX.machineCandidates() or FX.barrelCandidates(chosen)
   local top, bottom = 4, h - 2
   local done = {}
   if ui.pickM then done[#done + 1] = "factory " .. shortName(ui.pickM) end
@@ -1610,8 +1616,8 @@ local function drawFactoryAdd(w, h)
       if step == "machine" then ui.pickM, ui.step, ui.scroll = name, "feed", 1
       elseif step == "feed" then ui.pickF, ui.step, ui.scroll = name, "out", 1
       else
-        local i = addFactory(ui.pickM, ui.pickF, name)
-        say(("%s added: feed %s -> out %s"):format(factoryName(i), shortName(ui.pickF), shortName(name)), K.lime)
+        local i = FX.addFactory(ui.pickM, ui.pickF, name)
+        say(("%s added: feed %s -> out %s"):format(FX.factoryName(i), shortName(ui.pickF), shortName(name)), K.lime)
         go("factories", { sel = i })
       end
     end)
@@ -1812,7 +1818,7 @@ local function drawHome(w, h)
     for yy = top, bottom do at(x - 2, yy, " ", K.grey, K.black) end
     for yy = top, bottom do at(x - 1, yy, "\149", K.grey) end
     local y = drawTrainerCard(x, top, rw)
-    y = drawFactoryCard(x, y, rw, math.min(bottom - 3, y + 3))
+    y = FX.drawFactoryCard(x, y, rw, math.min(bottom - 3, y + 3))
     local queueRows = 0
     for _, j in ipairs(smeltQueue) do if j.left > 0 then queueRows = queueRows + 1 end end
     local ruleMax = bottom - (queueRows > 0 and math.min(queueRows + 2, 5) or 0)
@@ -2337,8 +2343,8 @@ local function draw()
         elseif ui.page == "pick" then drawPick(w, h)
         elseif ui.page == "recipes" then drawRecipes(w, h)
         elseif ui.page == "rule" then drawRule(w, h)
-        elseif ui.page == "factories" then drawFactories(w, h)
-        elseif ui.page == "fadd" then drawFactoryAdd(w, h)
+        elseif ui.page == "factories" then FX.drawFactories(w, h)
+        elseif ui.page == "fadd" then FX.drawFactoryAdd(w, h)
         else drawHome(w, h) end
         if v.kind == "term" then drawCmdLine(w, h) end
       end)
@@ -2377,20 +2383,20 @@ local function runCommand(line)
   elseif q == "factories" or q == "factory" then go("factories")
   elseif q:match("^factory%s+add") then
     local m, fd, o = line:match("[Aa][Dd][Dd]%s+(%S+)%s+(%S+)%s+(%S+)")
-    local pm, pf, po = findPeripheral(m), findPeripheral(fd), findPeripheral(o)
+    local pm, pf, po = FX.findPeripheral(m), FX.findPeripheral(fd), FX.findPeripheral(o)
     if not (m and fd and o) then say("factory add <machine> <feed barrel> <out barrel>", K.white, ui)
-    elseif not pm or not factoryLike(pm) then say("No factory called " .. m .. " on my cable.", K.orange, ui)
+    elseif not pm or not FX.factoryLike(pm) then say("No factory called " .. m .. " on my cable.", K.orange, ui)
     elseif not pf or not peripheral.hasType(pf, "inventory") then say("No barrel called " .. fd .. " on my cable.", K.orange, ui)
     elseif not po or not peripheral.hasType(po, "inventory") or po == pf then say("No (other) barrel called " .. o .. " on my cable.", K.orange, ui)
-    elseif usedByFactory(pm) or usedByFactory(pf) or usedByFactory(po) then say("One of those is already in a factory setup.", K.orange, ui)
+    elseif FX.usedByFactory(pm) or FX.usedByFactory(pf) or FX.usedByFactory(po) then say("One of those is already in a factory setup.", K.orange, ui)
     else
-      local i = addFactory(pm, pf, po)
-      say(("%s added: feed %s -> out %s"):format(factoryName(i), shortName(pf), shortName(po)), K.lime, ui)
+      local i = FX.addFactory(pm, pf, po)
+      say(("%s added: feed %s -> out %s"):format(FX.factoryName(i), shortName(pf), shortName(po)), K.lime, ui)
       go("factories", { sel = i })
     end
   elseif q:match("^factory%s+remove%s+%d+$") then
     local i = tonumber(q:match("(%d+)$"))
-    if cfg.factories[i] then removeFactory(i); say("Factory " .. i .. " removed.", K.orange, ui)
+    if cfg.factories[i] then FX.removeFactory(i); say("Factory " .. i .. " removed.", K.orange, ui)
     else say("No factory " .. i .. ".", K.orange, ui) end
   elseif q:match("^enrich%s+forget%s+%S+$") then
     local word = q:match("(%S+)$")
@@ -2422,9 +2428,9 @@ local function trainLoop()
   while true do
     local ok, err = pcall(trainStep)
     if not ok then train.note = "Error: " .. tostring(err) end
-    local ok2, err2 = pcall(trialStep)
+    local ok2, err2 = pcall(FX.trialStep)
     if not ok2 then smeltNote = "Factory error: " .. tostring(err2) end
-    local ok3, err3 = pcall(autoTrainStep)
+    local ok3, err3 = pcall(FX.autoTrainStep)
     if not ok3 then train.note = "Error: " .. tostring(err3) end
     -- An item dropped into an idle trainer: bring the training page up on the monitor
     if train.state == "idle" and trainSlots.inp and not train.seen then
@@ -2469,7 +2475,7 @@ local function netLoop()
       rednet.broadcast({ type = "smelter", id = os.getComputerID(), label = os.getComputerLabel(),
         state = cfg.paused and "paused" or "ok", paused = cfg.paused or false, training = trainLine(),
         note = trainLine() or smeltNote, lines = smeltStatus(), furnaces = #array, lastCmd = lastCmd,
-        factories = factoryBarrels() }, BASE)
+        factories = FX.factoryBarrels() }, BASE)
       lastSend = os.clock()
     end
   end
