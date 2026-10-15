@@ -395,51 +395,24 @@ function View:stepper(x, y, label, value, o)
 end
 
 ---------------------------------------------------------------------------------------------------------
--- Footer (4.4, part 1: a back button; tabs and paging arrive with part 2)
----------------------------------------------------------------------------------------------------------
--- v:footer({ back = fn }) draws the last row. Back is `< Back` on regular and wide screens, just `<` below.
-function View:footer(o)
-  o = o or {}
-  local y, W = self.H, self.W
-  self:fill(1, y, W, "bg")
-  local x = 1
-  if o.back then
-    local wide = self.wc == "regular" or self.wc == "wide"
-    local id = "back"
-    local focused = self.focus == id
-    local fill = focused and "dim" or "bar"
-    if self.colour then
-      self:put(1, y, " < ", "fg", fill)
-      x = 4
-      if wide then x = self:put(x, y, " Back", "fg", "bg") end
-    else
-      x = self:put(1, y, wide and "[ < ] Back" or "[ < ]", "fg", "bg")
-    end
-    self:_box({ 1, y, x - 1, y }, nil, { fn = o.back, id = id, focus = true })
-    self.backfn = o.back
-  end
-  return x, y
-end
-
----------------------------------------------------------------------------------------------------------
 -- Input: taps and keys
 ---------------------------------------------------------------------------------------------------------
 -- Run a box's action, honouring disabled and tap-twice.
-function View:press(b)
+function View:press(b, x, y)
   if not b or not b.enabled then return end
   if b.confirm then
-    if self:isArmed(b.id) then self.armed = nil; b.fn() else self.armed = { id = b.id, at = os.clock() } end
+    if self:isArmed(b.id) then self.armed = nil; b.fn(x, y) else self.armed = { id = b.id, at = os.clock() } end
     return
   end
   self.armed = nil
-  if b.fn then b.fn() end
+  if b.fn then b.fn(x, y) end
 end
 
 -- A tap (monitor_touch or mouse_click) at x,y.
 function View:tap(x, y)
   local b = ui.hit.find(self.boxes, x, y)
   if self.armed and not (b and b.id == self.armed.id) then self.armed = nil end
-  self:press(b)
+  self:press(b, x, y)
 end
 
 local function focusIndex(self)
@@ -532,6 +505,8 @@ function ui.run(views, draw, opts)
       if ev[2] == keys.leftShift or ev[2] == keys.rightShift then shift = false end
     elseif name == "char" then
       for _, v in ipairs(views) do v:char(ev[2]) end
+    elseif name == "mouse_scroll" then
+      for _, v in ipairs(views) do if not v.side then v:scroll(ev[2]) end end
     elseif name == "term_resize" then
       for _, v in ipairs(views) do if not v.side then v:measure() end end
     elseif name == "monitor_resize" then
@@ -544,5 +519,8 @@ function ui.run(views, draw, opts)
     end
   end
 end
+
+-- Part 2 (tabs and paging footer, tiles, bars, fields, lists, map) lives in ui_widgets.lua and extends View.
+require("ui_widgets")(ui)
 
 return ui

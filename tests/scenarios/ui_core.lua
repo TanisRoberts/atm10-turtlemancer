@@ -8,7 +8,8 @@ local SIZES = { { 57, 24 }, { 51, 19 }, { 39, 13 }, { 26, 20 } }
 local RULE = "\140"
 
 local function pure()
-  local env = setmetatable({ colours = COL, keys = {}, os = os }, { __index = _G })
+  local env = setmetatable({ colours = COL, keys = require("sim.env").keys, os = os }, { __index = _G })
+  env.require = function(n) return assert(loadfile(cc.ROOT .. "/shared/" .. n .. ".lua", "t", env))() end
   return assert(loadfile(cc.ROOT .. "/shared/ui.lua", "t", env))()
 end
 
@@ -17,7 +18,7 @@ local function demo(w, h, opts)
   local world = cc.world()
   local c = world:computer{ id = 1, label = "Demo", w = w, h = h, colour = opts.colour }
   local mon = opts.monitor and c:monitor("right", opts.monitor[1], opts.monitor[2])
-  c:install("shared/ui.lua")
+  c:install("shared/ui.lua"); c:install("shared/ui_widgets.lua")
   c:install("tests/demo/ui_demo.lua")
   c:run("ui_demo")
   world:run(0.5)
@@ -55,12 +56,16 @@ T.test("ui: manifest.lua ships shared/ui.lua to every role that will use it, and
   local m = assert(load(src, "@manifest.lua", "t", {}))()
   local want = { computer = { "mainframe", "storage", "smelter", "foreman", "nether", "farmhand", "architect", "plastic",
                               "neural" }, glasses = { "hud" } }
-  local function has(r) for _, p in ipairs(r.files or {}) do if p == "shared/ui.lua" then return true end end end
+  local function has(r)
+    local a, b
+    for _, p in ipairs(r.files or {}) do a = a or p == "shared/ui.lua"; b = b or p == "shared/ui_widgets.lua" end
+    return a and b
+  end
   for kind, roles in pairs(want) do
     for _, name in ipairs(roles) do
       local r = m.types[kind].roles[name]
       T.truthy(r, kind .. "/" .. name .. " exists")
-      T.truthy(has(r), name .. " should list shared/ui.lua")
+      T.truthy(has(r), name .. " should list shared/ui.lua and shared/ui_widgets.lua")
     end
   end
   -- devices keep shared files flat (shared/ui.lua -> ui.lua), so a program says require("ui")
@@ -306,7 +311,7 @@ end)
 T.test("ui: an error notice stays until tapped; the next notice replaces it; action button", function()
   local world = cc.world()
   local c = world:computer{ id = 1, w = 51, h = 19 }
-  c:install("shared/ui.lua")
+  c:install("shared/ui.lua"); c:install("shared/ui_widgets.lua")
   c:writeFile("t.lua", [[
     local ui = require("ui")
     local v = ui.view(term.current())
