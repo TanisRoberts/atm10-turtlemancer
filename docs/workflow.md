@@ -20,7 +20,7 @@ Every open issue has exactly one `status:` label, and every issue past Backlog h
 2. **Claim it:** swap to `status: in progress`, comment "Taking this."
 3. **Ask, don't guess:** one question per comment, starting with who it's for ("PM: …", "Tanis: …"), then swap the `for:` label to them.
 4. **Finish it:**
-   - Engineering pushes to `main` (that's the release), comments what to reboot and any in-game steps, then sets `status: test in game` and `for: tanis`.
+   - Engineering works on its own branch `eng/<issue-number>-<short-name>`, then rebases on `origin/main` and merges into `main` (that's the release), comments what to reboot and any in-game steps, then sets `status: test in game` and `for: tanis`.
    - Tanis closes it when it works in game, or comments what went wrong and sets `status: todo` + `for: engineering`.
    - Design commits its spec to `docs/design/` and hands the issue to engineering.
    - Anything with no code change: close it with a one-line comment saying what was decided.

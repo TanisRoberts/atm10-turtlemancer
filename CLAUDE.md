@@ -8,7 +8,7 @@ CC:Tweaked scripts for Tanis's island base in All the Mods 10. Computers, turtle
 - `startup.lua` is the only file placed on a device by hand. A new or moved file needs its `manifest.lua` entry, or no device will download it.
 - A `.lua` file that doesn't compile is refused on the device, which keeps the old copy. Compile-check every changed file before pushing.
 - GitHub's raw CDN caches `main` for up to 5 minutes. Tell Tanis to wait about 5 minutes, then reboot (hold Ctrl+R) the named devices.
-- Several sessions can run at once. Before pushing: `git fetch origin main && git rebase origin/main`, then `git push origin HEAD:main`. Never force-push.
+- Several sessions can run at once, so engineers work on their own branch (`eng/<issue-number>-<short-name>`), never directly on `main`. When the work is done and compile-checked: `git fetch origin main && git rebase origin/main`, re-run the checks, then `git push origin HEAD:main` to merge it (that ships it). Delete the branch afterwards. Never force-push `main`.
 
 ## How work flows
 
