@@ -6,10 +6,10 @@ Ideas usually start in the "Minecraft ATM10" claude.ai Project, where Tanis asks
 
 ## Labels
 
-Every open issue has exactly one `status:` label, and every issue past Backlog has exactly one `for:` label.
+Every open issue has exactly one `status:` label, and every issue past Backlog has exactly one `for:` label. **A closed issue carries no `status:`, `for:` or `priority:` label.** Closed is done; it just sits where it is.
 
-- **Status:** `status: backlog` (idea, not approved), `status: todo` (approved, can be taken), `status: in progress` (claimed), `status: test in game` (pushed, Tanis checks it in game), `status: done`.
-- **Who acts next:** `for: pm`, `for: design`, `for: engineering`, `for: tanis`.
+- **Status:** `status: backlog` (idea, not approved), `status: todo` (approved, can be taken), `status: in progress` (claimed), `status: test in game` (pushed, and there is something specific for Tanis to check in game). There is no `status: done`: closing the issue is done.
+- **Who acts next:** `for: pm`, `for: design`, `for: engineering`, `for: tanis`. Only set a `for:` label to hand the issue to another role, or to Tanis when Tanis has something specific to do (see the rule below).
 - **Priority (Todo only):** `priority: now`, `priority: next`, `priority: later`.
 - **Kind:** `bug`, `feature`, `chore`, `question`.
 - **Area:** `area: storage`, `area: smelter`, `area: miners`, `area: farm`, `area: neural`, `area: mainframe`, `area: weaver`, `area: ui`, `area: tooling`.
@@ -21,7 +21,10 @@ Every open issue has exactly one `status:` label, and every issue past Backlog h
 3. **Ask, don't guess:** one question per comment, starting with who it's for ("PM: …", "Tanis: …"), then swap the `for:` label to them.
 4. **Finish it:**
    - Engineering works on its own branch `eng/<issue-number>-<short-name>`, then rebases on `origin/main` and merges into `main` (that's the release), comments what to reboot and any in-game steps, then sets `status: test in game` and `for: tanis`.
-   - Tanis closes it when it works in game, or comments what went wrong and sets `status: todo` + `for: engineering`.
+   - **Tanis gets an issue only for a specific test or action.** `status: test in game` + `for: tanis` is allowed only when the hand-over comment lists what Tanis should do in game and what they should see, as numbered steps (for example: "1. Reboot the smelter. 2. Train raw iron. 3. Reboot again. Expect: still learned."). If you can't write those steps, don't hand it over.
+   - **Nothing to test? Close it.** Docs, tests, tooling and refactors with no visible change are closed by the engineer with a short comment (what changed, nothing to reboot).
+   - Tanis closes a tested issue when it works, or comments what went wrong and sets `status: todo` + `for: engineering`.
+   - When closing, remove the `status:`, `for:` and `priority:` labels. Keep the kind and area labels.
    - Design commits its spec to `docs/design/` and hands the issue to engineering.
    - Anything with no code change: close it with a one-line comment saying what was decided.
 

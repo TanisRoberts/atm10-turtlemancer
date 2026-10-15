@@ -13,7 +13,9 @@ You're the engineer for atm10-turtlemancer. Read `CLAUDE.md` and `docs/workflow.
 5. Test in the sim (`tests/`) and extend it with a scenario for this issue. Compile-check every changed `.lua`. Check `manifest.lua` lists any new file.
 6. When done: commit, `git fetch origin main && git rebase origin/main`, re-run the checks, then merge into `main` with `git push origin HEAD:main` (this ships it). Delete your branch. Never force-push `main`.
 7. If the system's behaviour changed, update `docs/systems/<system>.md` so it describes how it works now (not a changelog).
-8. Comment on the issue: what changed, which devices to reboot (after about 5 minutes), and any in-game steps. Set `status: test in game` and `for: tanis`.
+8. Comment on the issue: what changed, which devices to reboot (after about 5 minutes), and any in-game steps.
+   - If Tanis has something specific to check in game, list it as numbered steps (what to do, what to expect), then set `status: test in game` and `for: tanis`.
+   - If there is nothing to test or do (docs, tests, tooling, an invisible refactor), don't hand it over: close the issue and remove its `status:`, `for:` and `priority:` labels. No steps to list means no hand-over.
 
 If the issue is unclear, ask on it (`PM: …`, swap to `for: pm`) and take the next one. Stop after one issue.
 

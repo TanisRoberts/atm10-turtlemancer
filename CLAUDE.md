@@ -53,4 +53,4 @@ Most files are big (smelter 109 KB, storage 88 KB, miner 74 KB, nether 72 KB, ne
 
 ## Finishing a change
 
-Push, then comment on the issue: what changed, which devices to reboot, and anything Tanis has to do in game (an `/assign`, a block to place). Keep it short.
+Push, then comment on the issue: what changed, which devices to reboot, and anything Tanis has to do in game (an `/assign`, a block to place), as numbered steps. Only hand the issue to Tanis (`for: tanis`, `status: test in game`) if there are such steps; otherwise close it. Keep it short.
