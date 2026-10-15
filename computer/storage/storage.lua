@@ -84,6 +84,10 @@ local function loadCfg()
   cfg.drawers = cfg.drawers or {}   -- assigned as drawers (bulk storage) by hand, besides those found by name
   cfg.ignored = cfg.ignored or {}   -- never touched or counted
   cfg.names = cfg.names or {}       -- network name -> nickname, shown in /assign
+  -- The smelter's factory barrels (from its broadcast): feeds are filled for it and never storage,
+  -- outs are emptied into storage like inputs
+  cfg.smelterFeeds = cfg.smelterFeeds or {}
+  cfg.smelterOuts = cfg.smelterOuts or {}
   -- Saved before the turtles were renamed (Oct 2026)
   if cfg.rigger and not cfg.weaver then cfg.weaver = cfg.rigger end
   cfg.rigger = nil
@@ -119,6 +123,13 @@ local function isDrawer(n)
   return false
 end
 
+local function sortedSet(t)
+  local out = {}
+  for k, v in pairs(t or {}) do if v then out[#out + 1] = k end end
+  table.sort(out)
+  return out
+end
+
 local function listRemove(list, n)
   for i = #list, 1, -1 do if list[i] == n then table.remove(list, i) end end
 end
@@ -127,7 +138,12 @@ local function listAdd(list, n)
   list[#list + 1] = n
 end
 
+local smelterHold = {}   -- out barrels the smelter is counting (trying an ore): not emptied meanwhile
+local function isSmelterFeed(n) return cfg.smelterFeeds and cfg.smelterFeeds[n] == true end
+local function isSmelterOut(n) return cfg.smelterOuts and cfg.smelterOuts[n] == true end
+
 local function isSpecial(n)
+  if isSmelterFeed(n) or isSmelterOut(n) then return true end
   if n == cfg.output or n == cfg.weaver or n == cfg.pocketIn or n == cfg.pocketOut then return true end
   for _, d in ipairs(cfg.docks or {}) do if d == n then return true end end
   for _, d in ipairs(cfg.fuels) do if d == n then return true end end
@@ -990,6 +1006,14 @@ local function deposit()
     moved = moved + m
     if left > 0 then stuck = true end
   end
+  -- The smelter's factory out barrels: the dust goes into storage like any input
+  for _, o in ipairs(sortedSet(cfg.smelterOuts)) do
+    if peripheral.isPresent(o) and not smelterHold[o] then
+      local m, left = depositFrom(o)
+      moved = moved + m
+      if left > 0 then stuck = true end
+    end
+  end
   for _, d in ipairs(cfg.docks or {}) do
     -- Its Keeps (the neural lab's matrices, Woodpecker's saplings...) stay up to their count;
     -- anything over that is taken like the rest, so a turtle unloading spares can't fill the dock.
@@ -1161,7 +1185,7 @@ local function runSmeltOps(ops)
   local results = {}
   for i, o in ipairs(ops or {}) do
     local moved = 0
-    if type(o) == "table" and type(o.fz) == "string" and isFurnace(o.fz) then
+    if type(o) == "table" and type(o.fz) == "string" and (isFurnace(o.fz) or isSmelterFeed(o.fz)) then
       if o.op == "store" then
         moved = storeFrom(o.fz, tonumber(o.slot) or 3)
       elseif o.op == "fill" and type(o.item) == "string" then
@@ -1746,6 +1770,30 @@ local function netLoop()
         local was = isLocked()
         presence = { known = msg.known == true, home = msg.home, autoLock = msg.autoLock ~= false, at = os.clock() }
         if isLocked() ~= was then os.queueEvent("storage_work") end   -- redraw now, not next tick
+      elseif proto == BASE and msg.type == "smelter" and type(msg.factories) == "table" then
+        -- The smelter's factory barrels: keep our copy (saved, so a reboot without the smelter keeps them safe)
+        local feeds, outs = {}, {}
+        smelterHold = {}
+        for _, f in ipairs(msg.factories) do
+          if type(f) == "table" and type(f.feed) == "string" and type(f.out) == "string" and f.feed ~= f.out then
+            feeds[f.feed], outs[f.out] = true, true
+            if f.hold == true then smelterHold[f.out] = true end
+          end
+        end
+        local same = true
+        for k in pairs(feeds) do if not cfg.smelterFeeds[k] then same = false end end
+        for k in pairs(cfg.smelterFeeds) do if not feeds[k] then same = false end end
+        for k in pairs(outs) do if not cfg.smelterOuts[k] then same = false end end
+        for k in pairs(cfg.smelterOuts) do if not outs[k] then same = false end end
+        if not same then
+          cfg.smelterFeeds, cfg.smelterOuts = feeds, outs
+          -- A barrel that becomes a factory barrel loses any job it had here
+          for k in pairs(feeds) do unassign(k) end
+          for k in pairs(outs) do unassign(k) end
+          saveCfg()
+          refreshStorageList()
+          os.queueEvent("storage_work")
+        end
       elseif proto == BASE and msg.type == "smelt_ops" and type(msg.ops) == "table" then
         jobs[#jobs + 1] = { from = from, id = msg.id, ops = msg.ops }
         os.queueEvent("storage_work")
@@ -1864,7 +1912,7 @@ local function assignScreen()
       for _, field in pairs(LISTS) do for _, n in ipairs(cfg[field] or {}) do out[#out + 1] = n end end
       return out
     end,
-    candidate = function(n) return not isMachine(n) end,
+    candidate = function(n) return not isMachine(n) and not isSmelterFeed(n) and not isSmelterOut(n) end,
     auto = function(n) if isDrawer(n) then return "drawer" end end,   -- drawers found by their name
     single = function(key) return SINGLES[key] and cfg[SINGLES[key]] or nil end,
     defaultKey = function() return not cfg.output and "output" or "input" end,
