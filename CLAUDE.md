@@ -34,7 +34,7 @@ Most files are big (smelter 109 KB, storage 88 KB, miner 74 KB, nether 72 KB, ne
 
 ## Facts about the server (don't relearn these)
 
-- ATM10 8.2 on NeoForge 21.1.251, Minecraft 1.21.1. CC:Tweaked (CraftOS 1.9) and Advanced Peripherals 0.8.x.
+- ATM10 8.2 on NeoForge 21.1.251, Minecraft 1.21.1. CC:Tweaked 1.120.2 (CraftOS 1.9) and Advanced Peripherals 0.8.1a. **Every mod and version is in `docs/mods.md`**: check it before relying on a mod's API.
 - Advanced Peripherals 0.8 peripheral types are snake_case (`chat_box`, `player_detector`, `environment_detector`). Use the 0.8 docs (IntelligenceModding/Advanced-Peripherals-Documentation, branch `0.8`), not 0.7. Mod source settles anything vague: AdvancedPeripherals branch `release/0.8-1.21.1`, CC-Tweaked branch `mc-1.21.x`.
 - Tanis uses advanced computers only. Every computer's monitors touch one of its sides; scripts use those, never monitors on the cable.
 - **Wired modems don't connect to chests here.** Wire a chest as chest → hopper → barrel, with the modem on the barrel. Suggest barrels for anything on a cable.
