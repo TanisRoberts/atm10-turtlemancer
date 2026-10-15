@@ -47,8 +47,8 @@ Most files are big (smelter 109 KB, storage 88 KB, miner 74 KB, nether 72 KB, ne
 
 ## Testing
 
-- No Lua is preinstalled. `pip install --break-system-packages -q lupa` gives Lua 5.2 for compile checks and simulations.
-- The CraftOS mock and world simulator belong in `tests/` (issue on the board). Reuse and extend them. Don't write a throwaway harness in a scratchpad.
+- `pip install --break-system-packages -q lupa` gives Lua 5.2 (same as CraftOS). Then `python3 tests/run.py` compile-checks every `.lua` and runs every scenario in the CraftOS simulator (`tests/sim/`); `python3 tests/run.py storage` runs one system's scenarios. Run it before every push to main.
+- The simulator runs the real programs on a virtual clock: computers, turtles in a voxel world, wired networks, rednet, monitors with touch, inventories, furnaces. `tests/README.md` says how to add a scenario. Extend the mocks and scenarios; don't write a throwaway harness in a scratchpad.
 - Check anything you can in the sim before Tanis has to test it in game.
 
 ## Finishing a change
