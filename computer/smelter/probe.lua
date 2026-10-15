@@ -67,6 +67,11 @@ local function looksLikeEnricher(n)
   return false
 end
 
+-- "probe minecraft:raw_iron" (just an item) works too: a first word that isn't on the cable but looks
+-- like an item id is the item
+if args[1] and not args[2] and not peripheral.isPresent(args[1]) and args[1]:find(":") then
+  args[2], args[1] = args[1], nil
+end
 local machine = args[1]
 if machine and not peripheral.isPresent(machine) then
   say("I can't see '" .. machine .. "' on my cable.", colours.red)
