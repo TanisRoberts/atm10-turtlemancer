@@ -443,3 +443,117 @@ Rules for the code:
 - Per-screen designs (storage, smelter and so on) get their own `docs/design/<screen>.md` using these components.
 - Mouse drag on monitors does not exist in CC, so nothing relies on it.
 - Glasses: it is not known whether the palette remap applies there; the kit works either way.
+
+## 9. Motion
+
+Signed off by Tanis: concept A, glyphs. One character per icon, four frames, nothing else moves. Written for issue #24.
+
+### 9.1 Rules
+
+1. **Only active things move.** working, building, farming, smelting, waiting, returning and rebooting animate. docked, done, idle, stale, lost and error show a still glyph. A stale or offline machine never animates.
+2. **One beat.** Dashboard icons step together on a shared clock at 2 beats a second (`ui.beat(2)`); loading screens run at 4 (`ui.beat(4)`). Icons never carry their own timers or phase offsets, so a beat changes a few cells in the same rows and costs one `blit` per changed row.
+3. **Fixed size.** The icon slot is always one character, drawn for every state (still glyph when not animating), so words never shift. Nothing animates bars, numbers, backgrounds, positions or the stripe.
+4. **Slow.** Nothing flashes faster than once a second. An error pulses three times when it first appears (`!` red, then white, one second each) and then stays still.
+5. **Budget.** At most 24 animated glyphs per view. Past that, the rest show their still glyph. A view with nothing animated redraws only on events, as before.
+6. **Calm dashboard.** One glyph per tile header (state word, not the whole tile) and one in the header state. Big motion (flames, sparkles, a long spinner line) belongs on training, picking and loading screens, one thing at a time.
+7. **Setting.** `ANIM=full|calm|off` in each device's `.env`, default `full` (glasses: `calm`). `calm` keeps dashboard glyphs and drops loading-screen extras to a spinner only; `off` shows still glyphs everywhere. A terminal that is not colour draws still glyphs.
+
+### 9.2 Glyphs
+
+The glyph sits directly before the state word, with one space between: `\ working`. Colour is the state colour. Frames play in order at the beat.
+
+| State (words that share it) | Frame 1 | 2 | 3 | 4 | Colour |
+|---|---|---|---|---|---|
+| working (mining, mapping, surveying, clearing, marking) | `\` | `|` | `/` | `|` | lime |
+| building | `+` | `x` | `+` | `x` | lime |
+| farming (planting, harvesting) | `.` | `,` | `i` | `Y` | green |
+| smelting (cooking) | `\30` | `^` | `\30` | `'` | red, orange, yellow, orange |
+| waiting | `.` | `o` | `O` | `o` | orange |
+| returning | `<` | `\171` (`«`) | `<` | `\171` | cyan |
+| rebooting, updating | `|` | `/` | `-` | `\` | purple |
+
+Still glyphs (no animation): docked `=` lightBlue, done `+` lightBlue, idle `-` lightGrey, stale `?` grey, lost and error `!` red (three slow pulses on arrival, see rule 4).
+
+The working glyph reads as a swinging pickaxe: the stroke goes up-left, vertical, up-right, vertical. Four frames of the foreman tile header at 24 wide:
+
+```text w=24
+▒ Canary-04   \ working 
+▒ Canary-04   | working 
+▒ Canary-04   / working 
+▒ Canary-04   | working 
+```
+Frames 1 to 4 top to bottom. Stripe, glyph and state word lime.
+```text w=24
+▒ Canary-07   . waiting 
+▒ Canary-07   o waiting 
+▒ Canary-07   O waiting 
+▒ Canary-07   o waiting 
+```
+Waiting, orange.
+**Header state.** The header's right-hand state word gets the same glyph (`\ working`). It is the only place on the page that moves besides tiles.
+
+**Buttons.** A `busy` button (an order in flight) keeps its label and puts the rebooting glyph before it, purple, and ignores taps until the order is confirmed.
+
+```text w=12
+▒|▒Reboot▒  
+▒/▒Reboot▒  
+▒-▒Reboot▒  
+▒\▒Reboot▒  
+```
+Purple fill, black text.
+### 9.3 Waiting and loading screens
+
+Every screen that waits for something (no reply from storage, a map being fetched, a turtle booting, training) shows four things: the title with a spinner, an indeterminate bar, one line saying what is being tried, and Back. The spinner is the waiting or rebooting glyph at 4 beats a second. The bar is a 6-cell block bouncing in the track at 4 beats a second (one cell per beat). With `ANIM=calm` the bar is still and only the spinner moves.
+
+```text w=36
+▓STORAGE▓                   waiting 
+────────────────────────────────────
+                                    
+       | Waiting for storage        
+                                    
+    ▒▒▒▒▒▒░░░░░░░░░░░░░░░░░░░░░░    
+                                    
+ Asked 3 times. Still no answer.    
+                                    
+                                    
+░<░░Back░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+```
+Beat 0. Spinner `|`, block at the left of the track.
+```text w=36
+▓STORAGE▓                   waiting 
+────────────────────────────────────
+                                    
+       - Waiting for storage        
+                                    
+    ░░░░░░▒▒▒▒▒▒░░░░░░░░░░░░░░░░    
+                                    
+ Asked 3 times. Still no answer.    
+                                    
+                                    
+░<░░Back░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+```
+Beat 6. Spinner `-`, block six cells along.
+Wording: say what is being waited for and what has been tried, never just `Loading...`. When the wait ends the screen is replaced by the real one; nothing fades or wipes.
+
+### 9.4 Cost and the buffered redraw
+
+The kit writes only changed rows, one `blit` each, and never clears. A beat on the foreman dashboard therefore costs one write for each tile row that holds a moving glyph: at most the number of visible tile rows plus the header. On a 51x19 computer that is 3 rows every half second; on the 164x81 wall, up to 24 glyphs in at most 13 rows, at 2 beats a second.
+
+`ui.run` already redraws non-input events at most every `min_interval` (0.25 s). Motion adds:
+
+- `ui.beat(rate)` returns an integer that increments `rate` times a second from a shared origin; every glyph in a frame reads it, so all glyphs are in step.
+- `v:glyph(x, y, state, opts)` draws the glyph for a state at the current beat (still if the machine is stale or `ANIM=off`), counts it against the view's budget and sets `v.animated = true`.
+- `ui.run` re-arms its timer for the next beat only while some view drew an animated glyph in the last frame; otherwise it idles as it does now. A screen with no motion costs nothing.
+- Loading screens call `v:spinner(x, y)` and `v:indeterminate(x, y, w)`, which use the 4-a-second beat.
+
+### 9.5 The smelter
+
+The smelter keeps its flames, with a smaller job:
+
+- **Home (dashboard):** each cooking furnace tile gets the smelting glyph in its band (replacing the flame on the end of line 1). The random flame row on line 3 and the per-tile offsets go; line 3 shows `x42` and the finished count, still. Nothing else moves.
+- **Train and Pick pages:** keep the flames, sparkles and `learning...` dots as they are (one thing happens at a time); move their timer onto `ui.beat(4)` and the shared `ANIM` setting.
+- `animating()` becomes the kit's `v.animated`: the smelter stops waking four times a second when nothing on screen moves.
+
+### 9.6 Tests
+
+In the simulator: (1) at 51x19 with four tiles in different states, only working, waiting and returning tiles change between beats, and only in the glyph cell; (2) `ANIM=off` and a stale tile never change; (3) a beat flushes at most one `blit` per changed row and never calls `clear`; (4) 25 animated tiles draw 24 moving glyphs; (5) the timer is not armed when nothing animated.
