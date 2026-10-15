@@ -4,6 +4,28 @@ Status: **waiting on Tanis**. Pick one of A/B/C in each of the three choices bel
 
 How to read the mockups: every block is exactly the width in its `w=` tag. A space is a black cell. Shaded cells are coloured backgrounds: `░` grey (bars, idle buttons), `▓` gold (active, primary), `▒` a state colour (named under the block). Letters are text on top of that.
 
+## 0. Screen sizes the kit designs for
+
+Monitors run at text scale 0.5 (the scale storage, foreman, nether, farmhand, plastic and neural already set). Size in characters is `round((64n-20)/(6*0.5))` wide by `round((64n-20)/(9*0.5))` tall for n blocks.
+
+| Screen | Blocks | Characters | Used for |
+|---|---|---|---|
+| Display | 2x2 | **36x24** | one machine or one status; near-square, so tall |
+| Small board | 3x2 | **57x24** | overview of a system; today's "57x24 wall" |
+| Large board | 3x3 | **57x38** | overview plus detail side by side |
+| Canvas | 3x6 | **57x81** | art, tall lists and maps |
+| Wall | 8x6 | **164x81** | whole-base board, many columns |
+| Advanced computer | | **51x19** | terminal, keyboard |
+| Turtle | | **39x13** | terminal, keyboard |
+| Smart glasses | | **26x20** | HUD |
+
+The kit picks a layout from width and height separately, not from a named size, so a 4x3 or a computer with a different font still works:
+
+- **Width classes:** narrow (up to 30: glasses), compact (31-45: 2x2 display, turtle), regular (46-70: computer, 3x2, 3x3, 3x6), wide (71+: wall). Wide screens add columns of tiles instead of stretching them.
+- **Height classes:** short (up to 14), normal (15-30), tall (31+). Buttons use 1 row on short, 3 on normal and tall; tall screens show more rows of a list, never bigger text.
+
+The mockups below are still 51 and 26 wide. The full kit will show every component at 26x20, 36x24, 39x13, 51x19, 57x24, 57x38 and the wall as a 3-column tile grid. A canvas is a tall 57-wide column.
+
 ## 1. What the screens do today (grep survey)
 
 Every screen draws its own copy. Same job, different look:
