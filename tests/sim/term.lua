@@ -26,6 +26,11 @@ function Term:_blankRow(y)
   self.ch[y], self.fgs[y], self.bgs[y] = c, f, b
 end
 
+local GREYS = { [1] = true, [128] = true, [256] = true, [32768] = true }
+local function checkColour(self, c)
+  if not self.colour and not GREYS[c] then error("Colour not supported", 3) end
+end
+
 -- peripheral/term methods (called with self)
 function Term:getSize() return self.w, self.h end
 function Term:getCursorPos() return self.cx, self.cy end
@@ -34,12 +39,22 @@ function Term:setCursorBlink(b) self.blink = b and true or false end
 function Term:getCursorBlink() return self.blink end
 function Term:isColour() return self.colour end
 Term.isColor = Term.isColour
-function Term:setTextColour(c) self.fg = c end
-function Term:setBackgroundColour(c) self.bg = c end
+function Term:setTextColour(c) checkColour(self, c); self.fg = c end
+function Term:setBackgroundColour(c) checkColour(self, c); self.bg = c end
 function Term:getTextColour() return self.fg end
 function Term:getBackgroundColour() return self.bg end
-function Term:setPaletteColour() end
-function Term:getPaletteColour() return 0, 0, 0 end
+-- Palette: remembered per colour slot (a power of two). setPaletteColour(c, 0xRRGGBB) or (c, r, g, b) as floats.
+function Term:setPaletteColour(c, r, g, b)
+  if g then r = math.floor(r * 255 + 0.5) * 65536 + math.floor(g * 255 + 0.5) * 256 + math.floor(b * 255 + 0.5) end
+  self.pal = self.pal or {}
+  self.pal[c] = r
+end
+function Term:getPaletteColour(c)
+  local v = self.pal and self.pal[c] or 0
+  return math.floor(v / 65536) / 255, math.floor(v / 256) % 256 / 255, v % 256 / 255
+end
+function Term:paletteHex(c) return self.pal and self.pal[c] end   -- test helper
+
 function Term:setTextScale(s) self.scale = s end
 function Term:getTextScale() return self.scale end
 Term.setTextColor, Term.setBackgroundColor = Term.setTextColour, Term.setBackgroundColour
@@ -134,13 +149,33 @@ Term.peripheralMethods = { "getSize", "getCursorPos", "setCursorPos", "setCursor
   "getTextColor", "getBackgroundColour", "getBackgroundColor", "write", "blit", "clear", "clearLine", "scroll",
   "setPaletteColour", "setPaletteColor", "getPaletteColour", "getPaletteColor", "setTextScale", "getTextScale" }
 
+-- term.current()/native() hand back plain functions (called with a dot, no self), like CC's real terminal
+-- objects; proxies are cached so term.redirect(term.current()) round-trips.
+local function proxyOf(t, cache)
+  if cache[t] then return cache[t] end
+  local p = {}
+  for _, m in ipairs(METHODS) do p[m] = function(...) return t[m](t, ...) end end
+  cache[t], cache[p] = p, t
+  return p
+end
+
 function Term.api(native)
-  local cur = native
+  local cur, dot = native, false      -- dot: the target is a plain-function object (a wrapped monitor)
+  local cache = setmetatable({}, { __mode = "k" })
   local api = {}
-  for _, m in ipairs(METHODS) do api[m] = function(...) return cur[m](cur, ...) end end
-  function api.current() return cur end
-  function api.native() return native end
-  function api.redirect(target) local old = cur; cur = target; return old end
+  for _, m in ipairs(METHODS) do
+    api[m] = function(...) if dot then return cur[m](...) end return cur[m](cur, ...) end
+  end
+  function api.current() if dot then return cur end return proxyOf(cur, cache) end
+  function api.native() return proxyOf(native, cache) end
+  function api._cur() return cur end           -- the sim's own method-style handle (print, read)
+  function api.redirect(target)
+    local old, olddot = cur, dot
+    local t = cache[target]
+    if t then cur, dot = t, false else cur, dot = target, true end
+    if olddot then return old end
+    return proxyOf(old, cache)
+  end
   return api
 end
 

@@ -36,7 +36,7 @@ local M = {
             .. "torch top-ups and warnings (Inventory Manager), welcomes, visitors and the storage "
             .. "lock (Player Detector). Needs an ender or wireless modem.",
           run = "mainframe",
-          files = { "computer/mainframe/mainframe.lua", "computer/mainframe/island.lua",
+          files = { "computer/mainframe/mainframe.lua", "computer/mainframe/island.lua", "shared/ui.lua",
                     "computer/mainframe/board.lua", "computer/mainframe/butler.lua",
                     "computer/mainframe/base_link.lua",
                     "computer/mainframe/dig_link.lua", "computer/mainframe/weaver_link.lua",
@@ -49,7 +49,7 @@ local M = {
             .. "drawers, search + take on its screen, tops up turtle fuel barrels, supplies Weaver "
             .. "and does the smelter's moves. Wired modem on the storage cable + wireless modem.",
           run = "storage",
-          files = { "computer/storage/storage.lua", "shared/assignui.lua" },
+          files = { "computer/storage/storage.lua", "shared/assignui.lua", "shared/ui.lua" },
         },
         smelter = {
           name = "Smelter",
@@ -58,7 +58,7 @@ local M = {
             .. "first. Teach it new recipes with a training furnace. Storage moves the items. "
             .. "Wired modem on the storage cable; advanced monitor optional (3x2 is ideal).",
           run = "smelter",
-          files = { "computer/smelter/smelter.lua", "computer/smelter/probe.lua" },
+          files = { "computer/smelter/smelter.lua", "computer/smelter/probe.lua", "shared/ui.lua" },
           once = { "computer/smelter/smelt.txt" },
         },
         foreman = {
@@ -68,7 +68,7 @@ local M = {
             .. "dock it, see where it is, or retire it. Hands out Canary numbers. Needs an ender "
             .. "modem and an advanced monitor.",
           run = "foreman",
-          files = { "computer/foreman/foreman.lua" },
+          files = { "computer/foreman/foreman.lua", "shared/ui.lua" },
         },
         nether = {
           name = "Nether Foreman",
@@ -78,7 +78,7 @@ local M = {
             .. "what the Rules say in Nether stock, sends the rest home through the output barrel "
             .. "(hopper -> ender chest). Ender modem + wired modem; /assign for the barrels.",
           run = "nether",
-          files = { "computer/nether/nether.lua", "shared/assignui.lua" },
+          files = { "computer/nether/nether.lua", "shared/assignui.lua", "shared/ui.lua" },
         },
         farmhand = {
           name = "Farmhand",
@@ -87,7 +87,7 @@ local M = {
             .. "pause, re-map, reboot, its settings, where it is and what it has brought in. "
             .. "Needs a wireless or ender modem and an advanced monitor.",
           run = "farmhand",
-          files = { "computer/farmhand/farmhand.lua" },
+          files = { "computer/farmhand/farmhand.lua", "shared/ui.lua" },
         },
         architect = {
           name = "Architect",
@@ -97,7 +97,7 @@ local M = {
             .. "needed, the corner markers, and build / stop / test / clear / reboot orders. "
             .. "Needs a wireless or ender modem; no monitor.",
           run = "architect",
-          files = { "computer/architect/architect.lua", "computer/art/art_gfx.lua", "shared/weaverplan.lua" },
+          files = { "computer/architect/architect.lua", "computer/art/art_gfx.lua", "shared/weaverplan.lua", "shared/ui.lua" },
         },
         gps = {
           name = "GPS host",
@@ -115,7 +115,7 @@ local M = {
             .. "into the Latex Processing Unit, tops up its water, smelts the dry rubber and puts the "
             .. "plastic in a dock barrel that storage empties and keeps fuelled (/dock on storage).",
           run = "plastic",
-          files = { "computer/plastic/plastic.lua" },
+          files = { "computer/plastic/plastic.lua", "shared/ui.lua" },
         },
         neural = {
           name = "Neural lab",
@@ -125,7 +125,7 @@ local M = {
             .. "enough of what its fab makes (neural.txt), learns new columns and fab changes by "
             .. "itself. Dock barrel shared with storage. Needs a wireless or ender modem.",
           run = "neural",
-          files = { "computer/neural/neural.lua" },
+          files = { "computer/neural/neural.lua", "shared/ui.lua" },
         },
         art = {
           name = "Art controller",
@@ -194,7 +194,7 @@ local M = {
             .. "facing, free inventory bar (with an Inventory Manager), and a top-middle alert when a "
             .. "mob is attacking you. Settings in glasses.env.",
           run = "glasses",
-          files = { "glasses/hud/glasses.lua" },
+          files = { "glasses/hud/glasses.lua", "shared/ui.lua" },
         },
       },
     },

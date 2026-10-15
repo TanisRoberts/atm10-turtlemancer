@@ -78,5 +78,10 @@ stack and turtle actions take game time. (The mock does not enforce that wired m
 scenarios put barrels on the cable, as the real base does.) Don't write a
 throwaway harness in a scratchpad.
 
+Screens behave like CC's: `term.current()` hands back plain functions (call `t.write(...)`, no colon), `setPaletteColour`
+is remembered (`screen:paletteHex(colours.yellow)`), a `colour = false` computer refuses non-grey colours, and
+`c:resize(w, h)` / `monitor:setSize(w, h)` raise `term_resize` / `monitor_resize`. `tests/demo/ui_demo.lua` is a small
+screen built on the UI kit that `ui_core.lua` drives at every size.
+
 Not simulated yet: `http`, `window`, redstone, the neural/plastic machines, Functional Storage drawers (use `slotLimit`),
 chunk loading, mobs, fluids other than lava pickup.

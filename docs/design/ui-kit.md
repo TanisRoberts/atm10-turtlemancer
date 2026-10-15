@@ -413,7 +413,7 @@ A tap on a monitor is `monitor_touch`; a click on a computer is `mouse_click`. T
 One module, loaded by every controller. It owns the palette, drawing, hit boxes and keys; a screen calls it and never writes to the terminal.
 
 ```lua
-local ui = require("shared.ui")
+local ui = require("ui")                     -- repo file shared/ui.lua; devices keep shared files flat, as ui.lua
 
 local view = ui.view(term.current())         -- or a wrapped monitor / glasses; installs the palette,
                                              -- sets text scale 0.5 on monitors, reads W x H and classes

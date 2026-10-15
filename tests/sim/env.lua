@@ -264,7 +264,7 @@ function Env.build(world, c)
   end
 
   ------------------------------------------------------------------ print / read
-  local function cur() return term.current() end
+  local function cur() return term._cur() end
   local function newline()
     local t = cur()
     local _, h = t:getSize()

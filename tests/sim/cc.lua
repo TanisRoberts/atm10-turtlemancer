@@ -278,6 +278,18 @@ function Term:touch(x, y)
   c:_queue("monitor_touch", self.side or self.netName, x, y)
 end
 
+-- Resize a screen as the game does (monitor blocks added or removed; a window resized): the program gets
+-- term_resize (its own screen) or monitor_resize (a monitor).
+function Term:setSize(w, h)
+  self:resize(w, h)
+  local c = self.comp
+  if c then c:_queue("monitor_resize", self.side or self.netName) end
+end
+function Computer:resize(w, h)
+  self.screen:resize(w, h)
+  self:_queue("term_resize")
+end
+
 -- Input as if typed at the computer
 function Computer:type(text)
   for ch in text:gmatch(".") do self:_queue("char", ch) end
