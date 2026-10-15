@@ -1,6 +1,6 @@
 # UI kit
 
-Status: **draft for Tanis's sign-off** (issue #2). Picks already made: header B (chip and rule), buttons B (one row, big tap area), tiles B (edge stripe). Palette approved, with a new room recipe for floors (section 3).
+Status: **draft for Tanis's sign-off** (issue #2). Picks already made: header B (chip and rule), buttons B (one row, big tap area), tiles B (edge stripe). Palette approved. Block palette revised to match the advanced monitor frame (section 3).
 
 Every controller draws its screens with `shared/ui.lua`, which implements this document. A screen says what it shows (header, buttons, tiles, list); the kit decides sizes, colours, hit boxes and keys, so screens on a 26x20 pair of glasses and a 164x81 wall come from the same code.
 
@@ -69,25 +69,41 @@ Rules: one state, one colour, and the state is always also a word. Gold at most 
 
 ## 3. Blocks and rooms
 
-Computers and monitors sit in a **deepslate** wall so the screen's black and grey look part of the build, and the gold frames of advanced computers pop.
+Computers and monitors sit in a **deepslate** wall so the screen's black and grey look part of the build.
 
-**Room recipe (coloured wall theory).** Walls, floor and ceiling differ in both lightness and temperature. Lightness steps up from floor to ceiling; temperature sandwiches: warm floor, cool walls, warm ceiling, tied together by gold trim. Deepslate Tiles were too close to the Deepslate Brick walls in both, so they leave the floor.
+**The advanced monitor frame is not gold.** Read from CC:Tweaked's own textures (`computer_advanced_*`, `monitor_advanced_*`): the frame is a pale olive-yellow, `#DDD771` lit, `#ECEC9C` on its inner highlight, with `#303030` detail, hue 56 degrees. In game it dims to about `#938D4A` in shade. The UI's gold chip (`#F2B71F`, hue 43) is warmer and more orange, so gold blocks (Gold Block, Raw Gold, Yellow Terracotta) look wrong beside the frames. The UI palette stays as approved; the block palette now follows the frame instead.
+
+**Frame yellow blocks.** Matched on hue, saturation and lightness against the frame body (`#DDD771`, hue 56, saturation 0.51, lightness 0.87) across vanilla and the pack's mods (Aether, Create, Chipped, Mekanism, Industrial Foregoing, Ars Nouveau, Regions Unexplored and others; textures read from the 1.21.1 jars and mod sources).
+
+| Block | Mod | Average | Hue | Use |
+|---|---|---|---|---|
+| **Block of Ambrosium** | Aether | `#E0D661` | 55 | an exact match: trim, pillars, frames around monitors. Craft from 9 Ambrosium Shards (Ambrosium Ore, Aether islands) |
+| **Quicksoil** | Aether | `#D8CE82` | 53 | the same hue, a little paler and softer: walls and panels around monitors. Mined in the Aether, plentiful |
+| **Stripped Bamboo Block** | vanilla | `#C1AD50` | 49 | the closest vanilla block; slightly warmer and darker. The fallback anywhere without Aether blocks |
+| End Stone Bricks | vanilla | `#DAE0A2` | 65 | cooler and paler than the frame; fine for pillars beside Stripped Bamboo |
+
+Checked in your screenshot: in that lighting the frame reads about `#A8A053` lit and `#817C48` in shade, and the Ambrosium Block's average scaled by the same lighting (0.76) lands within about 10 units of the lit frame, where Sponge, Bamboo Planks and End Stone each miss on hue or saturation. Sponge is out (too hard to get); the Gold Block family is out (wrong hue).
+
+Not worth it: Create's Brass and Mekanism's Refined Glowstone are gold, not olive-yellow; Chipped's variants reuse vanilla colours and add nothing new here.
+
+**Room recipe (coloured wall theory).** Walls, floor and ceiling differ in lightness and in temperature. Lightness steps up from floor to ceiling; temperature sandwiches: warm floor, cool walls, warm ceiling, tied together by a frame-yellow line. Deepslate Tiles were too close to the Deepslate Brick walls in both, so they are out of the floor.
 
 | Surface | Block | Lightness L* | Temperature |
 |---|---|---|---|
-| Ceiling | **Mud Bricks** (bright variant: Cut Sandstone, L* 83) | 47 | warm, pale brown |
+| Ceiling | **Mud Bricks** (brighter: Cut Sandstone, L* 83) | 47 | warm, pale brown |
 | Walls | **Deepslate Bricks**, Polished Deepslate pillars | 30 | cool grey |
 | Floor | **Dark Oak Planks**, Polished Blackstone Bricks inlay border | 20 / 18 | warm, deep brown |
-| Skirting and cornice | Raw Gold Block or Yellow Terracotta, one block high where wall meets floor and ceiling | | gold, the bridge |
+| Skirting and cornice | **Block of Ambrosium** (or **Stripped Bamboo Block**), one block high where wall meets floor and ceiling | | frame yellow, the bridge |
+| Pillars and panels between monitors | **Quicksoil** (or **End Stone Bricks**) | | frame yellow, pale |
 | Behind monitors | Blackstone, Polished Blackstone | | matches screen `bg` |
 | Light | Shroomlight, Glowstone, Lanterns (warm light) | | warm |
 | Status lamps | Lime, Orange, Red, Light Blue stained glass over lit redstone lamps | | match state colours |
 | Accent stripe | Dark Prismarine, Cyan Terracotta | | matches `info` |
 | Farm rooms | Moss Block, Dark Oak | | green and soil |
 
-Floor alternatives if dark oak does not suit a room: Polished Blackstone Bricks (same pattern feel as the tiles, darker and warmer than the walls), Spruce Planks (lighter). Keep the rule: the floor is the darkest and warmest large surface, the ceiling the lightest.
+Floor alternatives if dark oak does not suit a room: Polished Blackstone Bricks (darker and warmer than the walls), Spruce Planks (lighter). Keep the rule: the floor is the darkest and warmest large surface, the ceiling the lightest.
 
-About 80% deepslate, 15% gold, 5% accent by what you see at monitor height. Put gold against deepslate on two sides so it frames and does not flood.
+About 80% deepslate, 15% frame yellow, 5% accent by what you see at monitor height. Put frame yellow against deepslate on two sides so it frames and does not flood.
 
 ## 4. Components
 ### 4.1 Header
