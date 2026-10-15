@@ -427,3 +427,75 @@ T.test("ui2: a monitor view gets tiles and taps of its own", function()
   mon:touch(lx + 1, 24); world:run(0.2)
   T.eq(d2(c).tab, "list"); T.truthy(inRow(c.screen, 3, "Item number 01"), "the computer's own view follows")
 end)
+
+---------------------------------------------------------------------------------------------------------
+-- Additions the Farmhand needed: grown tiles, v:cells, map bounds / wide cells / area / arrow colours / text colour
+T.test("ui2: tiles grow: only the rows needed, taller tiles with a spare area for extra, input row kept free", function()
+  local world, c = frame(51, 19, [[
+    local n = 0
+    v:tiles({ 1, 2 }, { grow = true, input = true, on = function() end, render = function(i)
+      return { name = "T" .. i, state = "working", fuel = 0.5, extra = function(view, x, y, w, h)
+        n = n + 1; view:put(x, y, "EXTRA " .. w .. "x" .. h, "fg", "bg") end }
+    end })
+    v:footer({})
+  ]])
+  local scr = c.screen
+  -- 2 items, 2 columns of 24: one row of tiles, as tall as the area (rows 3..17 = 15)
+  T.truthy(inRow(scr, 8, "EXTRA 21x10"), "extra starts under the 5 fixed rows and gets the rest")
+  T.eq(bg(scr, 2, 17), COL.lime, "stripe runs the whole grown tile"); T.eq(bg(scr, 2, 18), COL.black, "input row left free")
+  local w1, c1 = frame(51, 19, [[
+    v:tiles({ 1 }, { grow = true, render = function(i)
+      return { name = "Only", state = "working", extra = function(view, x, y, w, h) view:put(x, y, "W" .. w, "fg", "bg") end } end })
+  ]])
+  T.truthy(inRow(c1.screen, 8, "W46"), "a single item gets the full width (no empty second column)")
+  local w2, c2 = frame(51, 19, [[
+    v:tiles({ 1 }, { render = function(i)
+      return { name = "Plain", state = "working", extra = function() error("no extra without grow") end } end })
+  ]])
+  T.truthy(inRow(c2.screen, 3, "Plain"))
+end)
+
+T.test("ui2: cells draws a row of coloured cells; without colour the character carries it", function()
+  local world, c = frame(20, 6, [[ v:cells(3, 3, { { "A", "bad", "bg" }, { " ", "fg", "good" }, { "C", "info", "water" } }) ]])
+  local scr = c.screen
+  T.eq(scr.ch[3][3], "A"); T.eq(fg(scr, 3, 3), COL.red)
+  T.eq(bg(scr, 4, 3), COL.lime); T.eq(scr.ch[3][5], "C"); T.eq(bg(scr, 5, 3), COL.blue); T.eq(fg(scr, 5, 3), COL.cyan)
+  local w2, c2 = frame(20, 6, [[ v:cells(3, 3, { { "A", "bad", "bg" }, { " ", "fg", "good" }, { " ", "fg", "bg" } }) ]], { colour = false })
+  T.eq(c2.screen:line(3):sub(3, 5), "A. ")
+end)
+
+T.test("ui2: map bounds: centred when it all fits (no pan row), 2-char cells with wide, area, arrow colours, text colour", function()
+  local get = [[ local function get(x, z)
+    if x < 1 or z < 1 or x > 10 or z > 6 then return nil end
+    if x == 3 and z == 2 then return { "soil", "x", "a tap", "good" } end
+    return "bar" end ]]
+  local world, c = frame(51, 19, get .. [[
+    v:map({ get = get, at = { x = 5, z = 3, facing = 1, fg = "fg", bg = "mark" }, bounds = { x1 = 1, z1 = 1, x2 = 10, z2 = 6 } })
+  ]])
+  local scr = c.screen
+  -- 49 columns x 16 rows available (rows 3..18): the 10x6 map is centred; no pan row although the screen is tall
+  local x0 = 2 + math.floor((49 - 10) / 2)
+  local y0 = 3 + math.floor((16 - 6) / 2)
+  T.eq(bg(scr, x0, y0), COL.grey, "map cell 1,1"); T.eq(bg(scr, x0 - 1, y0), COL.black, "nothing outside the bounds")
+  T.eq(bg(scr, x0 + 10, y0), COL.black); T.eq(bg(scr, x0, y0 + 6), COL.black)
+  T.eq(scr.ch[y0 + 2][x0 + 4], ">"); T.eq(bg(scr, x0 + 4, y0 + 2), COL.magenta, "arrow background"); T.eq(fg(scr, x0 + 4, y0 + 2), COL.white)
+  T.eq(fg(scr, x0 + 2, y0 + 1), COL.lime, "a cell's own text colour"); T.eq(scr.ch[y0 + 1][x0 + 2], "x")
+  for y = 3, 18 do T.absent(scr:line(y), " ^ ", "nothing to pan") end
+  -- wide: two characters per cell when the map fits that way
+  local w2, c2 = frame(51, 19, get .. [[
+    v:map({ get = get, at = { x = 5, z = 3, facing = 1 }, bounds = { x1 = 1, z1 = 1, x2 = 10, z2 = 6 }, wide = true })
+  ]])
+  local cols = math.floor(49 / 2)
+  local wx0 = 2 + (2 * math.floor((cols - 10) / 2)) 
+  T.eq(bg(c2.screen, wx0, y0), COL.grey); T.eq(bg(c2.screen, wx0 + 1, y0), COL.grey, "the cell is 2 wide")
+  T.eq(bg(c2.screen, wx0 + 20, y0), COL.black)
+  -- area: drawn only inside the box, the pan row is the box's last row when it does not fit
+  local w3, c3 = frame(51, 19, get .. [[
+    v:map({ get = function(x, z) return "bar" end, at = { x = 50, z = 50, facing = 0 }, bounds = { x1 = 1, z1 = 1, x2 = 99, z2 = 99 },
+            area = { x1 = 5, y1 = 4, x2 = 14, y2 = 9 } })
+  ]])
+  local s3 = c3.screen
+  T.eq(bg(s3, 5, 4), COL.grey); T.eq(bg(s3, 14, 8), COL.grey); T.eq(bg(s3, 4, 4), COL.black); T.eq(bg(s3, 15, 4), COL.black)
+  T.eq(bg(s3, 5, 10), COL.black, "nothing below the area")
+  T.truthy(inRow(s3, 9, " ^ ") and inRow(s3, 9, " > "), "the pan row is the last row of the area")
+end)

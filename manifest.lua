@@ -87,7 +87,8 @@ local M = {
             .. "pause, re-map, reboot, its settings, where it is and what it has brought in. "
             .. "Needs a wireless or ender modem and an advanced monitor.",
           run = "farmhand",
-          files = { "computer/farmhand/farmhand.lua", "shared/ui.lua", "shared/ui_widgets.lua" },
+          files = { "computer/farmhand/farmhand.lua", "computer/farmhand/farmhand_screens.lua", "computer/farmhand/farmhand_map.lua",
+                    "shared/ui.lua", "shared/ui_widgets.lua" },
         },
         architect = {
           name = "Architect",

@@ -1,6 +1,6 @@
 # UI kit (`shared/ui.lua`)
 
-Design: `docs/design/ui-kit.md`. Devices keep shared files flat, so a program says `local ui = require("ui")` and lists `shared/ui.lua` in its manifest role. Nothing uses it yet; the Farmhand pilot (#3) is first.
+Design: `docs/design/ui-kit.md`. Devices keep shared files flat, so a program says `local ui = require("ui")` and lists `shared/ui.lua` in its manifest role. The Farmhand is the first user (see `docs/systems/farmhand.md`); the other controllers move over in the kit's migration order.
 
 ## Part 1 (#2): `shared/ui.lua`
 
@@ -24,9 +24,9 @@ Paging state lives on the view: `v.page` is the page being shown, lists and tile
 - `v:bar(x, y, w, label, frac, { kind = "fuel"|"cap"|"progress", text })`; `ui.barColour(kind, frac)`.
 - `ui.field{ hint, max, validate, on_commit, on_cancel }` and `v:field(x, y, label, w, f)`. `v:search(f, { hint, commands = { { name, help, fn(arg) } } })` draws the input row and returns true in command mode; call it after the list, because the command list replaces what was drawn above it (and its hit boxes). A search bar takes all typing unless another field is focused, so button hotkeys and `1`-`9` are off on screens that have one. Enter on a search bar with no `on_commit` opens the selected list row, else the top one.
 - `v:list(rows, { on, input })`: rows `{ name, value, state (colour role), id }`. Up/Down, PgUp/PgDn, Home/End, Enter.
-- `v:map({ get = fn(x, z) -> role | { role, char, text }, at = { x, z, facing }, on_cell, input })`: pan buttons, `Follow`, arrows, Home or `f`, wheel. Draws rows with `blit`.
+- `v:map({ get = fn(x, z) -> role | { role, char, text, textRole }, at = { x, z, facing, fg, bg }, on_cell, input, area, bounds, wide })`: pan buttons, `Follow`, arrows, Home or `f`, wheel. `area` draws in a box instead of the content area (the pan row is its last row). `bounds` says where the map exists: a map that fits is centred with no pan row, a bigger one stays inside it; `wide` makes cells 2 characters when they fit. `v:cells(x, y, { { char, fg, bg }, ... })` draws one row of coloured cells with a single `blit` (the map uses it; so can a thumbnail).
 
-Not built: the map thumbnail inside a wall tile (kit 4.5, optional).
+The map thumbnail on a tile is done by the screen through `fields.extra` and `v:cells`.
 
 ## Tests
 

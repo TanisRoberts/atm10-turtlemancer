@@ -158,14 +158,28 @@ function ui.layout.tiles(W, H, n)
   return cols, w, h, rows, max(1, ceil((n or 0) / (cols * rows)))
 end
 
--- v:tiles(items, { render = fn(item) -> fields, on = fn(item) })
--- fields: name, state, activity, fuel (0..1), numbers, seen, stale ("3m": not heard for that long), color.
+-- v:tiles(items, { render = fn(item) -> fields, on = fn(item), grow = false, input = false })
+-- fields: name, state, activity, fuel (0..1), numbers, seen, stale ("3m": not heard for that long), color,
+--         extra = fn(view, x, y, w, h) draws into the spare rows of a grown tile.
 -- 5 rows: name + state, activity, fuel bar, numbers, seen. Short screens: name + state, fuel bar.
 -- A stripe in the state colour runs down the left edge (gold on the highlighted tile, grey when stale).
--- Whole tile is the tap target. Arrows move the highlight, Enter opens, Esc clears. Returns the next free row.
+-- grow = true: use the spare height: only as many rows of tiles as the items need, each tile taller than 5 rows
+-- (the extra rows go to fields.extra), and no more columns than items. input = true leaves the row above the
+-- footer free for a search bar. Whole tile is the tap target. Arrows move the highlight, Enter opens, Esc clears.
 function View:tiles(items, o)
-  local cols, tw, th, rows, pages = ui.layout.tiles(self.W, self.H, #items)
+  local r = self:rect(o.input)
+  local avail = r.y2 - r.y1 + 1
+  local cols, tw, th, rows = ui.layout.tiles(self.W, self.H - (o.input and 1 or 0), #items)
+  if o.grow then
+    cols = max(1, min(cols, #items))
+    tw = floor((self.W - 2 - (cols - 1)) / cols)
+    if th == 5 then
+      rows = max(1, min(rows, ceil(#items / cols)))
+      th = max(5, floor((avail + 1) / rows) - 1)
+    end
+  end
   local per = cols * rows
+  local pages = max(1, ceil(#items / per))
   self.pages = pages
   self.page = clamp(self.page, 1, pages)
   self.tileInfo = { items = items, cols = cols, per = per, on = o.on }
@@ -179,8 +193,8 @@ function View:tiles(items, o)
     local y = 3 + floor((i - 1) / cols) * (th + 1)
     local stale = f.stale ~= nil
     local role = (self.sel == first + i) and "gold" or stale and "bar" or f.color or ui.stateRole(f.state)
-    for r = 0, th - 1 do
-      if self.colour then self:put(x, y + r, " ", "fg", role) else self:put(x, y + r, "|", "fg", "bg") end
+    for rr = 0, th - 1 do
+      if self.colour then self:put(x, y + rr, " ", "fg", role) else self:put(x, y + rr, "|", "fg", "bg") end
     end
     local tx, w = x + 2, tw - 3
     local state = f.state and tostring(f.state) or ""
@@ -194,6 +208,7 @@ function View:tiles(items, o)
       if f.fuel ~= nil then self:bar(tx, y + 2, w, "Fuel", f.fuel, { text = f.fuelText }) end
       if f.numbers then self:put(tx, y + 3, fit(f.numbers, w), txt, "bg") end
       if f.seen then self:put(tx, y + 4, fit(f.seen, w), "dim", "bg") end
+      if th > 5 and f.extra then f.extra(self, tx, y + 5, w, th - 5) end
     end
     local idx = first + i
     self:_box({ x, y, x + tw - 1, y + th - 1 }, nil, { id = "tile:" .. idx,
@@ -362,52 +377,72 @@ end
 ---------------------------------------------------------------------------------------------------------
 -- Map viewport with pan (4.10)
 ---------------------------------------------------------------------------------------------------------
--- v:map({ get = fn(x, z) -> role or { role, char, text }, at = { x =, z =, facing = 0..3 (N E S W) or "^>v<" },
---         on_cell = fn(x, z, info), input = true if a search bar sits below })
--- Block-coloured cells (soil, good2 crops, good saplings, water, bar land) with the machine as a cyan arrow. It follows
--- the machine until you pan; then a Follow button appears. The pan row (^ v < > Follow) sits above the footer unless
--- the screen is short (keys and the wheel only). A tap on a cell says what is there. Arrows pan, Home or f follows.
+-- v:cells(x, y, { { char, fg, bg }, ... }) draws one row of coloured cells in a single call (blit). Without colour
+-- the character carries the meaning, and a blank cell on a coloured background becomes a dot.
+function View:cells(x, y, cells)
+  if self.colour then
+    local chs, fgs, bgs = {}, {}, {}
+    for i, c in ipairs(cells) do chs[i], fgs[i], bgs[i] = c[1], hex(self:slot(c[2])), hex(self:slot(c[3])) end
+    self.t.setCursorPos(x, y)
+    self.t.blit(table.concat(chs), table.concat(fgs), table.concat(bgs))
+  else
+    local chs = {}
+    for i, c in ipairs(cells) do chs[i] = (c[1] == " " and c[3] ~= "bg") and "." or c[1] end
+    self:put(x, y, table.concat(chs), "fg", "bg")
+  end
+end
+
+-- v:map({ get = fn(x, z) -> role or { role, char, text, fgRole }, at = { x =, z =, facing = 0..3 (N E S W) or "^>v<",
+--         fg =, bg = (the arrow's colours; default cyan on the cell) }, on_cell = fn(x, z, info),
+--         input = true if a search bar sits below, area = { x1, y1, x2, y2 } to draw somewhere else,
+--         bounds = { x1, z1, x2, z2 } the extent of what exists, wide = true for 2-character cells when they fit })
+-- Block-coloured cells (soil, good2 crops, good saplings, water, bar land) with the machine as an arrow. It follows
+-- the machine until you pan; then a Follow button appears. The pan row (^ v < > Follow) is the last row of the area
+-- unless the screen is short (keys and the wheel only) or, with bounds, the whole map fits (then it is centred and
+-- there is nothing to pan). A tap on a cell says what is there. Arrows pan, Home or f follows, the wheel pans.
 local ARROW = { [0] = "^", [1] = ">", [2] = "v", [3] = "<" }
 function View:map(o)
-  local r = self:rect(o.input)
-  local pan = self.hc ~= "short"
-  local x1, y1, x2, y2 = r.x1, r.y1, r.x2, pan and r.y2 - 1 or r.y2
-  local vw, vh = x2 - x1 + 1, y2 - y1 + 1
-  local at = o.at
+  local r = o.area or self:rect(o.input)
+  local x1, y1 = r.x1, r.y1
+  local at, b = o.at, o.bounds
+  local vw, full = r.x2 - x1 + 1, r.y2 - y1 + 1
+  local cw = (o.wide and b and (b.x2 - b.x1 + 1) * 2 <= vw) and 2 or 1
+  local cols = floor(vw / cw)
+  local fits = b and (b.x2 - b.x1 + 1) <= cols and (b.z2 - b.z1 + 1) <= full
+  local pan = self.hc ~= "short" and not fits
+  local vh = pan and full - 1 or full
   local cx = self.panTo and self.panTo.x or at.x
   local cz = self.panTo and self.panTo.z or at.z
-  local ox, oz = cx - floor(vw / 2), cz - floor(vh / 2)
+  local ox, oz = cx - floor(cols / 2), cz - floor(vh / 2)
+  if b then
+    local bw, bh = b.x2 - b.x1 + 1, b.z2 - b.z1 + 1
+    ox = bw <= cols and b.x1 - floor((cols - bw) / 2) or clamp(ox, b.x1, b.x2 - cols + 1)
+    oz = bh <= vh and b.z1 - floor((vh - bh) / 2) or clamp(oz, b.z1, b.z2 - vh + 1)
+    if self.panTo then self.panTo = { x = ox + floor(cols / 2), z = oz + floor(vh / 2) } end
+  end
   local arrow = type(at.facing) == "string" and at.facing or ARROW[at.facing or 0] or "^"
   for row = 0, vh - 1 do
-    local chs, fgs, bgs = {}, {}, {}
-    for col = 0, vw - 1 do
+    local cells = {}
+    for col = 0, cols - 1 do
       local wx, wz = ox + col, oz + row
       local info = o.get(wx, wz)
-      local role = type(info) == "table" and info[1] or info or "bg"
-      local ch = type(info) == "table" and info[2] or " "
-      local fgr = "fg"
-      if wx == at.x and wz == at.z then ch, fgr = arrow, "info" end
-      if self.colour then
-        chs[#chs + 1], fgs[#fgs + 1], bgs[#bgs + 1] = ch, hex(self:slot(fgr)), hex(self:slot(role))
-      else
-        chs[#chs + 1] = (wx == at.x and wz == at.z) and arrow or (ch ~= " " and ch or (info and "." or " "))
-      end
+      local tbl = type(info) == "table"
+      local bgr = tbl and info[1] or info or "bg"
+      local ch, fgr = tbl and info[2] or " ", tbl and info[4] or "fg"
+      if wx == at.x and wz == at.z then ch, fgr, bgr = arrow, at.fg or "info", at.bg or bgr end
+      cells[#cells + 1] = { ch, fgr, bgr }
+      if cw == 2 then cells[#cells + 1] = { ch == "\127" and ch or " ", fgr, bgr } end
     end
-    if self.colour then
-      self.t.setCursorPos(x1, y1 + row)
-      self.t.blit(table.concat(chs), table.concat(fgs), table.concat(bgs))
-    else
-      self:put(x1, y1 + row, table.concat(chs), "fg", "bg")
-    end
+    self:cells(x1, y1 + row, cells)
   end
   local function panBy(dx, dz)
     local p = self.panTo or { x = at.x, z = at.z }
     self.panTo = { x = p.x + dx, z = p.z + dz }
   end
   local function follow() self.panTo = nil end
-  self.mapInfo = { pan = panBy, follow = follow, hx = max(floor(vw / 2), 1), hz = max(floor(vh / 2), 1) }
-  self:_box({ x1, y1, x2, y2 }, nil, { id = "map", fn = function(tx, ty)
-    local wx, wz = ox + tx - x1, oz + ty - y1
+  self.mapInfo = { pan = panBy, follow = follow, hx = max(floor(cols / 2), 1), hz = max(floor(vh / 2), 1) }
+  self:_box({ x1, y1, x1 + cols * cw - 1, y1 + vh - 1 }, nil, { id = "map", fn = function(tx, ty)
+    local wx, wz = ox + floor((tx - x1) / cw), oz + ty - y1
     local info = o.get(wx, wz)
     if o.on_cell then o.on_cell(wx, wz, info)
     else
@@ -424,9 +459,9 @@ function View:map(o)
       { label = ">", id = "pan>", fn = function() panBy(mi.hx, 0) end },
     }
     if self.panTo then list[#list + 1] = { label = "Follow", style = "primary", id = "follow", fn = follow } end
-    self:buttons(2, r.y2, list)
+    self:buttons(x1, r.y2, list)
   end
-  return y2
+  return y1 + vh - 1
 end
 
 ---------------------------------------------------------------------------------------------------------
