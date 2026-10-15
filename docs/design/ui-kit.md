@@ -573,3 +573,116 @@ The smelter keeps its flames, with a smaller job:
 ### 9.6 Tests
 
 In the simulator: (1) at 51x19 with four tiles in different states, only working, waiting and returning tiles change between beats, and only in the glyph cell; (2) `ANIM=off` and a stale tile never change; (3) a beat flushes at most one `blit` per changed row and never calls `clear`; (4) 25 animated tiles draw 24 moving glyphs; (5) the timer is not armed when nothing animated.
+
+## 10. Components the screens need beyond sections 4 and 9
+
+Added for issue #26. Every controller's screens (`docs/design/<controller>.md`) use these as well as the components above.
+
+### 10.1 Section label
+
+A dim caps label and a rule to the right edge. Groups a page without boxes.
+
+
+```text w=51
+ LAYERS ────────────────────────────────────────── 
+ KEEP IN THE NETHER ────────────────────────────── 
+                                                   
+```
+Label lightGrey caps, rule grey. One blank row above it, none below. Never gold.
+
+### 10.2 Key-value row
+
+Key at the left (dim), value at the right (white, or a state colour). The kit truncates the value last. Used for info pages, reports and status blocks.
+
+
+```text w=51
+ Plan                     island_v3  54,200 blocks 
+ Missing                 none (storage has it all) 
+ Barrels                            not linked yet 
+ GPS                            no, counting moves 
+```
+
+### 10.3 Alert line
+
+One row with a stripe in the tone colour and the message in that colour. For problems the user can fix. At most two at a time; red ones stay until the problem goes, orange ones likewise. Neutral status text (a summary line) has no stripe.
+
+
+```text w=51
+ ▒ No OUTPUT yet: items cannot be taken out.       
+ ▒ Tap #4 is dry: its log is used up.              
+ Stock 64 buckets, 12 lava  Sent home 12k          
+```
+Orange, red, and a neutral line.
+
+### 10.4 Segmented switch
+
+One choice of a few, drawn as touching pills; the current one is gold. For modes (AUTO / ON / OFF), rules (No rule / Keep N stacks / Smelt all) and sort order. Tap a segment; Left/Right move, Enter picks. Squeeze: labels shorten, then the switch wraps to a second row.
+
+
+```text w=51
+ ▓AUTO▓░ON░░OFF░                                   
+ ░No░rule░░Keep░N░stacks░▓Smelt▓all▓               
+ Sort ▓Qty▓░A-Z░                                   
+```
+
+### 10.5 Board row
+
+A read-only status row: state stripe (and glyph) in the state colour, name, state word, detail, how long since last heard. A row not heard for 30 s goes grey and stops moving. The board header is a grey bar with a gold caps label (it is not a title chip: boards have no page title of their own).
+
+
+```text w=57
+░MACHINES░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+▒ Storage      ok       79% full                       2s
+▒ Smelter      ok       6 cooking                      3s
+▒ Plastic      running  1,204 made                     2s
+```
+
+### 10.6 Picker card
+
+One option at a time as a full gold card, the previous and next options peeking in above and below, a counter at the right, a hint in the footer. For setup. Up/Down, Left/Right, scroll, number keys, click a neighbour; Enter or `Pick >` picks. Wraps around.
+
+
+```text w=39
+▓SETUP▓ step 2 of 3                    
+                                       
+ Which role?                    1 of 3 
+ ^ Foreman                             
+ ▓MAINFRAME▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓suggested▓ 
+ ▓ Chat, alerts, island strip, stat..  
+ ▓                                     
+ ▓ The server. Chat commands and al..  
+ ▓ showing every machine, and the b..  
+ ▓ top-ups, welcomes, visitors and ..  
+ ▓                                     
+ v Storage                             
+ ░<░Back░   up/down browse     ▓Pick▓>▓
+```
+
+### 10.7 Report page
+
+A page of key-value rows (and a section label or two) with Back. Opened by commands that print information (`/fuelinfo`, `/drawers`, `status`). Replaces text dumped on the terminal.
+
+### 10.8 Spinner line and wizard steps
+
+A waiting line is a spinner glyph (waiting, orange) then the sentence. A multi-step flow puts `step 2/3` in the header's right text. Both use section 9's glyphs and beats.
+
+### 10.9 Furnace tile (smelter variant of the tile)
+
+Same as the edge-stripe tile, three rows: tier name, item (or `idle`), count and finished-waiting. The stripe is the tier colour (netherite purple, diamond cyan, gold yellow, iron grey-white, plain grey) while cooking and grey when idle; the smelting glyph sits at the right of the top row. Not tappable.
+
+
+```text w=31
+ ▒ Netherite 1^ ░ Diamond 2    
+ ▒ raw iron     ░ idle         
+ ▒ x64      +12 ░              
+```
+
+### 10.10 Padlock
+
+The storage lock screen: a 13x11 line-art padlock in gold, centred, with `LOCKED` and one line of why. No motion, taps ignored.
+
+### 10.11 Whole-screen rules
+
+- A page's actions are buttons in the content or the footer; the footer's left is always Back (when there is a parent), then tabs, then the pager at the right.
+- Text the user types lives in a text field or in the input row; a monitor shows it but cannot type, and says `type on the computer`.
+- The header chip carries the page title; the state word at the right is the only state in the header.
