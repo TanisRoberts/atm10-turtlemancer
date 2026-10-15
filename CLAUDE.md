@@ -43,6 +43,8 @@ Most files are big (smelter 109 KB, storage 88 KB, miner 74 KB, nether 72 KB, ne
 - A Functional Storage controller gets one modem. Modems on its drawers too would count every item twice.
 - `pushItems` and `pullItems` move at most one stack per call.
 - Tunables live in auto-generated `.env`-style files on each device: missing keys are appended, existing lines are never overwritten.
+- **Leaves break instantly** (a mod on the server) as soon as no log is left around them, and drop their items at once. Don't cut or wait for leaves to rot: remove the logs and the leaves clear themselves.
+- Fuel = ticks = time: a move saved is both fuel and time saved.
 - Turtles must never dig another turtle, a network cable or pipe, or a loot chest. Chests are emptied before they're dug.
 
 ## Testing
