@@ -17,6 +17,7 @@ Every controller's screens as exact-width mockups built from the UI kit (`ui-kit
 | Startup and reset | [`startup.md`](startup.md) | 5 |
 | Setup | [`setup.md`](setup.md) | 6 |
 | Smart glasses | [`glasses.md`](glasses.md) | 2 |
+| Operator | [`operator.md`](operator.md) | 4 tabs, 4 sizes |
 
 ## Common to every screen
 
