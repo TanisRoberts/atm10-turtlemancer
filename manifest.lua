@@ -104,9 +104,9 @@ local M = {
           name = "Operator",
           about = "Runs the Extreme Reactors power plant",
           details = "Finds every reactor on its cable, switches each on below 30% and off above 90% of its "
-            .. "buffer (operator.env), moves waste into a barrel, lists what each reactor needs, has and "
-            .. "is missing, and reports to the mainframe. Wired modem on the reactor cable (computer port, "
-            .. "input and output access ports, a waste barrel) + wireless or ender modem; a monitor shows the status.",
+            .. "buffer (operator.env), watches the inlet and outlet ports (Storage fills and drains them), lists "
+            .. "what each reactor needs, has and is missing, and reports to the mainframe. Wired modem on the "
+            .. "cable shared with the reactor and Storage + wireless or ender modem; a monitor shows the status.",
           run = "operator",
           files = { "computer/operator/operator.lua", "computer/operator/opplant.lua", "computer/operator/opdrivers.lua",
                     "computer/operator/oppolicy.lua", "computer/operator/opneeds.lua", "shared/envfile.lua" },

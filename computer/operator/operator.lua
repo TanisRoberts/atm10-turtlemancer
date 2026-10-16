@@ -1,15 +1,20 @@
 -- operator.lua  --  the Operator: runs the Extreme Reactors 2 power plant on its own.
 --
--- Needs: an advanced computer with a wired modem on the reactor cable (reactor computer port, its input and
--- output access ports and a waste barrel on that cable), plus a wireless or ender modem for the mainframe.
+-- Needs: an advanced computer with a wired modem on the cable that holds the reactor (computer port) and its inlet and
+-- outlet access ports (the cable is shared with Storage; everything that isn't a reactor or its ports is ignored), plus
+-- a wireless or ender modem for the mainframe.
+-- The Operator never moves items. Storage fills the inlet port and drains the outlet port (issue #37); the Operator
+-- only reads them: uranium in the inlet, and whether the outlet is emptying.
 -- A monitor touching a side shows the same plain text as the computer's screen (the pretty screen is separate).
 --
 -- What it does: finds every unit on the cable (opplant.lua), drives each reactor through a driver (opdrivers.lua),
--- lets a policy (oppolicy.lua) decide who runs (on below ON_BELOW % of the buffer, off above OFF_ABOVE %), keeps
--- waste moving from the output port into the barrel, works out what each reactor needs / has / is missing
--- (opneeds.lua) and tells the mainframe (protocol tanis-operator) once every few seconds.
+-- lets a policy (oppolicy.lua) decide who runs (on below ON_BELOW % of the buffer, off above OFF_ABOVE %), watches the
+-- outlet port ("waste not clearing" when it fills or stops emptying), works out what each reactor needs / has / is
+-- missing (opneeds.lua) and tells the mainframe (protocol tanis-operator) once every few seconds.
+-- Storage tells the Operator how much uranium it holds with  { type = "uranium", total = <ingots> }  on the same
+-- protocol; without it "fuel supply" reads unknown.
 -- Settings: operator.env (plant-wide, live) and operator.cfg (per unit, keyed by peripheral name: mode auto|on|off,
--- enabled, onBelow, offAbove, input, output, waste). Log: operator.log.
+-- enabled, onBelow, offAbove, input, output). Log: operator.log.
 local envfile = require("envfile")
 local plantlib = require("opplant")
 local policies = require("oppolicy")
@@ -24,6 +29,7 @@ local env = envfile.new("operator.env", "Operator settings.", {
   { "POLICY",       "follow", "Who runs: follow = every reactor on its own thresholds." },
   { "TICK",         2,  "Seconds between control passes." },
   { "SLOW",         30, "Seconds between full re-checks of the cable and of what each reactor needs." },
+  { "STUCK_AFTER",  120, "Seconds an outlet port may hold cyanite without ever dropping before it is reported as not clearing." },
   { "STATUS_EVERY", 5,  "Seconds between status messages to the mainframe (also the heartbeat)." },
 })
 env.load()
@@ -52,31 +58,47 @@ peripheral.find("modem", function(name, m)
 end)
 
 -- State -------------------------------------------------------------------
-local st = { units = {}, lastScan = -1e9, lastSend = -1e9, dirty = true, bufFull = {} }
+local st = { supply = nil, supplyAt = 0, units = {}, lastScan = -1e9, lastSend = -1e9, dirty = true, bufFull = {} }
 local E_NOW = {}
 
 local function fmt(n, d) if type(n) ~= "number" then return "?" end return ("%." .. (d or 0) .. "f"):format(n) end
 
--- Waste: move cyanite from the output port into the barrel, one stack per call. Never voided.
-local function clearWaste(u)
+-- Waste: only watch the outlet port. Not clearing = every slot taken, or cyanite that has not dropped for STUCK_AFTER s.
+-- Nothing is moved or voided here; Storage drains the port.
+local function watchOutlet(u)
+  u.outputCount, u.outputFull = nil, false
+  local was = u.wasteStuck
   u.wasteStuck = false
-  if not (u.output and u.waste) or u.outputGone then return end
-  local port = peripheral.wrap(u.output)
-  local l = plantlib.listOf(u.output)
-  if not (port and l) then return end
-  for slot, it in pairs(l) do
-    if plantlib.isWaste(it.name) then
-      local ok, moved = pcall(port.pushItems, u.waste, slot)
-      if not ok or (moved or 0) == 0 then u.wasteStuck = true; break end
+  if u.output and not u.outputGone then
+    local l = plantlib.listOf(u.output)
+    if l then
+      local n, used = 0, 0
+      for _, it in pairs(l) do
+        used = used + 1
+        if plantlib.isWaste(it.name) then n = n + (it.count or 0) end
+      end
+      local ok, size = pcall(function() return peripheral.call(u.output, "size") end)
+      u.outputCount = n
+      u.outputFull = ok and type(size) == "number" and size > 0 and used >= size
+      local now = os.clock()
+      if n == 0 then u.wTrack = nil
+      elseif not u.wTrack or n < u.wTrack.base then u.wTrack = { since = now, base = n }
+      elseif now - u.wTrack.since >= E.STUCK_AFTER then u.wasteStuck = true end
+      if u.outputFull and n > 0 then u.wasteStuck = true end
     end
   end
-  if u.wasteStuck and not u.wasteWarned then log(u.label .. ": waste not clearing") end
-  u.wasteWarned = u.wasteStuck
+  if u.wasteStuck and not was then log(u.label .. ": waste not clearing (outlet holds " .. tostring(u.outputCount) .. " cyanite)") end
+  return (was or false) ~= u.wasteStuck
+end
+
+-- Storage's uranium count (nil when it isn't reporting or went quiet)
+local function supply()
+  if st.supply and os.clock() - st.supplyAt < 90 then return st.supply end
 end
 
 -- Check what a reactor needs
 local function recheck(u, s)
-  u.needs = needs.evaluate({ unit = u, status = s, plant = plant.found, driver = u.driver, E = E })
+  u.needs = needs.evaluate({ unit = u, status = s, plant = plant.found, driver = u.driver, supply = supply(), E = E })
 end
 
 local function tick()
@@ -103,6 +125,11 @@ local function tick()
     end
   end
   st.rechecked = false
+  local sup = supply()
+  if (sup ~= nil) ~= st.hadSupply or (sup or 0) > 0 ~= (st.hadSupplyN or false) then
+    st.hadSupply, st.hadSupplyN = sup ~= nil, (sup or 0) > 0
+    for _, u in ipairs(plant.units) do if u.kind == "reactor" then recheck(u, u.status) end end
+  end
   sum.buf = sum.cap > 0 and sum.stored / sum.cap or nil
 
   -- decide, then act
@@ -119,9 +146,7 @@ local function tick()
           u.why = "can't switch (call failed)"
         end
       end
-      local wasStuck = u.wasteStuck
-      clearWaste(u)
-      if (wasStuck or false) ~= (u.wasteStuck or false) then recheck(u, u.status) end
+      if watchOutlet(u) then recheck(u, u.status) end
       -- passive reactors may keep burning with a full buffer: log what we see once per change so it can be confirmed
       local full = (u.status.buf or 0) >= 0.99 and u.status.active == true
       if full ~= (st.bufFull[u.id] or false) then
@@ -134,7 +159,7 @@ end
 
 -- Status record --------------------------------------------------------------
 local function record()
-  local units, tot = {}, { fe = 0, stored = 0, cap = 0, running = 0, reactors = 0, uranium = 0, waste = 0 }
+  local units, tot = {}, { fe = 0, stored = 0, cap = 0, running = 0, reactors = 0, uranium = 0, waste = 0, supply = supply() }
   for _, u in ipairs(plant.units) do
     local r = { id = u.id, label = u.label, kind = u.kind, present = u.present }
     if u.kind == "reactor" then
@@ -146,7 +171,7 @@ local function record()
       r.fuel, r.fuelMax, r.waste = s.fuel, s.fuelMax, s.waste
       r.fuelTemp, r.casing, r.uranium = s.fuelTemp, s.casing, uran
       r.mode, r.enabled, r.why = u.cfg.mode or "auto", u.cfg.enabled ~= false, u.why
-      r.wasteStuck, r.needs = u.wasteStuck or false, u.needs
+      r.wasteStuck, r.needs, r.outlet = u.wasteStuck or false, u.needs, u.outputCount
       r.note = u.wasteStuck and "waste not clearing" or needs.summary(u.needs)
       tot.reactors = tot.reactors + 1
       if s.answers then
@@ -165,9 +190,10 @@ end
 
 -- Plain text screen -----------------------------------------------------------
 local function render(t, rec)
-  local w = t.getSize()
+  local w, h = t.getSize()
   local y = 1
   local function line(s, col)
+    if y > h then return end
     if col and t.isColour and t.isColour() then t.setTextColour(col) end
     t.setCursorPos(1, y); t.clearLine(); t.write(tostring(s):sub(1, w)); y = y + 1
     if t.setTextColour then t.setTextColour(colours.white) end
@@ -176,19 +202,29 @@ local function render(t, rec)
   local p = rec.plant
   line(("%s: %d reactor%s, %d running"):format(rec.label, p.reactors, p.reactors == 1 and "" or "s", p.running), colours.cyan)
   line(("Plant: %s FE/t, buffer %s%%"):format(fmt(p.fe), p.buf and fmt(p.buf * 100) or "?"))
+  -- one line per unit first, then each reactor's detail while there is room (missing things always before unknowns)
   for _, r in ipairs(rec.units) do
     if r.kind == "reactor" then
       local state = not r.present and "OFFLINE" or not r.answers and "SILENT" or r.active and "ON" or "off"
       line(("%s %s %s%% %s FE/t"):format(r.label, state, r.buf and fmt(r.buf * 100) or "?", fmt(r.fe)),
         (r.active and colours.lime) or colours.white)
-      line(("  fuel %s/%s, uranium %s, waste %s"):format(fmt(r.fuel), fmt(r.fuelMax), r.uranium and fmt(r.uranium) or "?", fmt(r.waste)))
-      line(("  fuel %s C, casing %s C"):format(fmt(r.fuelTemp), fmt(r.casing)))
-      for _, n in ipairs(r.needs or {}) do
-        if n.state ~= "ok" then line(("  %s %s: %s"):format(n.state == "missing" and "MISSING" or "?", n.title, n.why),
-          n.state == "missing" and colours.red or colours.yellow) end
-      end
     else
       line(("%s (%s)%s"):format(r.label, r.kind, r.present and "" or " OFFLINE"))
+    end
+  end
+  for _, r in ipairs(rec.units) do
+    if r.kind == "reactor" then
+      line(("%s: fuel %s/%s, uranium %s, outlet %s"):format(r.label, fmt(r.fuel), fmt(r.fuelMax),
+        r.uranium and fmt(r.uranium) or "?", r.outlet and fmt(r.outlet) or "?"))
+      line(("  fuel %s C, casing %s C"):format(fmt(r.fuelTemp), fmt(r.casing)))
+      for _, n in ipairs(r.needs or {}) do
+        if n.state == "missing" then line(("  MISSING %s: %s"):format(n.title, n.why), colours.red) end
+      end
+    end
+  end
+  for _, r in ipairs(rec.units) do
+    for _, n in ipairs(r.needs or {}) do
+      if n.state == "unknown" then line(("  ? %s %s: %s"):format(r.label, n.title, n.why), colours.yellow) end
     end
   end
   if p.reactors == 0 then line("No reactor found on the cable (BigReactors-Reactor).", colours.red) end
@@ -206,15 +242,18 @@ end
 -- First boot: say what was found -------------------------------------------------
 local function report()
   local f = plant.found
-  log("Operator started. Found: " .. #f.reactor .. " reactor, " .. #f.port .. " access port, " .. #f.barrel .. " barrel, "
+  log("Operator started. Found: " .. #f.reactor .. " reactor, " .. #f.port .. " reactor port, "
     .. #f.turbine .. " turbine, " .. #f.storage .. " energy storage.")
+  -- every peripheral on the (shared) cable with its type, so the port names and types can be confirmed
+  for _, n in ipairs(peripheral.getNames()) do
+    log("peripheral " .. n .. " : " .. table.concat({ peripheral.getType(n) }, ", "))
+  end
   for _, u in ipairs(plant.units) do
     if u.kind == "reactor" then
-      log(("%s = %s (%s driver); input port %s, output port %s, waste barrel %s"):format(u.label, u.id,
-        u.driver and u.driver.kind or "none", tostring(u.input), tostring(u.output), tostring(u.waste)))
+      log(("%s = %s (%s driver); inlet port %s, outlet port %s"):format(u.label, u.id,
+        u.driver and u.driver.kind or "none", tostring(u.input), tostring(u.output)))
     end
   end
-  for _, k in ipairs({ "port", "barrel" }) do for _, n in ipairs(f[k]) do log(k .. ": " .. n .. " (" .. tostring(peripheral.getType(n)) .. ")") end end
 end
 
 -- Main loop ---------------------------------------------------------------------
@@ -225,7 +264,7 @@ report()
 
 local timer = os.startTimer(0)
 while true do
-  local ev, a = os.pullEvent()
+  local ev, a, b, c3 = os.pullEvent()
   if ev == "timer" and a == timer then
     local ok, err = pcall(tick)
     if not ok then log("tick failed: " .. tostring(err)) end
@@ -236,6 +275,8 @@ while true do
     end
     pcall(draw, rec)
     timer = os.startTimer(E.TICK)
+  elseif ev == "rednet_message" and c3 == PROTOCOL and type(b) == "table" and b.type == "uranium" and tonumber(b.total) then
+    st.supply, st.supplyAt = tonumber(b.total), os.clock()
   elseif ev == "peripheral" or ev == "peripheral_detach" then
     st.dirty = true
   end

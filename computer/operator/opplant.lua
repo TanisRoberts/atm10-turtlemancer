@@ -1,10 +1,11 @@
 -- opplant.lua  --  the plant model: what is on the cable, as a list of units with stable ids and labels.
 --   unit = { id = peripheral name, kind = "reactor"|"turbine"|"storage", label = "Reactor-1", present, driver, cfg }
 -- Units are remembered in operator.cfg keyed by id; numbers are handed out once per kind and never reused.
--- Per-unit settings live in that config too (mode, enabled, onBelow, offAbove, input, output, waste), so a
+-- Per-unit settings live in that config too (mode, enabled, onBelow, offAbove, input, output), so a
 -- later driver or policy adds to it without a new file.
 -- Ports: each reactor has an input port (fuel in) and an output port (waste out). They are read from the unit's
 -- config, or worked out when only one reactor is on the cable; otherwise the Operator says "unknown", never guesses.
+-- The Operator only READS the ports; Storage fills the inlet and drains the outlet.
 local drivers = require("opdrivers")
 
 local M = {}
@@ -63,7 +64,6 @@ function M:load()
     if type(t) == "table" then
       self.cfg.nextNum = type(t.nextNum) == "table" and t.nextNum or {}
       self.cfg.units = type(t.units) == "table" and t.units or {}
-      self.cfg.waste = t.waste
     end
   end
   self.stamp = stampOf(self.file)
@@ -88,14 +88,15 @@ local function classify(name)
   if peripheral.getType(name) == REACTOR then return "reactor" end
   if t:find("turbine") then return "turbine" end
   if t:find("energy_storage") then return "storage" end
-  if t:find("minecraft:barrel") then return "barrel" end
-  if (t:find("access") or t:find("port")) and not t:find("computer") and peripheral.hasType(name, "inventory") then return "port" end
+  -- The cable is shared with Storage and its chests: only ER2 reactor ports count, everything else is ignored.
+  -- (Whether the ports show as inventories is not assumed; the type name is what we go by.)
+  if t:find("reactor") and (t:find("access") or t:find("port")) and not t:find("computer") then return "port" end
   return nil
 end
 
 -- Scan the cable. Returns true if the set of devices changed.
 function M:scan()
-  local found = { reactor = {}, turbine = {}, storage = {}, barrel = {}, port = {} }
+  local found = { reactor = {}, turbine = {}, storage = {}, port = {} }
   local names = peripheral.getNames()
   table.sort(names)
   for _, name in ipairs(names) do
@@ -103,7 +104,7 @@ function M:scan()
     if k then found[k][#found[k] + 1] = name end
   end
   local sig = {}
-  for _, k in ipairs({ "reactor", "turbine", "storage", "barrel", "port" }) do sig[#sig + 1] = k .. ":" .. table.concat(found[k], ",") end
+  for _, k in ipairs({ "reactor", "turbine", "storage", "port" }) do sig[#sig + 1] = k .. ":" .. table.concat(found[k], ",") end
   sig = table.concat(sig, ";")
   local changed = sig ~= self.sig
   self.sig, self.found = sig, found
@@ -148,7 +149,7 @@ function M:scan()
   return changed or dirty
 end
 
--- Ports and the waste barrel -------------------------------------------------
+-- Ports -------------------------------------------------
 local function has(list, v) for _, x in ipairs(list) do if x == v then return true end end end
 
 function M:resolvePorts()
@@ -190,22 +191,14 @@ function M:resolvePorts()
         end
       end
       if not (u.input and u.output) then
-        u.portNote = #reactors > 1 and "several reactors: set input=/output= for this one in " .. self.file
-          or (#free == 0 and "no access port found on the cable")
+        u.portNote = (#free == 0 and "no reactor access port found on the cable")
+          or (#reactors > 1 and "several reactors: set input=/output= for this one in " .. self.file)
           or "can't tell which port is input and which is output yet"
       end
     end
     -- named in the config but not on the cable
     if u.input and not peripheral.isPresent(u.input) then u.inputGone = true else u.inputGone = nil end
     if u.output and not peripheral.isPresent(u.output) then u.outputGone = true else u.outputGone = nil end
-    u.waste = c.waste or self.cfg.waste
-    u.wasteNote = nil
-    if not u.waste then
-      local b = self.found.barrel
-      if #b == 1 then u.waste = b[1]
-      elseif #b == 0 then u.wasteNote = "no barrel on the cable"
-      else u.wasteNote = "several barrels: set waste= in " .. self.file end
-    end
   end
 end
 

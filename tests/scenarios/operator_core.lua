@@ -23,9 +23,23 @@ local function listener(w)
   m:attach("top", cc.wireless{ ender = true })
   m:writeFile("mon.lua", [[
     rednet.open("top"); _G.last, _G.beats = nil, 0
-    while true do local _, m = rednet.receive("tanis-operator"); _G.last = m; _G.beats = _G.beats + 1 end]])
+    while true do local _, m = rednet.receive("tanis-operator"); if m.type == "operator" then _G.last = m; _G.beats = _G.beats + 1 end end]])
   m:run("mon")
   return m
+end
+-- Storage stand-in on the same cable: drains the outlet port into a chest; reports its uranium count.
+-- opts.drain = false leaves the outlet alone; opts.supply = n reports n uranium.
+local function storage(w, net, outName, opts)
+  opts = opts or {}
+  local chest = net:add("minecraft:chest_9", cc.Inv.new{ size = 54 })
+  local c = w:computer{ id = 7, label = "Storage" }
+  c:attach("back", cc.wired(net)); c:attach("top", cc.wireless{ ender = true })
+  c:writeFile("st.lua", ("local out, drain, supply = %q, %s, %s\nrednet.open('top')\nwhile true do\n"
+    .. "  if drain then local o = peripheral.wrap(out); for slot in pairs(o.list()) do o.pushItems('minecraft:chest_9', slot) end end\n"
+    .. "  if supply then rednet.broadcast({ type = 'uranium', total = supply }, 'tanis-operator') end\n  sleep(1)\nend")
+    :format(outName, tostring(opts.drain ~= false), tostring(opts.supply)))
+  c:run("st")
+  return chest
 end
 local function unit(rec, label) for _, u in ipairs(rec.units) do if u.label == label then return u end end end
 local function need(u, key) for _, n in ipairs(u.needs or {}) do if n.key == key then return n end end end
@@ -33,10 +47,11 @@ local function need(u, key) for _, n in ipairs(u.needs or {}) do if n.key == key
 T.test("operator: on below 30%, off above 90%, hysteresis in between", function()
   local w, net = cc.world(), nil
   net = w:net()
-  local inP, outP, bar = port(), port(), barrel()
+  local inP, outP = port(), port()
   inP:give("mekanism:ingot_uranium", 10)
   local r = w:reactor{ stored = 200000, inPort = inP, outPort = outP }       -- 20%: should switch on
-  net:add("BigReactors-Reactor_0", r); net:add("port_in", inP); net:add("port_out", outP); net:add("barrel_0", bar)
+  net:add("BigReactors-Reactor_0", r); net:add("port_in", inP); net:add("port_out", outP)
+  storage(w, net, "port_out")
   local mf = listener(w)
   local c = plant(w, net)
   c:run("operator")
@@ -58,60 +73,87 @@ T.test("operator: on below 30%, off above 90%, hysteresis in between", function(
   T.contains(c.screen, "Reactor-1")
 end)
 
-T.test("operator: ports are worked out, waste goes to the barrel, fuel is reported", function()
+T.test("operator: ports are worked out, Storage drains the outlet, the Operator moves nothing", function()
   local w = cc.world(); local net = w:net()
-  local inP, outP, bar = port(), port(), barrel()
+  local inP, outP = port(), port()
   inP:give("mekanism:ingot_uranium", 20)
   local r = w:reactor{ stored = 100000, inPort = inP, outPort = outP }
-  net:add("BigReactors-Reactor_0", r); net:add("port_a", inP); net:add("port_b", outP); net:add("barrel_0", bar)
+  net:add("BigReactors-Reactor_0", r); net:add("port_a", inP); net:add("port_b", outP)
+  local other = net:add("minecraft:chest_3", cc.Inv.new{ size = 27 })    -- Storage's own chest: ignored
+  other:give("minecraft:iron_ingot", 40)
+  net:add("minecraft:barrel_5", cc.Inv.new{ size = 27, types = { "minecraft:barrel", "inventory" } })
+  local chest = storage(w, net, "port_b", { supply = 500 })
   local mf = listener(w)
   local c = plant(w, net); c:run("operator")
-  T.waitFor(w, function() return bar:count("bigreactors:cyanite_ingot") >= 2 end, 120, "waste never reached the barrel")
-  T.eq(outP:count("bigreactors:cyanite_ingot"), 0, "waste left in the output port")
+  T.waitFor(w, function() return chest:count("bigreactors:cyanite_ingot") >= 2 end, 120, "Storage never got the waste")
   w:run(6)
   local u = unit(mf.env._G.last, "Reactor-1")
   T.truthy(u.fuel and u.fuel > 0, "no fuel reading")
-  T.truthy(u.uranium ~= nil and u.uranium < 20, "uranium in supply not reported")
+  T.truthy(u.uranium ~= nil and u.uranium < 20, "uranium in the inlet not reported")
+  T.eq(u.wasteStuck, false)
   T.eq(need(u, "fuelIn").state, "ok")
   T.eq(need(u, "wasteOut").state, "ok")
-  T.truthy(c:readFile("operator.log"):find("Operator started", 1, true), "no first-boot report")
-  T.truthy(c:readFile("operator.log"):find("port_a", 1, true), "ports not logged")
+  T.eq(need(u, "wasteTo").state, "ok")
+  T.eq(need(u, "supply").state, "ok")
+  T.eq(mf.env._G.last.plant.supply, 500)
+  local log = c:readFile("operator.log")
+  T.truthy(log:find("port_a", 1, true), "ports not logged")
+  T.truthy(log:find("minecraft:chest_3", 1, true), "first boot must list every peripheral and its type")
+  T.truthy(log:find("bigreactors:reactoraccessport", 1, true), "port types not logged")
+  T.eq(other:count("minecraft:iron_ingot"), 40, "touched Storage's chest")
+  T.eq(inP:count("mekanism:ingot_uranium") + 0 <= 20, true)
   local cfg = c:readTable("operator.cfg")
   T.eq(cfg.units["BigReactors-Reactor_0"].input, "port_a")
   T.eq(cfg.units["BigReactors-Reactor_0"].output, "port_b")
+  T.eq(cfg.units["minecraft:chest_3"], nil, "a chest became a unit")
 end)
 
-T.test("operator: a full waste barrel is reported, nothing is voided, and it never shuts down for low fuel", function()
+T.test("operator: an outlet that doesn't empty is reported, nothing is moved, and it never shuts down for low fuel", function()
   local w = cc.world(); local net = w:net()
-  local inP, outP, bar = port(), port(), cc.Inv.new{ size = 1, types = { "minecraft:barrel", "inventory" } }
-  bar:give("bigreactors:cyanite_ingot", 64)
+  local inP, outP = port(), port()
   local r = w:reactor{ stored = 100000, inPort = inP, outPort = outP, fuel = 0 }   -- no uranium anywhere
-  net:add("BigReactors-Reactor_0", r); net:add("port_in", inP); net:add("port_out", outP); net:add("barrel_0", bar)
+  net:add("BigReactors-Reactor_0", r); net:add("port_in", inP); net:add("port_out", outP)
   outP:give("bigreactors:cyanite_ingot", 5)
-  inP:give("minecraft:dirt", 1)       -- something in the input port so the two ports can be told apart by config below
-  local mf = listener(w)
+  local mf = listener(w)                                                          -- no Storage on the cable
   local c = plant(w, net)
   c:writeTable("operator.cfg", { nextNum = { reactor = 1 }, units = { ["BigReactors-Reactor_0"] =
     { kind = "reactor", num = 1, label = "Reactor-1", mode = "auto", enabled = true, input = "port_in", output = "port_out" } } })
   c:run("operator")
   w:run(15)
   local u = unit(mf.env._G.last, "Reactor-1")
+  T.eq(u.wasteStuck, false, "reported too early")
+  w:run(130)                                                                      -- cyanite sat there past STUCK_AFTER
+  u = unit(mf.env._G.last, "Reactor-1")
   T.eq(u.wasteStuck, true)
   T.eq(u.note, "waste not clearing")
   T.eq(need(u, "wasteTo").state, "missing")
-  T.eq(outP:count("bigreactors:cyanite_ingot"), 5, "waste was voided")
+  T.truthy(outP:count("bigreactors:cyanite_ingot") >= 5, "waste was voided or moved")
   T.truthy(u.active == true, "reactor must still run with an empty fuel supply")
   T.eq(need(u, "fuel").state, "missing")
+  T.eq(need(u, "supply").state, "unknown", "no Storage report must read unknown")
+end)
+
+T.test("operator: a completely full outlet is reported at once, and a draining one is not", function()
+  local w = cc.world(); local net = w:net()
+  local inP, outP = port(), cc.Inv.new{ size = 2, types = PORT }
+  local r = w:reactor{ stored = 500000, inPort = inP, outPort = outP }
+  net:add("BigReactors-Reactor_0", r); net:add("port_in", inP); net:add("port_out", outP)
+  outP:give("bigreactors:cyanite_ingot", 128)                                     -- both slots full
+  local mf = listener(w)
+  local c = plant(w, net); c:run("operator")
+  w:run(8)
+  T.eq(unit(mf.env._G.last, "Reactor-1").wasteStuck, true)
 end)
 
 T.test("operator: two reactors on one cable each follow their own buffer", function()
   local w = cc.world(); local net = w:net()
-  local i1, o1, i2, o2, bar = port(), port(), port(), port(), barrel()
+  local i1, o1, i2, o2 = port(), port(), port(), port()
   i1:give("mekanism:ingot_uranium", 10); i2:give("mekanism:ingot_uranium", 10)
   local ra = w:reactor{ stored = 200000, inPort = i1, outPort = o1 }     -- 20%: on
   local rb = w:reactor{ stored = 950000, inPort = i2, outPort = o2, active = true }  -- 95%: off
   net:add("BigReactors-Reactor_0", ra); net:add("BigReactors-Reactor_1", rb)
-  net:add("in_0", i1); net:add("out_0", o1); net:add("in_1", i2); net:add("out_1", o2); net:add("barrel_0", bar)
+  net:add("in_0", i1); net:add("out_0", o1); net:add("in_1", i2); net:add("out_1", o2)
+  local chest = storage(w, net, "out_0")
   local mf = listener(w)
   local c = plant(w, net)
   c:writeTable("operator.cfg", { nextNum = { reactor = 2 }, units = {
@@ -125,7 +167,7 @@ T.test("operator: two reactors on one cable each follow their own buffer", funct
   T.eq(unit(rec, "Reactor-1").active, true)
   T.eq(unit(rec, "Reactor-2").active, false)
   -- each reactor's own waste goes through its own port
-  T.waitFor(w, function() return bar:count("bigreactors:cyanite_ingot") >= 1 end, 120, "no waste cleared")
+  T.waitFor(w, function() return chest:count("bigreactors:cyanite_ingot") >= 1 end, 120, "reactor 1 waste never drained")
   -- Reactor-2 has its own, lower ON threshold (10%): at ~25% it stays off (the default 30% would switch it on)
   rb.stored = 300000
   w:run(3)
@@ -139,12 +181,11 @@ end)
 
 T.test("operator: needs/has/missing for different reactors", function()
   local w = cc.world(); local net = w:net()
-  local bar = barrel()
   -- A: no ports at all
   local ra = w:reactor{ stored = 500000 }
   -- B: actively cooled, no turbine, can't read rods or temperatures
   local rb = w:reactor{ stored = 500000, activelyCooled = true, without = { "getControlRodLevel", "getNumberOfControlRods", "getFuelTemperature" } }
-  net:add("BigReactors-Reactor_0", ra); net:add("BigReactors-Reactor_1", rb); net:add("barrel_0", bar)
+  net:add("BigReactors-Reactor_0", ra); net:add("BigReactors-Reactor_1", rb)
   local mf = listener(w)
   local c = plant(w, net); c:run("operator")
   w:run(12)
@@ -153,7 +194,8 @@ T.test("operator: needs/has/missing for different reactors", function()
   T.eq(need(a, "computer").state, "ok")
   T.eq(need(a, "fuelIn").state, "unknown")
   T.eq(need(a, "wasteOut").state, "unknown")
-  T.eq(need(a, "wasteTo").state, "ok")
+  T.eq(need(a, "wasteTo").state, "unknown")
+  T.eq(need(a, "supply").state, "unknown")
   T.eq(need(a, "turbine").state, "ok")
   T.eq(need(b, "turbine").state, "missing")
   T.eq(need(b, "turbine").why, "no turbine on the cable")

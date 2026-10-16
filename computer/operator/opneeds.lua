@@ -1,7 +1,7 @@
 -- opneeds.lua  --  what each reactor needs, has and is missing, worked out from what the device and the cable show.
 -- A list of small checks; each is  { key, title, fn(ctx) -> state, why }  with state "ok" | "missing" | "unknown".
 -- "unknown" means the Operator can't tell (not "missing"). Add a check by adding one entry to CHECKS.
---   ctx = { unit, status, plant (found devices), driver, set (settings), E }
+--   ctx = { unit, status, plant (found devices), driver, supply (uranium in storage, or nil), E }
 local plantlib = require("opplant")
 
 local function ok(why) return "ok", why or "" end
@@ -29,12 +29,19 @@ local CHECKS = {
       if u.input then return ok(u.input) end
       return unknown(u.portNote or "no input port known")
     end },
-  { "fuel", "Fuel supply", function(c)
+  { "fuel", "Fuel in reactor", function(c)
       local s, u = c.status or {}, c.unit
       local inPort = u.input and plantlib.contents(u.input)
       if (inPort or 0) > 0 or (s.fuel or 0) > 0 then return ok() end
-      if not u.input then return unknown("no input port known to look in") end
-      return missing("no uranium in the input port or the reactor")
+      if not u.input then return unknown("no inlet port known to look in") end
+      if inPort == nil then return unknown("can't read the inlet port") end
+      return missing("no uranium in the inlet port or the reactor")
+    end },
+  { "supply", "Fuel supply", function(c)
+      local sup = c.supply
+      if sup == nil then return unknown("Storage isn't reporting its uranium") end
+      if sup > 0 then return ok(sup .. " uranium in storage") end
+      return missing("no uranium left in storage")
     end },
   { "wasteOut", "Waste output", function(c)
       local u = c.unit
@@ -42,12 +49,12 @@ local CHECKS = {
       if u.output then return ok(u.output) end
       return unknown(u.portNote or "no output port known")
     end },
-  { "wasteTo", "Waste destination", function(c)
+  { "wasteTo", "Waste draining", function(c)
       local u = c.unit
-      if u.wasteStuck then return missing("waste not clearing: the barrel is full or can't take it") end
-      if u.waste and not peripheral.isPresent(u.waste) then return missing("barrel " .. u.waste .. " is not on the cable") end
-      if u.waste then return ok(u.waste) end
-      return missing(u.wasteNote or "no barrel for waste")
+      if u.wasteStuck then return missing("waste not clearing: the outlet port isn't emptying") end
+      if not u.output then return unknown("no outlet port known to watch") end
+      if u.outputCount == nil then return unknown("can't read the outlet port") end
+      return ok("Storage empties it")
     end },
   { "power", "Power output", function(c)
       -- A passive reactor's power tap isn't on the cable; all we can say is that it reports output.
