@@ -16,6 +16,7 @@ return function(plant, E, hooks)
   hooks = hooks or {}
   local function log(m) if hooks.log then hooks.log(m) end end
   local function kick() if hooks.kick then hooks.kick() end end      -- act now, not at the next pass
+  local function rescan() if hooks.dirty then hooks.dirty() end end -- look at the cable again
 
   local function reactors(ref)
     local out = {}
@@ -102,6 +103,68 @@ return function(plant, E, hooks)
       u.hold = nil
     end
     plant:save(); kick()
+  end
+
+  -- Ignore (or stop ignoring) a warning or problem on the Needs tab.
+  function C.ignore(ref, key, on)
+    for _, u in ipairs(reactors(ref)) do
+      u.cfg.ignore = u.cfg.ignore or {}
+      u.cfg.ignore[key] = on and true or nil
+      if next(u.cfg.ignore) == nil then u.cfg.ignore = nil end
+    end
+    plant:save(); rescan()
+  end
+
+  -- Everything on the cable that could be a port, ER2 access ports first. { name, type, port, taken }
+  function C.candidates()
+    local taken, isPort = {}, {}
+    for _, r in ipairs(reactors(nil)) do
+      if r.cfg.input then taken[r.cfg.input] = r.label .. " inlet" end
+      if r.cfg.output then taken[r.cfg.output] = r.label .. " outlet" end
+    end
+    for _, n in ipairs(plant.found and plant.found.port or {}) do isPort[n] = true end
+    local out = {}
+    for _, n in ipairs(peripheral.getNames()) do
+      local types = { peripheral.getType(n) }
+      local skip = false
+      for _, t in ipairs(types) do
+        local l = tostring(t):lower()
+        if l == "modem" or l == "monitor" or l:find("reactor$") or l:find("turbine") or l:find("energy_storage") then skip = true end
+      end
+      if not skip then
+        out[#out + 1] = { name = n, type = isPort[n] and "port" or (tostring(types[1]):gsub("^.-:", "")), port = isPort[n] or false, taken = taken[n] }
+      end
+    end
+    table.sort(out, function(a, b)
+      if a.port ~= b.port then return a.port end
+      return a.name < b.name
+    end)
+    return out
+  end
+
+  -- Say which port is a reactor's inlet or outlet (role "input" | "output"); name nil = back to auto-detect.
+  -- A port another reactor held is taken from it. Returns a notice text when it took one.
+  function C.assign(ref, role, name)
+    if role ~= "input" and role ~= "output" then return end
+    local u = reactors(ref)[1]
+    if not u then return end
+    local note
+    if name then
+      for _, r in ipairs(reactors(nil)) do
+        if r ~= u then
+          for _, k in ipairs({ "input", "output" }) do
+            if r.cfg[k] == name then r.cfg[k] = nil; note = name .. " was " .. r.label .. "'s " .. (k == "input" and "inlet" or "outlet") end
+          end
+        end
+      end
+      local other = role == "input" and "output" or "input"
+      if u.cfg[other] == name then u.cfg[other] = nil end
+    end
+    u.cfg[role] = name
+    u.wTrack, u.wasteStuck = nil, false
+    log(("%s %s port %s"):format(u.label, role == "input" and "inlet" or "outlet", name and ("= " .. name) or "back to auto"))
+    plant:save(); rescan(); kick()
+    return note
   end
 
   function C.reset(ref)

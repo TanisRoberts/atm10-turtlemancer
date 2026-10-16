@@ -186,15 +186,15 @@ function M:resolvePorts()
         if not c.input and fuelPort then c.input = fuelPort; claimed[fuelPort] = true; u.input = fuelPort; newly = true end
         if not c.output and wastePort then c.output = wastePort; claimed[wastePort] = true; u.output = wastePort; newly = true end
         if newly then
-          self.log(("%s ports: input %s, output %s (worked out from what they hold; set input=/output= in %s to pin them)")
-            :format(u.label, tostring(c.input), tostring(c.output), self.file))
+          self.log(("%s ports: input %s, output %s (worked out from what they hold; assign them on the Needs tab to pin them)")
+            :format(u.label, tostring(c.input), tostring(c.output)))
           self:save()
         end
       end
       if not (u.input and u.output) then
         u.portNote = (#free == 0 and "no reactor access port found on the cable")
-          or (#reactors > 1 and "several reactors: set input=/output= for this one in " .. self.file)
-          or "can't tell which port is input and which is output yet"
+          or (#reactors > 1 and "several reactors: assign its ports on the Needs tab")
+          or "can't tell which port is input and which is output: assign them on the Needs tab"
       end
     end
     -- named in the config but not on the cable

@@ -250,19 +250,27 @@ end
 local TABS = { { id = "power", label = "Power", short = "Pwr" }, { id = "needs", label = "Needs", short = "Need" },
                { id = "set", label = "Set", short = "Set" } }
 
+-- The two lines under the level: { label, value at the right edge (or nil), second line }
 local function autoLines(r, now)
-  if r.manage == false then return { "Left alone", "(Set: Run it)" } end
-  if r.holdLeft then return { "Manual hold, auto in " .. D.clock(r.holdLeft), "tap AUTO to return now" } end
-  if r.mode == "on" then return { "Forced on", "" } end
-  if r.mode == "off" then return { "Forced off", "" } end
-  if not r.active then return { ("Auto: off until buffer under %d%%"):format(floor((r.onBelow or 0.3) * 100 + 0.5)), "" } end
-  if r.levelAt and r.levelWhy then return { "Auto set it " .. D.age(now - r.levelAt) .. " ago:", r.levelWhy } end
-  return { "Auto: following the buffer", "" }
+  if r.manage == false then return "Left alone", nil, "(Set: Run it)" end
+  if r.holdLeft then return "Manual Hold:", D.clock(r.holdLeft), "tap AUTO to return now" end
+  if r.mode == "on" then return "Forced on", nil, "" end
+  if r.mode == "off" then return "Forced off", nil, "" end
+  if not r.active then return ("Off until under %d%%"):format(floor((r.onBelow or 0.3) * 100 + 0.5)), nil, "" end
+  if r.levelAt and r.levelWhy then return "Auto set:", D.age(now - r.levelAt), r.levelWhy end
+  return "Auto: following buffer", nil, ""
 end
 
 function S.autoText(r, now)
-  local a = autoLines(r, now)
-  return a[2] ~= "" and (a[1] .. " " .. a[2]) or a[1]
+  local a, b, c = autoLines(r, now)
+  return a .. (b and (" " .. b) or "") .. ((c ~= "") and (" " .. c) or "")
+end
+
+-- Draw those lines at x, y (value flush right at x + w - 1)
+local function autoDraw(v, x, y, w, r, now)
+  local a, b, c = autoLines(r, now)
+  if b then v:kv(x, y, w, a, b) else v:put(x, y, D.fit(a, w), "dim", "bg") end
+  v:put(x, y + 1, D.fit(c, w), "dim", "bg")
 end
 
 local function stepFns(ctx, r)
@@ -302,9 +310,7 @@ local function powerTab(v, ctx, r)
     v:kv(sx, 4, W - 1 - sx, "Output", D.num(r.fe or 0) .. " FE/t")
     v:put(sx, 6, "Level", "fg", "bg")
     D.pair(v, sx + 7, 6, levelText(r), dec, inc, "lvl", 5)
-    local al = autoLines(r, now)
-    v:put(sx, 7, D.fit(al[1], W - sx), "dim", "bg")
-    v:put(sx, 8, D.fit(al[2], W - sx), "dim", "bg")
+    autoDraw(v, sx, 7, W - sx, r, now)
     v:put(sx, 10, "Run", "fg", "bg")
     runSwitch(v, ctx, sx + 5, 10, r)
     v:put(2, 4 + rh, D.fit(caption, W - 2), "dim", "bg")
@@ -320,8 +326,9 @@ local function powerTab(v, ctx, r)
     v:kv(sx, 4, W - 1 - sx, "Out", D.num(r.fe or 0) .. " FE/t")
     v:put(sx, 5, "Level", "fg", "bg")
     D.pair(v, sx + 6, 5, levelText(r), dec, inc, "lvl", 4)
-    local al = autoLines(r, now)
-    v:put(sx, 6, D.fit(r.holdLeft and ("Manual hold " .. D.clock(r.holdLeft)) or (al[2] ~= "" and ("Auto: " .. al[2]) or al[1]), W - sx), "dim", "bg")
+    if r.holdLeft then v:kv(sx, 6, W - sx, "Manual Hold:", D.clock(r.holdLeft))
+    elseif r.levelWhy and r.active and r.mode == "auto" then v:kv(sx, 6, W - sx, "Auto:", (r.levelWhy:gsub("^buffer ", "")))
+    else v:put(sx, 6, D.fit((autoLines(r, now)), W - sx), "dim", "bg") end
     v:put(sx, 7, "Run", "fg", "bg")
     runSwitch(v, ctx, sx + 4, 7, r)
     local y = D.buffer(v, 2, 4 + rh, W - 2, r.buf, r.onBelow or 0.3, r.offAbove or 0.9, "Buffer")
@@ -332,7 +339,6 @@ local function powerTab(v, ctx, r)
     local sx = 3 + width + 2
     v:put(sx, 4, "Level", "fg", "bg")
     v:put(sx, 5, levelText(r), "fg", "bg")
-    local al = autoLines(r, now)
     v:put(sx, 7, r.holdLeft and "Hold" or "Auto", "dim", "bg")
     v:put(sx, 8, D.fit(r.holdLeft and D.clock(r.holdLeft) or (r.levelWhy and r.levelWhy:gsub("^buffer ", "") or ""), W - sx), "dim", "bg")
     D.pair(v, 2, 9, levelText(r), dec, inc, "lvl", 5)
@@ -359,15 +365,17 @@ end
 S.wrap = wrap
 
 -- The needs checklist from row y, x..x+w-1, at most `room` rows; pages when it does not fit. Returns the next row.
--- Narrow screens drop the value of an ok row and give a ! or ? row a second line. A tap on a ! or ? row says its
--- reason in full.
+-- A row that is not ok says "1 warning" / "1 problem" at the right (a narrow screen gives it a second line with the
+-- reason instead). A tap on such a row calls o.open(need), which shows the reason in full and the way to fix it.
 function S.needsList(v, x, y, w, room, r, o)
   o = o or {}
   local narrow = w < 30
   local items = {}
   for _, n in ipairs(r.needs or {}) do
     local bad = n.state ~= "ok" and n.state ~= "na"
-    local lines = { { text = n.title, value = (not narrow and n.why ~= "") and n.why or nil } }
+    local value = n.why ~= "" and n.why or nil
+    if bad then value = n.state == "missing" and "1 problem" or "1 warning" end
+    local lines = { { text = n.title, value = (not narrow) and value or nil } }
     if narrow and bad then
       for _, l in ipairs(wrap(n.why, w - 5)) do lines[#lines + 1] = { text = l, sub = true } end
     end
@@ -394,8 +402,8 @@ function S.needsList(v, x, y, w, room, r, o)
         local vtxt = l.value and D.fit(l.value, max(w - #l.text - 5, 4)) or ""
         v:put(x + 2, y, D.fit(l.text, w - 2 - (#vtxt > 0 and #vtxt + 1 or 0)), tone or (n.state == "na" and "dim" or "fg"), "bg")
         if #vtxt > 0 then v:put(x + w - #vtxt, y, vtxt, (n.state == "ok" and "dim") or tone or "dim", "bg") end
-        if n.state ~= "ok" and n.state ~= "na" then
-          v:_box({ x, y, x + w - 1, y }, nil, { fn = function() ui.say(n.title .. ": " .. n.why, n.state == "missing" and "bad" or "warn") end,
+        if (n.state ~= "ok" and n.state ~= "na") or n.ignored then
+          v:_box({ x, y, x + w - 1, y }, nil, { fn = function() if o.open then o.open(n) end end,
             id = "need:" .. n.key, focus = true })
         end
       end
@@ -414,7 +422,7 @@ local function needsTab(v, ctx, r)
   if miss == 0 and unk == 0 then label = "NEEDS  " end
   D.section(v, 2, 3, W - 2, label)
   if miss == 0 and unk == 0 then v:put(2 + #label, 3, "all good", "good", "bg") end
-  S.needsList(v, 2, 4, W - 2, H - 4, r)
+  S.needsList(v, 2, 4, W - 2, H - 4, r, { open = function(n) o.page, o.need, v.page = "need", n.key, 1 end })
 end
 
 -- The Set tab, as a list of rows so a short screen can page it.
@@ -460,7 +468,7 @@ local function setTab(v, ctx, r)
   v.pages = #pages
   v.page = max(1, min(v.page or 1, #pages))
   local y = 3
-  local tx = W >= 50 and (W - 24) or (W - 15)
+  local tx = W >= 50 and (W - 26) or (W - 15)       -- a gap before the default / local status at the right
   for _, row in ipairs(pages[v.page]) do
     if row.kind == "blank" then y = y + 1
     elseif row.kind == "section" then y = D.section(v, 2, y, W - 2, row.text)
@@ -473,7 +481,7 @@ local function setTab(v, ctx, r)
       local val, src = ctl.value(unit, row.key)
       local shown = row.key == "holdMin" and (floor(val) .. "") or (floor(val) .. "%")
       local text = row.key == "holdMin" and (floor(val) .. " min") or shown
-      local tag = o.all and "" or (src == "unit" and "set here" or "default")
+      local tag = o.all and "" or (src == "unit" and "local" or "default")
       if W < 50 and src == "unit" and not o.all then text = text .. "*" end
       local lx = 2
       local py = y
@@ -518,6 +526,87 @@ local function reactorPage(v, ctx, r)
              on_tab = function(id) o.tab = id; o.detail = nil end })
 end
 
+-- A need's own page: the reason in full and how to fix it -----------------------------------------------------------
+local ROLE = { fuelIn = "input", fuel = "input", wasteOut = "output", wasteTo = "output" }
+local ROLE_NAME = { input = "inlet", output = "outlet" }
+
+local function findNeed(r, key)
+  for _, n in ipairs(r.needs or {}) do if n.key == key then return n end end
+end
+
+local function needPage(v, ctx, r)
+  local W, H = v.W, v.H
+  local o = opState(v)
+  local n = findNeed(r, o.need)
+  local ctl = ctx.ctl
+  local function back() o.page, o.tab, v.page = "reactor", "needs", 1 end
+  if not n then back(); return reactorPage(v, ctx, r) end
+  local word, tone = "warning", "warn"
+  if n.state == "missing" then word, tone = "problem", "bad" elseif n.state == "na" then word, tone = "ignored", "dim" elseif n.state == "ok" then word, tone = "ok", "good" end
+  v:header(r.label, { state = word, color = tone })
+  local y = D.section(v, 2, 3, W - 2, n.title)
+  for _, l in ipairs(wrap(n.ignored and n.was or n.why, W - 4)) do
+    v:put(3, y, l, n.ignored and "dim" or tone, "bg"); y = y + 1
+  end
+  if n.ignored then v:put(3, y, "You chose to ignore this.", "dim", "bg"); y = y + 1 end
+  y = y + 1
+  local role = ROLE[n.key]
+  local unit = ctl.reactors(r.label)[1]
+  if role and unit then
+    local cur = unit.cfg[role]
+    y = D.section(v, 2, y, W - 2, "FIX")
+    v:kv(2, y, W - 2, "Its " .. ROLE_NAME[role] .. " port", cur or "auto-detect", cur and "fg" or "dim")
+    y = y + 1
+    v:buttons(2, y, {
+      { label = "Manually assign", short = "Assign", fn = function()
+          o.page, o.role, v.page = "assign", role, 1
+          o.search = ui.field{ hint = "type to narrow the list", max = 30 }
+        end },
+      { label = "Clear", enabled = cur ~= nil, fn = function() ctl.assign(r.label, role, nil); ui.say("Back to auto-detect", "good") end },
+    })
+    y = y + 2
+  end
+  y = D.section(v, 2, y, W - 2, "IGNORE")
+  if n.ignored then
+    for _, l in ipairs(wrap("It counts again if you stop ignoring it.", W - 4)) do v:put(3, y, l, "dim", "bg"); y = y + 1 end
+    v:buttons(2, y, { { label = "Stop ignoring", short = "Stop", fn = function() ctl.ignore(r.label, n.key, false) end } })
+  else
+    for _, l in ipairs(wrap("For something that can't be fixed, like a power tap that can't go on the cable.", W - 4)) do
+      v:put(3, y, l, "dim", "bg"); y = y + 1
+    end
+    v:buttons(2, y, { { label = "Ignore this", short = "Ignore", fn = function() ctl.ignore(r.label, n.key, true) end } })
+  end
+  v:footer({ back = back })
+end
+
+-- Pick a device on the cable for a reactor's inlet or outlet
+local function assignPage(v, ctx, r)
+  local W, H = v.W, v.H
+  local o = opState(v)
+  local ctl = ctx.ctl
+  local role = o.role or "input"
+  local function back() o.page, v.page = "need", 1 end
+  o.search = o.search or ui.field{ hint = "type to narrow the list", max = 30 }
+  local f = o.search
+  v:header("ASSIGN " .. ROLE_NAME[role]:upper(), { state = r.label, color = "dim" })
+  local want = f.text:lower()
+  local rows = {}
+  for _, c in ipairs(ctl.candidates()) do
+    if want == "" or c.name:lower():find(want, 1, true) or c.type:lower():find(want, 1, true) then
+      rows[#rows + 1] = { name = c.name .. (c.taken and ("  (" .. c.taken .. ")") or ""), value = c.type,
+        state = c.port and "info" or "bar", id = c.name }
+    end
+  end
+  v:list(rows, { input = not v.side, on = function(row)
+    local note = ctl.assign(r.label, role, row.id)
+    ui.say(row.id .. " is now " .. r.label .. "'s " .. ROLE_NAME[role] .. (note and ("; " .. note) or ""), "good")
+    back()
+  end })
+  if #rows == 0 then v:put(3, 4, "Nothing matches.", "dim", "bg") end
+  v:footer({ back = back })
+  if not v.side then v:search(f, { hint = "type to narrow, tap a device twice to pick it" }) end
+end
+
 -- Entry ---------------------------------------------------------------------------------------------------------
 function S.draw(v, ctx)
   v.pages = 1
@@ -536,11 +625,14 @@ function S.draw(v, ctx)
     o.rid = R[1] and R[1].label
   end
   local r
-  if o.page == "reactor" then
+  if o.page == "reactor" or o.page == "need" or o.page == "assign" then
     for _, x in ipairs(R) do if x.label == o.rid then r = x end end
     if not r then o.page = "overview" end
   end
-  if o.page == "reactor" then reactorPage(v, ctx, r) else overview(v, ctx, R, t) end
+  if o.page == "reactor" then reactorPage(v, ctx, r)
+  elseif o.page == "need" then needPage(v, ctx, r)
+  elseif o.page == "assign" then assignPage(v, ctx, r)
+  else overview(v, ctx, R, t) end
 end
 
 return S

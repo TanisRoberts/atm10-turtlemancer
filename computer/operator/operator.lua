@@ -91,7 +91,7 @@ local function event(label, text)
   while #st.events > 8 do table.remove(st.events) end
 end
 
-local ctlHooks = { log = log, event = event }
+local ctlHooks = { log = log, event = event, dirty = function() st.dirty = true end }
 local ctl = require("opctl")(plant, E, ctlHooks)
 
 local function fmt(n, d) if type(n) ~= "number" then return "?" end return ("%." .. (d or 0) .. "f"):format(n) end

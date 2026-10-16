@@ -93,7 +93,13 @@ function M.evaluate(ctx)
   for _, ch in ipairs(CHECKS) do
     local okc, state, why = pcall(ch[3], ctx)
     if not okc then state, why = "unknown", "check failed" end
-    out[#out + 1] = { key = ch[1], title = ch[2], state = state, why = why or "" }
+    local row = { key = ch[1], title = ch[2], state = state, why = why or "" }
+    -- a warning or problem the person chose to ignore (operator.cfg ignore = { power = true }) stops counting
+    local ign = ctx.unit and ctx.unit.cfg and ctx.unit.cfg.ignore
+    if ign and ign[ch[1]] and (state == "missing" or state == "unknown") then
+      row.state, row.ignored, row.was, row.why = "na", true, why or "", "ignored"
+    end
+    out[#out + 1] = row
   end
   return out
 end

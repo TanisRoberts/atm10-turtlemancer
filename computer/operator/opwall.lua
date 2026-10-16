@@ -123,7 +123,9 @@ return function(S)
     })
     local ok, miss, unk = S.counts(r)
     y = D.section(v, cx, y + 1, cw, ("NEEDS  %d ok  %d !  %d ?"):format(ok, miss, unk))
-    y = S.needsList(v, cx, y, cw, 40, r)
+    y = S.needsList(v, cx, y, cw, 40, r, { open = function(n)
+      ui.say(n.title .. ": " .. (n.was or n.why), n.state == "missing" and "bad" or "warn")
+    end })
     for yy = y0, y - 1 do
       if v.colour then v:put(x, yy, " ", "fg", role) else v:put(x, yy, "|", "fg", "bg") end
     end
