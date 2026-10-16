@@ -47,7 +47,7 @@ end
 -- Config ------------------------------------------------------------------
 function M.new(file, log)
   local self = setmetatable({ file = file, log = log or function() end, units = {}, byId = {}, found = {},
-                              cfg = { nextNum = {}, units = {} } }, { __index = M })
+                              cfg = { nextNum = {}, units = {}, plant = {} } }, { __index = M })
   self:load()
   return self
 end
@@ -64,6 +64,7 @@ function M:load()
     if type(t) == "table" then
       self.cfg.nextNum = type(t.nextNum) == "table" and t.nextNum or {}
       self.cfg.units = type(t.units) == "table" and t.units or {}
+      self.cfg.plant = type(t.plant) == "table" and t.plant or {}
     end
   end
   self.stamp = stampOf(self.file)
@@ -130,7 +131,7 @@ function M:scan()
   local list = {}
   for id, c in pairs(self.cfg.units) do
     local u = self.byId[id] or { id = id }
-    u.kind, u.cfg, u.label = c.kind, c, c.label
+    u.kind, u.cfg, u.label, u.plantCfg = c.kind, c, c.label, self.cfg.plant
     u.present = present[id] ~= nil
     if u.present and u.kind == "reactor" then
       if not u.driver then u.driver = drivers.pick(id) end
@@ -203,10 +204,19 @@ function M:resolvePorts()
 end
 
 -- The numbers a unit's settings resolve to (percent in env, fraction here)
+-- A setting for a unit: its own override in operator.cfg, else the plant-wide value set from the screen
+-- (operator.cfg `plant`), else the default in operator.env. Also says where it came from: "unit", "plant" or "env".
+function M.setting(u, key, E, envKey)
+  local v = tonumber((u.cfg or {})[key])
+  if v then return v, "unit" end
+  v = tonumber((u.plantCfg or {})[key])
+  if v then return v, "plant" end
+  return tonumber(E[envKey]), "env"
+end
+
 function M.thresholds(u, E)
-  local c = u.cfg
-  local on = (tonumber(c.onBelow) or tonumber(E.ON_BELOW) or 30) / 100
-  local off = (tonumber(c.offAbove) or tonumber(E.OFF_ABOVE) or 90) / 100
+  local on = (M.setting(u, "onBelow", E, "ON_BELOW") or 30) / 100
+  local off = (M.setting(u, "offAbove", E, "OFF_ABOVE") or 90) / 100
   return on, off
 end
 

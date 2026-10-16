@@ -1,13 +1,13 @@
 -- oprods.lua  --  control rod stepping and manual holds, apart from the policy (which says where to) and the driver
 -- (which sets the rods). "Level" is the power setting in percent, 100 = full power = rods out: rod insertion is
 -- 100 - level.
+local plantlib = require("opplant")
 local R = {}
 
 -- Lowest and highest level for a unit: its own settings in operator.cfg, else the plant-wide ones.
 function R.limits(u, E)
-  local c = u.cfg or {}
-  local lo = tonumber(c.levelMin) or tonumber(E.LEVEL_MIN) or 10
-  local hi = tonumber(c.levelMax) or tonumber(E.LEVEL_MAX) or 100
+  local lo = plantlib.setting(u, "levelMin", E, "LEVEL_MIN") or 10
+  local hi = plantlib.setting(u, "levelMax", E, "LEVEL_MAX") or 100
   lo = math.max(0, math.min(100, lo)); hi = math.max(lo, math.min(100, hi))
   return lo, hi
 end
@@ -22,7 +22,7 @@ end
 
 -- A person set a level or a mode. A level takes over from Auto: ON, that level, and back to Auto after HOLD_MIN minutes.
 function R.hold(u, level, now, E)
-  u.hold = { mode = "on", level = level, untilT = now + (tonumber(E.HOLD_MIN) or 10) * 60 }
+  u.hold = { mode = "on", level = level, untilT = now + (plantlib.setting(u, "holdMin", E, "HOLD_MIN") or 10) * 60 }
 end
 
 function R.holdLeft(u, now) return u.hold and math.max(0, math.floor(u.hold.untilT - now)) or nil end

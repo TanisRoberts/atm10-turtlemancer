@@ -1,11 +1,11 @@
 # Operator
 
-Runs the Extreme Reactors 2 power plant headless. `computer/operator/`: `operator.lua` (loop, status, text screen), `opplant.lua` (what is on the cable, units, ports), `opdrivers.lua` (reactor drivers), `oppolicy.lua` (who runs), `opneeds.lua` (needs / has / missing), `oprods.lua` (rod stepping and manual holds). `shared/envfile.lua` reads `operator.env`.
+Runs the Extreme Reactors 2 power plant headless. `computer/operator/`: `operator.lua` (loop, status, text screen), `opplant.lua` (what is on the cable, units, ports), `opdrivers.lua` (reactor drivers), `oppolicy.lua` (who runs), `opneeds.lua` (needs / has / missing), `oprods.lua` (rod stepping and manual holds), `opctl.lua` (what a person can change), `opscreen.lua`, `opwall.lua` and `opdraw.lua` (the screens). `shared/envfile.lua` reads `operator.env`.
 
 ## Plant model (`opplant.lua`)
 
 - Scans the cable for units: reactors (`BigReactors-Reactor`), turbines (type contains "turbine") and energy storage (`energy_storage`), plus the reactor's access ports (type name contains "reactor" and "access" or "port"). The cable is shared with Storage and the reactor, so everything else (chests, machines) is ignored; the first-boot log lists every peripheral name and type so the port pairing can be confirmed. Ports are not assumed to be inventories. A unit's id is its peripheral name; `operator.cfg` remembers it with a label (`Reactor-1`). Numbers are per kind, handed out once in cable-name order and never reused.
-- `operator.cfg` (a Lua table, edit by hand, reloaded when it changes) holds per unit: `mode` (auto|on|off), `enabled`, `onBelow`/`offAbove` (percent, beat the `.env` defaults), `input`, `output` (peripheral names of the inlet and outlet port).
+- `operator.cfg` (a Lua table, reloaded when it changes; the screen writes it too) holds per unit: `mode` (auto|on|off), `enabled`, `onBelow`/`offAbove` (percent, beat the `.env` defaults), `input`, `output` (peripheral names of the inlet and outlet port), `levelMin`, `levelMax`, `holdMin`, `manage` (false = "Run it: NO", leave the reactor alone). A `plant` table holds the same settings for every reactor (set from the Set tab with "All reactors"); a unit's own value beats it, and it beats `operator.env`.
 - Ports: from the config. With exactly one reactor and one or two free ports, the Operator works them out by contents (fuel in one = input, cyanite in one = output, the other of a pair is the remaining one) and writes them to the config. With several reactors, or empty ports it can't tell apart, it says "unknown"; set `input=`/`output=`. Never guesses.
 
 ## Drivers, policy (`opdrivers.lua`, `oppolicy.lua`)
@@ -22,6 +22,17 @@ Runs the Extreme Reactors 2 power plant headless. `computer/operator/`: `operato
 - `RODS=off` leaves the rods alone. A reactor without rod methods is controlled on/off only.
 - Command (protocol `tanis-operator`): `{ type="operator_cmd", unit=<label or id; none = every reactor>, mode="auto"|"on"|"off", level=1..100 }`. A mode is saved in `operator.cfg`; a level is a hold.
 - Status per unit adds `level`, `rodCount`, `rodLevels`, `levelWhy` ("buffer falling" / "buffer filling" / "manual"), `levelAt` and `holdLeft` (seconds).
+
+## Screens (`opscreen.lua`, `opwall.lua`, UI kit)
+
+Design: `docs/design/operator.md`. The computer's screen and every monitor touching a side are separate views, each with its own page. Taps and keys work on all of them.
+
+- **Overview**: 50 wide or more has the Power Grid column (totals over every reactor, net FE/t from the last minute) and a 5-row tile per reactor (stripe: orange when something is missing, lime running, light blue idle, grey not heard for 30 s). 36 to 49 wide has a totals strip and 2-row tiles; narrower, the 26-wide layout. A tap opens the reactor on its Power tab. One reactor on a screen under 50 wide opens straight on Power.
+- **Power**: rods (grey inserted, lime withdrawn, light blue when off), the level stepper (5% a tap, stops at Lowest and Highest with a notice), the Run switch AUTO / ON / OFF, buffer bar with the ON and OFF marks, fuel and temperatures. Stepping the level in Auto forces ON and holds it for `HOLD_MIN` minutes (countdown on screen); AUTO returns at once.
+- **Needs**: the checklist (`+` ok, `!` missing, `?` unknown, `-` not needed). A tap on a `!` or `?` row says its reason in full. Pages when it does not fit.
+- **Set**: ON below, OFF above (at least 10 points apart), Lowest, Highest, Back to Auto after, Run it, Reset to defaults (tap twice). "Applies to" picks this reactor (an override, shown `set here`) or all reactors (the plant-wide value). Every change is saved to `operator.cfg`.
+- **Wall** (120 wide and 50 tall or more): Power Grid, up to three whole reactor panels, the plant buffer chart (last 30 minutes) and the recent events. More than three reactors become tiles. Chart and events come from `plant.hist` (one sample every 15 s, 120 of them) and `plant.events` (the last 8) in the status record.
+- A command from the mainframe or the screen acts at once, not at the next pass.
 
 ## Items: the Operator never moves any
 
@@ -41,5 +52,6 @@ Protocol `tanis-operator`, a `{type="operator", units={...}, plant={...}}` broad
 
 ## Tests
 
+`tests/scenarios/operator_screen.lua`: the overview at 51x19, 39x13, 26x20 and 164x81, taps for tile / level / hold / ON / OFF / AUTO, limits, Needs, Set (one reactor, all, reset), the narrow single-reactor start, and the wall.
 `tests/scenarios/operator_rods.lua`: steps out and in, steady load, off keeps the level, manual level and limits, a hold that expires, no rod methods.
 `tests/scenarios/operator_core.lua` with the `BigReactors-Reactor` mock in `tests/sim/reactor.lua`: hysteresis, ports worked out with Storage draining the outlet, an outlet that doesn't empty, a full outlet, two reactors with their own thresholds and a manual override, needs lists for different reactors, a silent reactor.

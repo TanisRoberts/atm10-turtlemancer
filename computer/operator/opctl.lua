@@ -1,0 +1,116 @@
+-- opctl.lua  --  what a person (the screen, or a command from the mainframe) can change on a reactor: the run mode,
+-- a held power level, and the settings. One place, so the screen and the radio do exactly the same thing.
+-- Settings live in operator.cfg: per reactor (an override) or `plant` (every reactor's default). Both beat operator.env.
+local plantlib = require("opplant")
+local rods = require("oprods")
+
+-- key -> { env key, step, lowest, highest }. holdMin counts minutes, the rest percent.
+local KEYS = {
+  onBelow  = { "ON_BELOW",  5, 0, 100 }, offAbove = { "OFF_ABOVE", 5, 0, 100 },
+  levelMin = { "LEVEL_MIN", 5, 0, 100 }, levelMax = { "LEVEL_MAX", 5, 5, 100 },
+  holdMin  = { "HOLD_MIN",  5, 5, 60 },
+}
+
+return function(plant, E, hooks)
+  local C = { KEYS = KEYS }
+  hooks = hooks or {}
+  local function log(m) if hooks.log then hooks.log(m) end end
+  local function kick() if hooks.kick then hooks.kick() end end      -- act now, not at the next pass
+
+  local function reactors(ref)
+    local out = {}
+    for _, u in ipairs(plant.units) do
+      if u.kind == "reactor" and (ref == nil or ref == u.label or ref == u.id) then out[#out + 1] = u end
+    end
+    return out
+  end
+  C.reactors = reactors
+
+  -- mode: auto | on | off. Saved. Ends a manual hold.
+  function C.mode(ref, mode)
+    if mode ~= "auto" and mode ~= "on" and mode ~= "off" then return false end
+    local n = 0
+    for _, u in ipairs(reactors(ref)) do
+      u.cfg.mode, u.hold = mode, nil
+      n = n + 1
+      log(u.label .. ": mode " .. mode)
+      if hooks.event then hooks.event(u.label, "mode " .. string.upper(mode)) end
+    end
+    if n > 0 then plant:save(); kick() end
+    return n > 0
+  end
+
+  -- Hold a power level for HOLD_MIN minutes (the reactor is forced ON, then control returns to Auto).
+  function C.hold(ref, level)
+    for _, u in ipairs(reactors(ref)) do
+      local lo, hi = rods.limits(u, E)
+      rods.hold(u, math.max(lo, math.min(hi, math.floor(level + 0.5))), os.clock(), E)
+      log(("%s: level %d%% held for %s min"):format(u.label, u.hold.level, tostring(plantlib.setting(u, "holdMin", E, "HOLD_MIN"))))
+    end
+    kick()
+  end
+
+  -- One step of the level (delta percent). Returns a notice text when it hit a limit or can't.
+  function C.step(ref, delta)
+    local u = reactors(ref)[1]
+    if not u then return "no such reactor" end
+    if (u.hold and u.hold.mode or u.cfg.mode) == "off" then return "The reactor is off" end
+    local lo, hi = rods.limits(u, E)
+    local cur = (u.hold and u.hold.level) or u.level or (u.status and u.status.level)
+    if not cur then return "Can't read the rods" end
+    local want = math.max(lo, math.min(hi, cur + delta))
+    if want == cur then return delta < 0 and ("Lowest is " .. lo .. "%") or ("Highest is " .. hi .. "%") end
+    C.hold(u.label, want)
+    if hooks.event then hooks.event(u.label, ("level held at %d%%"):format(want)) end
+  end
+
+  -- What a setting reads for a reactor, and where it comes from ("unit", "plant" or "env").
+  function C.value(u, key)
+    return plantlib.setting(u, key, E, KEYS[key][1])
+  end
+
+  -- Step a setting. all = true sets the plant-wide default and clears this setting from every reactor's own overrides.
+  -- Returns a notice text when the step is refused.
+  function C.change(ref, all, key, delta)
+    local k = KEYS[key]
+    local u = reactors(ref)[1]
+    if not k or not u then return "no such setting" end
+    local cur = C.value(u, key)
+    local want = math.max(k[3], math.min(k[4], cur + delta * k[2]))
+    if want == cur then return nil end
+    -- keep the switching band at least 10 points wide, and the level limits in order
+    local on, off = C.value(u, "onBelow"), C.value(u, "offAbove")
+    local lo, hi = C.value(u, "levelMin"), C.value(u, "levelMax")
+    if key == "onBelow" then on = want elseif key == "offAbove" then off = want
+    elseif key == "levelMin" then lo = want elseif key == "levelMax" then hi = want end
+    if off - on < 10 then return "ON below stays at least 10 points under OFF above" end
+    if hi < lo then return "Highest can't go under Lowest" end
+    if all then
+      plant.cfg.plant[key] = want
+      for _, r in ipairs(reactors(nil)) do r.cfg[key] = nil end
+    else
+      u.cfg[key] = want
+    end
+    plant:save(); kick()
+    log(("%s %s = %s"):format(all and "all reactors" or u.label, key, tostring(want)))
+  end
+
+  -- "Run it": false = leave the reactor alone while still reporting it.
+  function C.manage(ref, on)
+    for _, u in ipairs(reactors(ref)) do
+      if on then u.cfg.manage = nil else u.cfg.manage = false end
+      u.hold = nil
+    end
+    plant:save(); kick()
+  end
+
+  function C.reset(ref)
+    for _, u in ipairs(reactors(ref)) do
+      for key in pairs(KEYS) do u.cfg[key] = nil end
+      u.cfg.manage, u.cfg.level = nil, nil
+    end
+    plant:save(); kick()
+  end
+
+  return C
+end

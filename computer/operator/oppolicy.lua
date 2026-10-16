@@ -24,6 +24,7 @@ end
 
 -- One unit, by its own buffer: on below `on`, off above `off`. Manual mode and disabled win. Fuel never matters.
 local function one(u)
+  if u.manage == false then return nil end          -- "Run it: NO": leave the reactor alone
   if not u.enabled then return { active = false, why = "disabled" } end
   local d
   if u.mode == "on" then d = { active = true, why = "manual on" }

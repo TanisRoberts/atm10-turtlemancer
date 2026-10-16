@@ -5,7 +5,8 @@
 -- a wireless or ender modem for the mainframe.
 -- The Operator never moves items. Storage fills the inlet port and drains the outlet port (issue #37); the Operator
 -- only reads them: uranium in the inlet, and whether the outlet is emptying.
--- A monitor touching a side shows the same plain text as the computer's screen (the pretty screen is separate).
+-- The computer's screen and every monitor touching a side show the same pages (opscreen.lua, on the UI kit):
+-- a plant overview, and per reactor a Power, Needs and Set tab. Taps change the run mode, the held level and the settings.
 --
 -- What it does: finds every unit on the cable (opplant.lua), drives each reactor through a driver (opdrivers.lua),
 -- lets a policy (oppolicy.lua) decide who runs (on below ON_BELOW % of the buffer, off above OFF_ABOVE %), watches the
@@ -26,6 +27,8 @@ local plantlib = require("opplant")
 local policies = require("oppolicy")
 local needs = require("opneeds")
 local rods = require("oprods")
+local ui = require("ui")
+local screen = require("opscreen")
 
 local PROTOCOL = "tanis-operator"
 local LOG, CFG = "operator.log", "operator.cfg"
@@ -73,8 +76,23 @@ peripheral.find("modem", function(name, m)
 end)
 
 -- State -------------------------------------------------------------------
-local st = { supply = nil, supplyAt = 0, units = {}, lastScan = -1e9, lastSend = -1e9, dirty = true, bufFull = {} }
+local st = { supply = nil, supplyAt = 0, units = {}, lastScan = -1e9, lastSend = -1e9, dirty = true, bufFull = {},
+  hist = {}, events = {}, netS = {}, feS = {}, lastHist = -1e9, rec = nil }
 local E_NOW = {}
+
+-- A short event log (newest first, 8 entries) for the screen and the mainframe, and the plant buffer history
+-- (a sample every 15 s, 120 of them = 30 minutes).
+local function event(label, text)
+  local at = "--:--"
+  pcall(function() at = os.date("%H:%M") end)
+  local last = st.events[1]
+  if last and last.who == label and text:find("^level ") and last.text:find("^level ") then table.remove(st.events, 1) end
+  table.insert(st.events, 1, { at = at, who = label, text = text })
+  while #st.events > 8 do table.remove(st.events) end
+end
+
+local ctlHooks = { log = log, event = event }
+local ctl = require("opctl")(plant, E, ctlHooks)
 
 local function fmt(n, d) if type(n) ~= "number" then return "?" end return ("%." .. (d or 0) .. "f"):format(n) end
 
@@ -102,7 +120,10 @@ local function watchOutlet(u)
       if u.outputFull and n > 0 then u.wasteStuck = true end
     end
   end
-  if u.wasteStuck and not was then log(u.label .. ": waste not clearing (outlet holds " .. tostring(u.outputCount) .. " cyanite)") end
+  if u.wasteStuck and not was then
+    log(u.label .. ": waste not clearing (outlet holds " .. tostring(u.outputCount) .. " cyanite)")
+    event(u.label, "waste outlet not emptying")
+  end
   return (was or false) ~= u.wasteStuck
 end
 
@@ -132,14 +153,15 @@ local function tick()
     if u.kind == "reactor" then
       local s = (u.present and u.driver) and u.driver:status() or { answers = false }
       u.status = s
+      if s.answers then u.heardAt = now end
       if s.answers and s.stored and s.cap then sum.stored, sum.cap = sum.stored + s.stored, sum.cap + s.cap end
       if st.rechecked then recheck(u, s) end
       local on, off = plantlib.thresholds(u, E)
-      if rods.expire(u, now) then log(u.label .. ": manual hold ended, back to Auto") end
+      if rods.expire(u, now) then log(u.label .. ": manual hold ended, back to Auto"); event(u.label, "back to Auto"); ui.say(u.label .. ": back to Auto", "good") end
       local lo, hi = rods.limits(u, E)
       if s.level then u.level = s.level end
       list[#list + 1] = { id = u.id, label = u.label, mode = u.hold and u.hold.mode or u.cfg.mode or "auto",
-                          enabled = u.cfg.enabled ~= false, on = on, off = off, lo = lo, hi = hi,
+                          enabled = u.cfg.enabled ~= false, manage = u.cfg.manage ~= false, on = on, off = off, lo = lo, hi = hi,
                           manual = rods.manual(u, E), status = s.answers and s or nil }
     end
   end
@@ -151,6 +173,22 @@ local function tick()
   end
   sum.buf = sum.cap > 0 and sum.stored / sum.cap or nil
 
+  -- plant history for the screen: net FE/t from the last minute of buffer, a buffer sample every 15 s
+  if sum.cap > 0 then
+    local ns = st.netS
+    ns[#ns + 1] = { t = now, stored = sum.stored }
+    while #ns > 1 and now - ns[2].t >= 60 do table.remove(ns, 1) end
+    if now - st.lastHist >= 15 then
+      st.lastHist = now
+      st.hist[#st.hist + 1] = math.floor(sum.buf * 100 + 0.5)
+      while #st.hist > 120 do table.remove(st.hist, 1) end
+      local fs_ = 0
+      for _, u in ipairs(plant.units) do if u.kind == "reactor" and u.status and u.status.fe then fs_ = fs_ + u.status.fe end end
+      st.feS[#st.feS + 1] = fs_
+      while #st.feS > 240 do table.remove(st.feS, 1) end
+    end
+  end
+
   -- decide, then act
   decide = policies.get(E.POLICY)(sum, list)
   for _, u in ipairs(plant.units) do
@@ -161,6 +199,7 @@ local function tick()
         if u.driver:setActive(d.active) then
           u.status.active = d.active
           log(("%s %s (%s, buffer %s%%)"):format(u.label, d.active and "ON" or "OFF", d.why, fmt((u.status.buf or 0) * 100)))
+          event(u.label, ("%s, buffer %s%%"):format(d.active and "on" or "off", fmt((u.status.buf or 0) * 100)))
         else
           u.why = "can't switch (call failed)"
         end
@@ -173,8 +212,11 @@ local function tick()
           local from = u.level
           u.level, u.lastRod = nl, now
           u.levelWhy = d.manual and "manual" or (nl > (from or nl) and "buffer falling" or "buffer filling")
-          u.levelAt = os.epoch and os.epoch("utc") or nil
-          if nl == d.level then log(("%s level %d%% (%s, buffer %s%%)"):format(u.label, nl, u.levelWhy, fmt((u.status.buf or 0) * 100))) end
+          u.levelAt = now
+          if nl == d.level then
+            log(("%s level %d%% (%s, buffer %s%%)"):format(u.label, nl, u.levelWhy, fmt((u.status.buf or 0) * 100)))
+            if not d.manual then event(u.label, ("level %s to %d%% (%s)"):format(nl > (from or nl) and "raised" or "lowered", nl, u.levelWhy)) end
+          end
         end
       end
       if watchOutlet(u) then recheck(u, u.status) end
@@ -204,6 +246,10 @@ local function record()
       r.mode, r.enabled, r.why = u.hold and u.hold.mode or u.cfg.mode or "auto", u.cfg.enabled ~= false, u.why
       r.level, r.rodCount, r.rodLevels = s.level or u.level, s.rodCount, s.rodLevels
       r.levelWhy, r.levelAt, r.holdLeft = u.levelWhy, u.levelAt, rods.holdLeft(u, os.clock())
+      local lo, hi = rods.limits(u, E)
+      r.lo, r.hi, r.manage = lo, hi, u.cfg.manage ~= false
+      r.onBelow, r.offAbove = plantlib.thresholds(u, E)
+      r.seen = u.heardAt and (os.clock() - u.heardAt) or nil
       r.wasteStuck, r.needs, r.outlet = u.wasteStuck or false, u.needs, u.outputCount
       r.note = u.wasteStuck and "waste not clearing" or needs.summary(u.needs)
       tot.reactors = tot.reactors + 1
@@ -217,60 +263,18 @@ local function record()
     units[#units + 1] = r
   end
   tot.buf = tot.cap > 0 and tot.stored / tot.cap or nil
+  local ns = st.netS
+  if #ns >= 2 and ns[#ns].t - ns[1].t >= 20 then
+    tot.net = (ns[#ns].stored - ns[1].stored) / ((ns[#ns].t - ns[1].t) * 20)
+  end
+  if #st.feS > 0 then
+    local t = 0
+    for _, v in ipairs(st.feS) do t = t + v end
+    tot.avgHour = t / #st.feS
+  end
+  tot.hist, tot.events = st.hist, st.events
   return { type = "operator", id = os.getComputerID(), label = os.getComputerLabel() or "Operator", t = os.clock(),
            units = units, plant = tot }
-end
-
--- Plain text screen -----------------------------------------------------------
-local function render(t, rec)
-  local w, h = t.getSize()
-  local y = 1
-  local function line(s, col)
-    if y > h then return end
-    if col and t.isColour and t.isColour() then t.setTextColour(col) end
-    t.setCursorPos(1, y); t.clearLine(); t.write(tostring(s):sub(1, w)); y = y + 1
-    if t.setTextColour then t.setTextColour(colours.white) end
-  end
-  t.setBackgroundColour(colours.black); t.setTextColour(colours.white); t.clear()
-  local p = rec.plant
-  line(("%s: %d reactor%s, %d running"):format(rec.label, p.reactors, p.reactors == 1 and "" or "s", p.running), colours.cyan)
-  line(("Plant: %s FE/t, buffer %s%%"):format(fmt(p.fe), p.buf and fmt(p.buf * 100) or "?"))
-  -- one line per unit first, then each reactor's detail while there is room (missing things always before unknowns)
-  for _, r in ipairs(rec.units) do
-    if r.kind == "reactor" then
-      local state = not r.present and "OFFLINE" or not r.answers and "SILENT" or r.active and "ON" or "off"
-      line(("%s %s %s%% %s FE/t, level %s%%%s"):format(r.label, state, r.buf and fmt(r.buf * 100) or "?", fmt(r.fe),
-        r.level and fmt(r.level) or "?", r.holdLeft and (" hold " .. r.holdLeft .. "s") or ""),
-        (r.active and colours.lime) or colours.white)
-    else
-      line(("%s (%s)%s"):format(r.label, r.kind, r.present and "" or " OFFLINE"))
-    end
-  end
-  for _, r in ipairs(rec.units) do
-    if r.kind == "reactor" then
-      line(("%s: fuel %s/%s, uranium %s, outlet %s"):format(r.label, fmt(r.fuel), fmt(r.fuelMax),
-        r.uranium and fmt(r.uranium) or "?", r.outlet and fmt(r.outlet) or "?"))
-      line(("  fuel %s C, casing %s C"):format(fmt(r.fuelTemp), fmt(r.casing)))
-      for _, n in ipairs(r.needs or {}) do
-        if n.state == "missing" then line(("  MISSING %s: %s"):format(n.title, n.why), colours.red) end
-      end
-    end
-  end
-  for _, r in ipairs(rec.units) do
-    for _, n in ipairs(r.needs or {}) do
-      if n.state == "unknown" then line(("  ? %s %s: %s"):format(r.label, n.title, n.why), colours.yellow) end
-    end
-  end
-  if p.reactors == 0 then line("No reactor found on the cable (BigReactors-Reactor).", colours.red) end
-end
-
-local function draw(rec)
-  render(term.current(), rec)
-  peripheral.find("monitor", function(_, m)
-    m.setTextScale(0.5)
-    render(m, rec)
-    return false
-  end)
 end
 
 -- First boot: say what was found -------------------------------------------------
@@ -295,39 +299,55 @@ term.clear(); term.setCursorPos(1, 1)
 print("Operator starting. Reboot (hold Ctrl+R) to update. Type reset to give this computer a new role.")
 plant:scan(); st.lastScan = os.clock()
 report()
+event("Operator", ("started, %d reactor%s found"):format(#plant.found.reactor, #plant.found.reactor == 1 and "" or "s"))
+
+-- The computer's screen and each monitor touching a side
+local views = { ui.view(term.current()) }
+local SIDES = { "top", "bottom", "left", "right", "front", "back" }
+local function syncViews()
+  for i = #views, 2, -1 do
+    if not peripheral.isPresent(views[i].side) then table.remove(views, i) end
+  end
+  for _, side in ipairs(SIDES) do
+    if peripheral.isPresent(side) and peripheral.getType(side) == "monitor" then
+      local have = false
+      for i = 2, #views do if views[i].side == side then have = true end end
+      if not have then views[#views + 1] = ui.view(peripheral.wrap(side), { side = side }) end
+    end
+  end
+end
+syncViews()
 
 local timer = os.startTimer(0)
-while true do
-  local ev, a, b, c3 = os.pullEvent()
+ctlHooks.kick = function() if timer then os.cancelTimer(timer) end; timer = os.startTimer(0.05) end
+local function onEvent(ev, a, b, c3)
   if ev == "timer" and a == timer then
     local ok, err = pcall(tick)
     if not ok then log("tick failed: " .. tostring(err)) end
-    local rec = record()
+    st.rec = record()
     if netOn and os.clock() - st.lastSend >= E.STATUS_EVERY then
       st.lastSend = os.clock()
-      rednet.broadcast(rec, PROTOCOL)
+      rednet.broadcast(st.rec, PROTOCOL)
     end
-    pcall(draw, rec)
     timer = os.startTimer(E.TICK)
   elseif ev == "rednet_message" and c3 == PROTOCOL and type(b) == "table" and b.type == "uranium" and tonumber(b.total) then
     st.supply, st.supplyAt = tonumber(b.total), os.clock()
   elseif ev == "rednet_message" and c3 == PROTOCOL and type(b) == "table" and b.type == "operator_cmd" then
-    local changed = false
-    for _, u in ipairs(plant.units) do
-      if u.kind == "reactor" and (b.unit == nil or b.unit == u.label or b.unit == u.id) then
-        if b.mode == "auto" or b.mode == "on" or b.mode == "off" then
-          u.cfg.mode, u.hold, changed = b.mode, nil, true
-          log(u.label .. ": mode " .. b.mode .. " (command)")
-        end
-        if tonumber(b.level) then
-          local lo, hi = rods.limits(u, E)
-          rods.hold(u, math.max(lo, math.min(hi, math.floor(tonumber(b.level) + 0.5))), os.clock(), E)
-          log(("%s: level %d%% held for %s min (command)"):format(u.label, u.hold.level, tostring(E.HOLD_MIN)))
-        end
-      end
-    end
-    if changed then plant:save() end
+    if b.mode then ctl.mode(b.unit, b.mode) end
+    if tonumber(b.level) then ctl.hold(b.unit, tonumber(b.level)) end
   elseif ev == "peripheral" or ev == "peripheral_detach" then
     st.dirty = true
+    syncViews()
   end
 end
+
+local ctx = { ctl = ctl, E = E }
+ui.run(views, function(v)
+  ctx.rec, ctx.now = st.rec, os.clock()
+  local ok, err = pcall(screen.draw, v, ctx)
+  if not ok then
+    v:header("OPERATOR", { state = "error", color = "bad" })
+    v:put(2, 4, tostring(err):sub(1, math.max(v.W - 2, 1)), "bad", "bg")
+    if st.screenErr ~= tostring(err) then st.screenErr = tostring(err); log("screen failed: " .. st.screenErr) end
+  end
+end, { tick = 1, on_event = onEvent })

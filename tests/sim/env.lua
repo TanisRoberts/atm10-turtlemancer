@@ -166,6 +166,18 @@ function Env.build(world, c)
     if not d then error("No such file", 2) end
     return #d
   end
+  -- size and a "modified" that changes whenever the contents do (a checksum: the sim has no file times)
+  function fs.attributes(p)
+    p = norm(p)
+    local d = c.files[p]
+    if not d then
+      if isDir(p) then return { size = 0, isDir = true, isReadOnly = false, created = 0, modified = 0 } end
+      error("/" .. p .. ": No such file", 2)
+    end
+    local sum = 0
+    for i = 1, #d do sum = (sum * 31 + d:byte(i)) % 2147483629 end
+    return { size = #d, isDir = false, isReadOnly = false, created = 0, modified = sum }
+  end
   function fs.makeDir(p)
     p = norm(p)
     while p ~= "" do c.dirs[p] = true; p = p:match("^(.*)/[^/]*$") or "" end
