@@ -13,12 +13,19 @@
 -- missing (opneeds.lua) and tells the mainframe (protocol tanis-operator) once every few seconds.
 -- Storage tells the Operator how much uranium it holds with  { type = "uranium", total = <ingots> }  on the same
 -- protocol; without it "fuel supply" reads unknown.
+-- Control rods: the policy picks a power level per running reactor from its buffer (full power at the ON threshold,
+-- LEVEL_MIN at the OFF threshold); oprods.lua steps the rods toward it, ROD_STEP percent every ROD_EVERY seconds.
+-- A level set by hand holds for HOLD_MIN minutes, then control returns to Auto.
 -- Settings: operator.env (plant-wide, live) and operator.cfg (per unit, keyed by peripheral name: mode auto|on|off,
--- enabled, onBelow, offAbove, input, output). Log: operator.log.
+-- enabled, onBelow, offAbove, levelMin, levelMax, level, input, output). Log: operator.log.
+-- Commands (mainframe or screen), protocol tanis-operator:
+--   { type = "operator_cmd", unit = <label or id; nil = every reactor>, mode = "auto"|"on"|"off", level = 1..100 }
+--   a mode is saved in operator.cfg; a level is a manual hold.
 local envfile = require("envfile")
 local plantlib = require("opplant")
 local policies = require("oppolicy")
 local needs = require("opneeds")
+local rods = require("oprods")
 
 local PROTOCOL = "tanis-operator"
 local LOG, CFG = "operator.log", "operator.cfg"
@@ -27,6 +34,14 @@ local env = envfile.new("operator.env", "Operator settings.", {
   { "ON_BELOW",     30, "Switch a reactor ON when its buffer drops below this percent." },
   { "OFF_ABOVE",    90, "Switch a reactor OFF when its buffer rises above this percent." },
   { "POLICY",       "follow", "Who runs: follow = every reactor on its own thresholds." },
+  { "RODS",         "auto", "auto = the power level follows the buffer; off = leave the control rods alone." },
+  { "LEVEL_MIN",    10, "Lowest power level (percent, 100 = rods fully out) Auto will run a reactor at." },
+  { "LEVEL_MAX",    100, "Highest power level Auto will run a reactor at." },
+  { "ROD_STEP",     10, "Most percent Auto moves the level in one step." },
+  { "ROD_EVERY",    5,  "Fewest seconds between Auto's steps." },
+  { "LEVEL_BAND",   5,  "Auto leaves the rods alone while the level is within this many percent of where it wants to be." },
+  { "MANUAL_LEVEL", 0,  "Hold every reactor at this power level (1 to 100). 0 = off, Auto decides." },
+  { "HOLD_MIN",     10, "Minutes a level set by hand (screen or mainframe) is held before control returns to Auto." },
   { "TICK",         2,  "Seconds between control passes." },
   { "SLOW",         30, "Seconds between full re-checks of the cable and of what each reactor needs." },
   { "STUCK_AFTER",  120, "Seconds an outlet port may hold cyanite without ever dropping before it is reported as not clearing." },
@@ -120,8 +135,12 @@ local function tick()
       if s.answers and s.stored and s.cap then sum.stored, sum.cap = sum.stored + s.stored, sum.cap + s.cap end
       if st.rechecked then recheck(u, s) end
       local on, off = plantlib.thresholds(u, E)
-      list[#list + 1] = { id = u.id, label = u.label, mode = u.cfg.mode or "auto", enabled = u.cfg.enabled ~= false,
-                          on = on, off = off, status = s.answers and s or nil }
+      if rods.expire(u, now) then log(u.label .. ": manual hold ended, back to Auto") end
+      local lo, hi = rods.limits(u, E)
+      if s.level then u.level = s.level end
+      list[#list + 1] = { id = u.id, label = u.label, mode = u.hold and u.hold.mode or u.cfg.mode or "auto",
+                          enabled = u.cfg.enabled ~= false, on = on, off = off, lo = lo, hi = hi,
+                          manual = rods.manual(u, E), status = s.answers and s or nil }
     end
   end
   st.rechecked = false
@@ -144,6 +163,18 @@ local function tick()
           log(("%s %s (%s, buffer %s%%)"):format(u.label, d.active and "ON" or "OFF", d.why, fmt((u.status.buf or 0) * 100)))
         else
           u.why = "can't switch (call failed)"
+        end
+      end
+      -- control rods: the policy says where, oprods steps there, the driver sets them
+      if E.RODS ~= "off" and d and d.level and u.driver:has("setAllControlRodLevels") and u.status.active ~= false then
+        local lo, hi = rods.limits(u, E)
+        local nl = rods.step(u, d.level, d.manual, now, E, lo, hi)
+        if nl and u.driver:setOutput(100 - nl) then
+          local from = u.level
+          u.level, u.lastRod = nl, now
+          u.levelWhy = d.manual and "manual" or (nl > (from or nl) and "buffer falling" or "buffer filling")
+          u.levelAt = os.epoch and os.epoch("utc") or nil
+          if nl == d.level then log(("%s level %d%% (%s, buffer %s%%)"):format(u.label, nl, u.levelWhy, fmt((u.status.buf or 0) * 100))) end
         end
       end
       if watchOutlet(u) then recheck(u, u.status) end
@@ -170,7 +201,9 @@ local function record()
       r.active, r.fe, r.buf = s.active, s.fe, s.buf
       r.fuel, r.fuelMax, r.waste = s.fuel, s.fuelMax, s.waste
       r.fuelTemp, r.casing, r.uranium = s.fuelTemp, s.casing, uran
-      r.mode, r.enabled, r.why = u.cfg.mode or "auto", u.cfg.enabled ~= false, u.why
+      r.mode, r.enabled, r.why = u.hold and u.hold.mode or u.cfg.mode or "auto", u.cfg.enabled ~= false, u.why
+      r.level, r.rodCount, r.rodLevels = s.level or u.level, s.rodCount, s.rodLevels
+      r.levelWhy, r.levelAt, r.holdLeft = u.levelWhy, u.levelAt, rods.holdLeft(u, os.clock())
       r.wasteStuck, r.needs, r.outlet = u.wasteStuck or false, u.needs, u.outputCount
       r.note = u.wasteStuck and "waste not clearing" or needs.summary(u.needs)
       tot.reactors = tot.reactors + 1
@@ -206,7 +239,8 @@ local function render(t, rec)
   for _, r in ipairs(rec.units) do
     if r.kind == "reactor" then
       local state = not r.present and "OFFLINE" or not r.answers and "SILENT" or r.active and "ON" or "off"
-      line(("%s %s %s%% %s FE/t"):format(r.label, state, r.buf and fmt(r.buf * 100) or "?", fmt(r.fe)),
+      line(("%s %s %s%% %s FE/t, level %s%%%s"):format(r.label, state, r.buf and fmt(r.buf * 100) or "?", fmt(r.fe),
+        r.level and fmt(r.level) or "?", r.holdLeft and (" hold " .. r.holdLeft .. "s") or ""),
         (r.active and colours.lime) or colours.white)
     else
       line(("%s (%s)%s"):format(r.label, r.kind, r.present and "" or " OFFLINE"))
@@ -277,6 +311,22 @@ while true do
     timer = os.startTimer(E.TICK)
   elseif ev == "rednet_message" and c3 == PROTOCOL and type(b) == "table" and b.type == "uranium" and tonumber(b.total) then
     st.supply, st.supplyAt = tonumber(b.total), os.clock()
+  elseif ev == "rednet_message" and c3 == PROTOCOL and type(b) == "table" and b.type == "operator_cmd" then
+    local changed = false
+    for _, u in ipairs(plant.units) do
+      if u.kind == "reactor" and (b.unit == nil or b.unit == u.label or b.unit == u.id) then
+        if b.mode == "auto" or b.mode == "on" or b.mode == "off" then
+          u.cfg.mode, u.hold, changed = b.mode, nil, true
+          log(u.label .. ": mode " .. b.mode .. " (command)")
+        end
+        if tonumber(b.level) then
+          local lo, hi = rods.limits(u, E)
+          rods.hold(u, math.max(lo, math.min(hi, math.floor(tonumber(b.level) + 0.5))), os.clock(), E)
+          log(("%s: level %d%% held for %s min (command)"):format(u.label, u.hold.level, tostring(E.HOLD_MIN)))
+        end
+      end
+    end
+    if changed then plant:save() end
   elseif ev == "peripheral" or ev == "peripheral_detach" then
     st.dirty = true
   end

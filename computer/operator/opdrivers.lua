@@ -2,7 +2,8 @@
 --   driver.kind                    "passive" | "active"
 --   driver:status()                a table of readings (a field is nil when the reactor didn't answer)
 --   driver:setActive(on)           true if the call went through
---   driver:setOutput(level)        control rod insertion 0..100 for every rod (guarded; used by a later issue)
+--   driver:setOutput(insertion)    control rod insertion 0..100 for every rod (guarded). The power "level" the rest of
+--                                  the Operator talks about is 100 - insertion.
 --   driver:rods()                  number of control rods, or nil
 -- Every device call is guarded: a missing method or a failing call gives nil, never an error.
 -- Passive = FE straight from the power tap. Active (coolant -> turbines) reads the same plus coolant/steam; its
@@ -35,6 +36,17 @@ function Base:status()
     casing   = call(p, "getCasingTemperature"),
     burn     = call(p, "getFuelConsumedLastTick"),
   }
+  local n = self:rods()
+  if n then
+    local lv, sum = {}, 0
+    for i = 0, n - 1 do
+      local ins = call(p, "getControlRodLevel", i)
+      if type(ins) ~= "number" then lv = nil; break end
+      lv[#lv + 1] = 100 - ins; sum = sum + ins
+    end
+    s.rodCount = n
+    if lv and #lv > 0 then s.rodLevels, s.level = lv, math.floor(100 - sum / #lv + 0.5) end
+  end
   s.answers = s.active ~= nil or s.stored ~= nil or s.cap ~= nil
   if s.stored and s.cap and s.cap > 0 then s.buf = s.stored / s.cap end
   if self.kind == "active" then

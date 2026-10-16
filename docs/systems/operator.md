@@ -1,6 +1,6 @@
 # Operator
 
-Runs the Extreme Reactors 2 power plant headless. `computer/operator/`: `operator.lua` (loop, status, text screen), `opplant.lua` (what is on the cable, units, ports), `opdrivers.lua` (reactor drivers), `oppolicy.lua` (who runs), `opneeds.lua` (needs / has / missing). `shared/envfile.lua` reads `operator.env`.
+Runs the Extreme Reactors 2 power plant headless. `computer/operator/`: `operator.lua` (loop, status, text screen), `opplant.lua` (what is on the cable, units, ports), `opdrivers.lua` (reactor drivers), `oppolicy.lua` (who runs), `opneeds.lua` (needs / has / missing), `oprods.lua` (rod stepping and manual holds). `shared/envfile.lua` reads `operator.env`.
 
 ## Plant model (`opplant.lua`)
 
@@ -10,8 +10,18 @@ Runs the Extreme Reactors 2 power plant headless. `computer/operator/`: `operato
 
 ## Drivers, policy (`opdrivers.lua`, `oppolicy.lua`)
 
-- Driver: `status()`, `setActive()`, `setOutput()` (rod insertion, for the later rod issue), `rods()`. Every call is guarded (missing method or error gives nil). `passive` is FE straight from the power tap. A reactor answering `isActivelyCooled() == true` gets `active`: it reads the same plus coolant/hot fluid; its turbine/steam control is a later driver in the same file.
+- Driver: `status()` (also the rod count, each rod's level and the average `level`), `setActive()`, `setOutput(insertion)`, `rods()`. Every call is guarded (missing method or error gives nil). `passive` is FE straight from the power tap. A reactor answering `isActivelyCooled() == true` gets `active`: it reads the same plus coolant/hot fluid; its turbine/steam control is a later driver in the same file.
 - Policy: `follow` (day one) switches each reactor on below `ON_BELOW`% and off above `OFF_ABOVE`% of its own buffer, nothing in between. `disabled` and manual `on`/`off` win. Fuel is never a reason to switch off. A new policy (e.g. stagger) is a new function in `oppolicy.lua`, chosen by `POLICY=` in `operator.env`; it sees the plant totals and every unit.
+
+## Control rods (`oprods.lua`)
+
+- **Level** = power setting in percent = `100 - rod insertion`. All rods move together. The policy returns a target `level` per running reactor (full power at the ON threshold and below, `LEVEL_MIN` at the OFF threshold, a straight line between); `oprods.step` moves toward it and the driver applies it.
+- Auto steps at most `ROD_STEP` percent every `ROD_EVERY` seconds and leaves the rods alone within `LEVEL_BAND` of the target (unless the target is a limit). At steady load the level drifts a few percent at most.
+- Off: the rods keep their level, and switching on does not reset them.
+- Manual: `level` in a unit's `operator.cfg` entry (or `MANUAL_LEVEL` in `operator.env`) holds a level until removed. A hold set by command lasts `HOLD_MIN` minutes (default 10), forces the reactor ON, and then returns to Auto (logged). Limits per unit: `levelMin`, `levelMax`.
+- `RODS=off` leaves the rods alone. A reactor without rod methods is controlled on/off only.
+- Command (protocol `tanis-operator`): `{ type="operator_cmd", unit=<label or id; none = every reactor>, mode="auto"|"on"|"off", level=1..100 }`. A mode is saved in `operator.cfg`; a level is a hold.
+- Status per unit adds `level`, `rodCount`, `rodLevels`, `levelWhy` ("buffer falling" / "buffer filling" / "manual"), `levelAt` and `holdLeft` (seconds).
 
 ## Items: the Operator never moves any
 
@@ -31,4 +41,5 @@ Protocol `tanis-operator`, a `{type="operator", units={...}, plant={...}}` broad
 
 ## Tests
 
+`tests/scenarios/operator_rods.lua`: steps out and in, steady load, off keeps the level, manual level and limits, a hold that expires, no rod methods.
 `tests/scenarios/operator_core.lua` with the `BigReactors-Reactor` mock in `tests/sim/reactor.lua`: hysteresis, ports worked out with Storage draining the outlet, an outlet that doesn't empty, a full outlet, two reactors with their own thresholds and a manual override, needs lists for different reactors, a silent reactor.

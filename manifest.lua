@@ -109,7 +109,7 @@ local M = {
             .. "cable shared with the reactor and Storage + wireless or ender modem; a monitor shows the status.",
           run = "operator",
           files = { "computer/operator/operator.lua", "computer/operator/opplant.lua", "computer/operator/opdrivers.lua",
-                    "computer/operator/oppolicy.lua", "computer/operator/opneeds.lua", "shared/envfile.lua" },
+                    "computer/operator/oppolicy.lua", "computer/operator/opneeds.lua", "computer/operator/oprods.lua", "shared/envfile.lua" },
         },
         gps = {
           name = "GPS host",

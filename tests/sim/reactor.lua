@@ -2,6 +2,7 @@
 -- fills while it is on and drains with demand, burns fuel, and makes cyanite into its output port.
 -- Lazy like the furnace: state catches up to the clock on every call.
 --   w:reactor{ prod = FE/t while on, demand = FE/t drained, cap, stored, active, rods, inPort, outPort,
+--              rodScale = true (output follows 100 - rod insertion), rodLevel = starting insertion,
 --              activelyCooled = true, without = { "getControlRodLevel", ... } methods the device lacks }
 local Reactor = {}
 Reactor.__index = Reactor
@@ -15,7 +16,7 @@ function Reactor.new(opts)
     clock = opts.clock, types = { "BigReactors-Reactor" }, prod = opts.prod or 2000, demand = opts.demand or 1000,
     cap = opts.cap or 1000000, stored = opts.stored or 500000, on = opts.active or false, rods = opts.rods or 5,
     inPort = opts.inPort, outPort = opts.outPort, fuel = opts.fuel or 0, fuelMax = 4000, waste = 0,
-    cooled = opts.activelyCooled, rodLevel = 100, wasteAcc = 0, burnAcc = 0, made = 0,
+    cooled = opts.activelyCooled, rodLevel = opts.rodLevel or 100, rodScale = opts.rodScale, wasteAcc = 0, burnAcc = 0, made = 0,
   }, Reactor)
   self.last = self.clock()
   local skip = {}
@@ -26,6 +27,8 @@ function Reactor.new(opts)
   self.peripheralMethods = ms
   return self
 end
+
+function Reactor:output() return self.rodScale and self.prod * (100 - self.rodLevel) / 100 or self.prod end
 
 function Reactor:touch()
   local now = self.clock()
@@ -41,7 +44,7 @@ function Reactor:touch()
       end
     end
   end
-  local net = (self.on and self.fuel > 0 and self.prod or 0) - self.demand
+  local net = (self.on and self.fuel > 0 and self:output() or 0) - self.demand
   self.stored = math.max(0, math.min(self.cap, self.stored + net * 20 * dt))
   if self.on and self.fuel > 0 then
     self.fuel = math.max(0, self.fuel - 2 * dt)
@@ -58,7 +61,7 @@ function Reactor:getActive() self:touch(); return self.on end
 function Reactor:setActive(b) self:touch(); self.on = b and true or false end
 function Reactor:getEnergyStored() self:touch(); return self.stored end
 function Reactor:getEnergyCapacity() self:touch(); return self.cap end
-function Reactor:getEnergyProducedLastTick() self:touch(); return (self.on and self.fuel > 0) and self.prod or 0 end
+function Reactor:getEnergyProducedLastTick() self:touch(); return (self.on and self.fuel > 0) and self:output() or 0 end
 function Reactor:getFuelAmount() self:touch(); return self.fuel end
 function Reactor:getFuelAmountMax() return self.fuelMax end
 function Reactor:getWasteAmount() self:touch(); return self.waste end
