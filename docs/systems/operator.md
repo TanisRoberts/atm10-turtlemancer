@@ -37,11 +37,11 @@ Design: `docs/design/operator.md`. The computer's screen and every monitor touch
 
 ## Items: the Operator never moves any
 
-Storage fills the inlet port and drains the outlet port (issue #37). The Operator reads: uranium in the inlet (ingots, blocks count 9) and the outlet. "Waste not clearing" = every outlet slot taken, or cyanite in the outlet that hasn't dropped for `STUCK_AFTER` seconds (default 120). Fuel left = reactor `getFuelAmount/Max`. Uranium in supply comes from Storage: a `{type="uranium", total=<ingots>}` broadcast on protocol `tanis-operator`; silent for 90 s, or never heard, and "Fuel supply" reads unknown.
+Storage fills the inlet port and drains the outlet port (issue #37). The Operator reads: uranium in the inlet (ingots, blocks count 9) and the outlet. "Waste not clearing" = every outlet slot taken, or cyanite in the outlet that hasn't dropped for `STUCK_AFTER` seconds (default 120). Fuel left = reactor `getFuelAmount/Max`. Uranium in supply comes from Storage: a `{type="uranium", total=<ingots>}` broadcast on protocol `tanis-operator`; the plant totals and the mainframe alert use it. It is not a Needs check (the Needs tab used to have "Fuel supply" and "Power output"; both were removed because nothing on them could be fixed).
 
 ## Needs / has / missing (`opneeds.lua`)
 
-A list of small checks, each giving `ok | missing | unknown` and a one-line reason: computer port, control rods, temperatures, inlet port, fuel in reactor (inlet or reactor), fuel supply (Storage), outlet port, waste draining, power output, coolant, turbine. "Unknown" is used when the Operator can't tell (a passive reactor's power tap is not on the cable, so that one is always unknown). Recomputed on boot, every `SLOW` seconds, when the cable changes, and when waste starts or stops clearing. The list is in the unit's status record.
+A list of small checks, each giving `ok | missing | unknown | na` and a one-line reason: computer port, inlet port, fuel in reactor (inlet or reactor), outlet port, waste draining, control rods, fuel and casing temperature, coolant and turbine. "Unknown" is used when the Operator can't tell. Recomputed on boot, every `SLOW` seconds, when the cable changes, and when waste starts or stops clearing. The list is in the unit's status record.
 
 ## Status to the mainframe
 

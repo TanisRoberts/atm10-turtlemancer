@@ -1,7 +1,7 @@
 -- opneeds.lua  --  what each reactor needs, has and is missing, worked out from what the device and the cable show.
 -- A list of small checks; each is  { key, title, fn(ctx) -> state, why }  with state "ok" | "missing" | "unknown" | "na" (not needed for this reactor).
 -- "unknown" means the Operator can't tell (not "missing"). Add a check by adding one entry to CHECKS.
---   ctx = { unit, status, plant (found devices), driver, supply (uranium in storage, or nil), E }
+--   ctx = { unit, status, plant (found devices), driver, E }
 local plantlib = require("opplant")
 
 local function ok(why) return "ok", why or "" end
@@ -34,12 +34,6 @@ local CHECKS = {
       if inPort == nil then return unknown("can't read the inlet port") end
       return missing("no uranium in the inlet port or the reactor")
     end },
-  { "supply", "Fuel supply", function(c)
-      local sup = c.supply
-      if sup == nil then return unknown("Storage silent") end
-      if sup > 0 then return ok("Storage: " .. sup .. " ingots") end
-      return missing("no uranium left in storage")
-    end },
   { "wasteOut", "Waste outlet port", function(c)
       local u = c.unit
       if u.outputGone then return missing("output port " .. tostring(u.output) .. " is not on the cable") end
@@ -52,14 +46,6 @@ local CHECKS = {
       if not u.output then return unknown("no outlet port known to watch") end
       if u.outputCount == nil then return unknown("can't read outlet") end
       return ok("draining")
-    end },
-  { "power", "Power output", function(c)
-      -- A passive reactor's power tap isn't on the cable; all we can say is that it reports output.
-      if c.driver and c.driver.kind == "passive" then
-        if c.status and c.status.fe ~= nil then return unknown("tap not on cable") end
-        return unknown("no power reading")
-      end
-      return ok()
     end },
   { "rods", "Control rods", function(c)
       local n = c.driver and c.driver:rods()
