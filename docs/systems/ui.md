@@ -16,7 +16,7 @@ Design: `docs/design/ui-kit.md`. Devices keep shared files flat, so a program sa
 
 ## Part 2 (#15): `shared/ui_widgets.lua`
 
-Loaded by `ui.lua` itself, so a program only requires `ui`; both files must be in the role's manifest entry. Each file stays under about 30 KB (23 KB and 25 KB now); put part 3 in another `shared/ui_*.lua`.
+Loaded by `ui.lua` itself, so a program only requires `ui`; both files must be in the role's manifest entry. Each file stays under about 30 KB (26 KB and 26 KB now); new components go in another `shared/ui_*.lua`.
 
 Paging state lives on the view: `v.page` is the page being shown, lists and tiles set `v.pages` while drawing, and the footer (drawn last) shows the pager from it. `v:turn(d)` changes page; PgUp/PgDn and the mouse wheel call it. Tabs reset the page to 1. Pass `page`, `pages` or `on_page` to the footer to manage paging yourself. `v.sel` is the highlighted tile or selected list row.
 
@@ -29,6 +29,22 @@ Paging state lives on the view: `v.page` is the page being shown, lists and tile
 
 The map thumbnail on a tile is done by the screen through `fields.extra` and `v:cells`.
 
+## Part 3 (#27): `shared/ui_parts.lua`
+
+Loaded by `ui.lua` after `ui_widgets.lua`; every role that uses the kit lists all three files in its manifest entry. Design: `docs/design/ui-kit.md` section 10. Single-row components return the next free row (`y + 1`); `switch` returns the next free x and its last row, like `v:buttons`.
+
+- `v:section(x, y, w, text)`: dim caps label and a grey rule to `x + w - 1`. Leave a blank row above it.
+- `v:kv(x, y, w, key, value, tone)`: key left (dim), value right (white or a role). Too long: the key is cut first, the value last.
+- `v:alert(x, y, w, text, tone)`: one-cell stripe and text in the tone (default `"warn"`). Without colour the stripe is `!`.
+- `v:switch(x, y, options, current, on_pick, { id, maxx })`: touching pills, the current one gold. Options are ids or `{ id, label, short }`; `on_pick(id, option)`. If the long labels do not fit, `short` ones are used, then it wraps to a second row. Tap a segment to pick it. Tab focuses the switch: Left/Right move a cursor (wraps), Enter picks the cursor. Without colour the current one is `[AUTO]`.
+- `v:board(x, y, w, rows)` and `v:boardHeader(x, y, w, title)`: rows `{ name, state, detail, age, color, glyph }` (`rows.title` draws the grey header bar with the gold caps label first). Stripe in the state colour, glyph and state word, detail, and `age` (seconds, or text) at the right. `age >= 30` greys the row, with a still `?`. No hit boxes. Detail is dropped when it does not fit (26 wide has none). The glyph is `v:glyph` once motion (#24) is in, otherwise a still one.
+- `ui.picker{ question, items = { { id, name, tag, lines | text } }, index, hint, on_pick(item, i), on_move(item, i) }` and `v:picker(p)`: the question and `n of m` counter, the previous and next items peeking above and below (`^`/`v`, click to move to one), the current one as a gold title bar (name, tag) with its body (`lines`, or `text` word-wrapped; cut with `...`). It draws the hint and `Pick >` on the footer row, so call it **after** `v:footer{ back }`. Up/Down/Left/Right, wheel, Home/End, `1`-`9`; Enter with nothing focused (or `Pick >`) picks. Wraps around. `p:move(d)`, `p:jump(i)`, `p:pick()`.
+- `v:report{ title, state, color, right, back, rows }`: a whole info page. Rows are `{ section }`, `{ key, value, tone }`, `{ alert, tone }`, `{ text, tone }` or `{ blank = true }`; a blank row goes above every section but the first, a pager appears when it does not fit, and the footer has Back. Use it for what a command used to print on the terminal.
+- `v:spinner_line(x, y, text)`: the orange waiting glyph (`. o O o`, 4 beats a second) then the text; sets `v.animated`. `ui.anim == "off"` or no colour shows a still glyph. It uses `ui.beat` when motion lands, else the clock at the same rate.
+- The furnace tile and the padlock live in the smelter's and storage's own screens modules.
+
 ## Tests
 
 `tests/scenarios/ui_core.lua` with the demo screen `tests/demo/ui_demo.lua`, and `tests/scenarios/ui_more.lua` with `tests/demo/ui_demo2.lua` (tabs: tiles, list, map, form): layout and tap targets at 57x24, 51x19, 39x13 and 26x20, confirm timer, notices, colourless fallback, monitors, resize.
+
+`tests/scenarios/ui_parts.lua` with `tests/demo/ui_demo3.lua` (screens: parts, board, picker, report, wait): every part-3 component at the four sizes, taps and keys, the squeeze, a monitor, and the colourless fallback.

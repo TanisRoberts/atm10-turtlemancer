@@ -18,7 +18,7 @@ local function demo(w, h, opts)
   local world = cc.world()
   local c = world:computer{ id = 1, label = "Demo", w = w, h = h, colour = opts.colour }
   local mon = opts.monitor and c:monitor("right", opts.monitor[1], opts.monitor[2])
-  c:install("shared/ui.lua"); c:install("shared/ui_widgets.lua")
+  c:install("shared/ui.lua"); c:install("shared/ui_widgets.lua"); c:install("shared/ui_parts.lua")
   c:install("tests/demo/ui_demo.lua")
   c:run("ui_demo")
   world:run(0.5)
@@ -57,15 +57,17 @@ T.test("ui: manifest.lua ships shared/ui.lua to every role that will use it, and
   local want = { computer = { "mainframe", "storage", "smelter", "foreman", "nether", "farmhand", "architect", "plastic",
                               "neural" }, glasses = { "hud" } }
   local function has(r)
-    local a, b
-    for _, p in ipairs(r.files or {}) do a = a or p == "shared/ui.lua"; b = b or p == "shared/ui_widgets.lua" end
-    return a and b
+    local a, b, d
+    for _, p in ipairs(r.files or {}) do
+      a = a or p == "shared/ui.lua"; b = b or p == "shared/ui_widgets.lua"; d = d or p == "shared/ui_parts.lua"
+    end
+    return a and b and d
   end
   for kind, roles in pairs(want) do
     for _, name in ipairs(roles) do
       local r = m.types[kind].roles[name]
       T.truthy(r, kind .. "/" .. name .. " exists")
-      T.truthy(has(r), name .. " should list shared/ui.lua and shared/ui_widgets.lua")
+      T.truthy(has(r), name .. " should list shared/ui.lua, ui_widgets.lua and ui_parts.lua")
     end
   end
   -- devices keep shared files flat (shared/ui.lua -> ui.lua), so a program says require("ui")
@@ -311,7 +313,7 @@ end)
 T.test("ui: an error notice stays until tapped; the next notice replaces it; action button", function()
   local world = cc.world()
   local c = world:computer{ id = 1, w = 51, h = 19 }
-  c:install("shared/ui.lua"); c:install("shared/ui_widgets.lua")
+  c:install("shared/ui.lua"); c:install("shared/ui_widgets.lua"); c:install("shared/ui_parts.lua")
   c:writeFile("t.lua", [[
     local ui = require("ui")
     local v = ui.view(term.current())

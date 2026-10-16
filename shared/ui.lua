@@ -581,7 +581,9 @@ function ui.run(views, draw, opts)
   end
 end
 
--- Part 2 (tabs and paging footer, tiles, bars, fields, lists, map) lives in ui_widgets.lua and extends View.
+-- Part 2 (tabs and paging footer, tiles, bars, fields, lists, map) lives in ui_widgets.lua and extends View;
+-- part 3 (section, kv, alert, switch, board, picker, report, spinner line) in ui_parts.lua.
 require("ui_widgets")(ui)
+require("ui_parts")(ui)
 
 return ui
