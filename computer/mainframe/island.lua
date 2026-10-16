@@ -2,7 +2,7 @@
 -- Needs an Environment Detector next to the computer. Optional: a Chat Box and a monitor.
 --
 -- Chat commands (start with $ to keep them out of public chat, e.g. "$island miner"):
---   island status | scan | miner (every Canary) | storage | alerts | test | help
+--   island status | scan | miner (every Canary) | storage | operator [reactor] on|off|auto|status | alerts | test | help
 -- ($dump and $pocket are the butler's: see butler.lua)
 -- "island alerts" subscribes you to private alerts: storage filling up, the miner going quiet,
 -- getting lost, running out of fuel, finishing, or bringing home diamonds. Alerts you miss
@@ -14,6 +14,12 @@ local SCAN_RANGE   = 16          -- entity scan radius
 local REFRESH      = 2           -- seconds between updates
 local SILENT_AFTER = 120         -- seconds without hearing from the miner before alerting
 local ALERTS_FILE  = "alerts.cfg"
+local opfmt = require("operator_fmt")
+local tune = require("envfile").new("island.env", "Mainframe alert settings.", {
+  { "OPERATOR_SILENT_AFTER", 60, "Seconds without the Operator's heartbeat before a 'reactor silent' alert." },
+  { "URANIUM_LOW", 16, "Alert when Storage reports fewer uranium ingots than this." },
+})
+tune.load()
 local HOSTILES = {
   Zombie=true, Skeleton=true, Creeper=true, Spider=true, Drowned=true,
   Enderman=true, Witch=true, Phantom=true, Husk=true, Stray=true, Slime=true,
@@ -197,6 +203,7 @@ local function farmLine(st)
   return ("%s %s Fuel %s. Seen %ds ago."):format(head, body, tostring(st.fuel), ago)
 end
 
+local operatorKeys = {} -- reactor problems we've raised
 local lastHaul = {}   -- per Canary
 local factoryKeys = {} -- plastic factory problems we've raised
 local neuralKeys = {}  -- neural lab problems we've raised
@@ -243,6 +250,19 @@ local function watch()
       if not probs[k] then condition("neural:" .. k, false); neuralKeys[k] = nil end
     end
     for k, text in pairs(probs) do neuralKeys[k] = true; condition("neural:" .. k, true, tostring(text)) end
+  end
+
+  -- The Operator (reactors): heartbeat, and the problems it reports
+  tune.refresh()
+  if _G.OPERATOR_SEEN then
+    local silent = os.clock() - _G.OPERATOR_SEEN > tune.v.OPERATOR_SILENT_AFTER
+    condition("operatorSilent", silent, ("Reactor silent: no word from the Operator (%s) for %d seconds. Is it running?"):format(
+      tostring(_G.OPERATOR and _G.OPERATOR.label or "Operator"), tune.v.OPERATOR_SILENT_AFTER))
+    local probs = (not silent and _G.OPERATOR) and opfmt.problems(_G.OPERATOR, tune.v.URANIUM_LOW) or {}
+    for k in pairs(operatorKeys) do
+      if not probs[k] then condition("operator:" .. k, false); operatorKeys[k] = nil end
+    end
+    for k, text in pairs(probs) do operatorKeys[k] = true; condition("operator:" .. k, true, text) end
   end
 
   for _, e in ipairs(canaries()) do
@@ -457,7 +477,7 @@ end
 ---------------------------------------------------------------------------
 -- Chat commands
 ---------------------------------------------------------------------------
-local HELP = "Commands: island status | scan | miner | storage | weaver | woodpecker | partridge | smelt | plastic | neural | alerts | test."
+local HELP = "Commands: island status | scan | miner | storage | weaver | woodpecker | partridge | smelt | plastic | neural | operator | alerts | test."
   .. " Your inventory: $get [n] <item> | $dump | $pocket"
 
 local function chatLoop()
@@ -570,6 +590,25 @@ local function chatLoop()
         else
           say(weaverLine(_G.WEAVER_STATUS), user)
           say("Orders: island weaver test | clear | build | stop", user)
+        end
+      elseif cmd == "operator" or cmd == "reactor" or cmd == "reactors" then
+        local rest = tostring(msg):lower():match("^%$?%s*island%s+%a+%s*(.*)$") or ""
+        local op = _G.OPERATOR
+        local ref, verb = opfmt.parse(rest)
+        local unit, known
+        if ref and op then unit, known = opfmt.find(op, ref) end
+        if not op then
+          say("The Operator hasn't checked in. It needs a wireless or ender modem to reach me.", user)
+        elseif ref and not unit then
+          say(("No reactor called %s. I know: %s."):format(ref, table.concat(known or {}, ", ")), user)
+        elseif verb == "status" then
+          say(unit and opfmt.unitLine(unit) or opfmt.plantLine(op), user)
+        else
+          _G.OPERATOR_CMD = { unit = unit and unit.label or nil, mode = verb, left = 3, at = -10 }
+          local who = unit and unit.label or "All reactors"
+          local words = { on = "forced ON", off = "forced OFF", auto = "back on demand control (Auto)" }
+          local silent = not _G.OPERATOR_SEEN or os.clock() - _G.OPERATOR_SEEN > tune.v.OPERATOR_SILENT_AFTER
+          say(who .. ": " .. words[verb] .. "." .. (silent and " The Operator isn't answering right now; I'll keep trying." or ""), user)
         end
       elseif cmd == "alerts" then
         if A.subs[user] then

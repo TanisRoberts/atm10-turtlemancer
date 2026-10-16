@@ -531,6 +531,17 @@ function Env.build(world, c)
     running[#running] = nil
     return true
   end
+  -- os.run(env, path, ...): run a program with its own globals (they fall back to the computer's)
+  function os.run(tEnv, path, ...)
+    local p, src = findProgram(path)
+    if not p then env.printError("No such program: " .. tostring(path)); return false end
+    local e = setmetatable(tEnv or {}, { __index = env })
+    local fn, err = load(src, "@" .. p, "t", e)
+    if not fn then env.printError(err); return false end
+    local ok, perr = pcall(fn, ...)
+    if not ok then env.printError(perr); return false end
+    return true
+  end
   function shell.getRunningProgram() return running[#running] end
   function shell.resolve(p) return norm(p) end
   function shell.dir() return "" end

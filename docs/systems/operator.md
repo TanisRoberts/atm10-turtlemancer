@@ -44,7 +44,11 @@ A list of small checks, each giving `ok | missing | unknown` and a one-line reas
 
 ## Status to the mainframe
 
-Protocol `tanis-operator`, a `{type="operator", units={...}, plant={...}}` broadcast every `STATUS_EVERY` seconds, which is also the heartbeat. `computer/mainframe/operator_link.lua` keeps the last one in `_G.OPERATOR` / `_G.OPERATOR_SEEN`; the board row, alerts and chat are issue #36. The text screen shows the same on the computer and any monitor.
+Protocol `tanis-operator`, a `{type="operator", units={...}, plant={...}}` broadcast every `STATUS_EVERY` seconds, which is also the heartbeat. `computer/mainframe/operator_link.lua` keeps the last one in `_G.OPERATOR` / `_G.OPERATOR_SEEN`. `operator_fmt.lua` (mainframe) turns it into board rows, chat lines and alert text.
+
+- **Board**: one `Operator` row: running / idle / waiting, `ON|OFF`, FE/t, buffer %, uranium (Storage's report, else what sits in the inlets). With more than one reactor the row says `N of M on` and a row per reactor follows.
+- **Alerts** (same mechanism as the rest, `island alerts` to subscribe): `Reactor silent` (no heartbeat for `OPERATOR_SILENT_AFTER`, 60 s), `Fuel supply low` (Storage reports fewer than `URANIUM_LOW`, 16 ingots), `waste not clearing` and `not answering` / `not on the cable`, each naming the reactor. Both numbers are in `island.env` on the mainframe.
+- **Chat**: `island operator [reactor] on|off|auto|status` (reactor as `reactor-1`, `1` or `reactor 1`; none = every reactor; `status` is the default). `status` replies with one line. An order goes out as `{type="operator_cmd", unit, mode}` three times, one a second apart, and the Operator saves the mode in `operator.cfg`. The existing chat commands have no player list, and neither does this one.
 
 ## Log
 
@@ -52,6 +56,7 @@ Protocol `tanis-operator`, a `{type="operator", units={...}, plant={...}}` broad
 
 ## Tests
 
+`tests/scenarios/operator_mainframe.lua`: island.lua, board.lua and operator_link.lua on a simulated mainframe: the board row (one and two reactors), alerts (fuel low, waste, silent and back), chat orders and status.
 `tests/scenarios/operator_screen.lua`: the overview at 51x19, 39x13, 26x20 and 164x81, taps for tile / level / hold / ON / OFF / AUTO, limits, Needs, Set (one reactor, all, reset), the narrow single-reactor start, and the wall.
 `tests/scenarios/operator_rods.lua`: steps out and in, steady load, off keeps the level, manual level and limits, a hold that expires, no rod methods.
 `tests/scenarios/operator_core.lua` with the `BigReactors-Reactor` mock in `tests/sim/reactor.lua`: hysteresis, ports worked out with Storage draining the outlet, an outlet that doesn't empty, a full outlet, two reactors with their own thresholds and a manual override, needs lists for different reactors, a silent reactor.

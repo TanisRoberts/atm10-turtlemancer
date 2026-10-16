@@ -13,7 +13,8 @@ local STATE_COLOUR = {
   surveying = colours.lime, clearing = colours.lime, mapping = colours.lime,
   returning = colours.yellow, docked = colours.lightBlue, done = colours.lightBlue,
   waiting = colours.orange, error = colours.red, lost = colours.red,
-  running = colours.lime, paused = colours.orange, rebooting = colours.purple,
+  running = colours.lime, paused = colours.orange, rebooting = colours.purple, idle = colours.lightBlue,
+  offline = colours.red,
 }
 
 local function ago(t)
@@ -52,6 +53,10 @@ local function rows()
   if nl then
     out[#out + 1] = { nl.label or "Neural lab", nl.state, ("%s. Power %s"):format(tostring(nl.note or ""),
       nl.power and (nl.power .. "%") or "?"), _G.NEURAL_SEEN }
+  end
+  local op = _G.OPERATOR
+  if op then
+    for _, r in ipairs(require("operator_fmt").boardRows(op, _G.OPERATOR_SEEN)) do out[#out + 1] = r end
   end
   local digs = {}
   for _, e in pairs(_G.CANARIES or {}) do

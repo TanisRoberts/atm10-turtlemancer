@@ -40,7 +40,8 @@ local M = {
                     "computer/mainframe/board.lua", "computer/mainframe/butler.lua",
                     "computer/mainframe/base_link.lua",
                     "computer/mainframe/dig_link.lua", "computer/mainframe/weaver_link.lua",
-                    "computer/mainframe/farm_link.lua", "computer/mainframe/operator_link.lua" },
+                    "computer/mainframe/farm_link.lua", "computer/mainframe/operator_link.lua", "computer/mainframe/operator_fmt.lua",
+                    "shared/envfile.lua" },
         },
         storage = {
           name = "Storage",
