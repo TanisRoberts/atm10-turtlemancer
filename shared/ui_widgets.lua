@@ -339,7 +339,7 @@ end
 ---------------------------------------------------------------------------------------------------------
 -- Paged list rows (4.9)
 ---------------------------------------------------------------------------------------------------------
--- v:list(rows, { on = fn(row), input = true if a search bar sits below })  rows: { name, value, state, id }.
+-- v:list(rows, { on = fn(row), input = true if a search bar sits below, top = first row to use (default 3) })  rows: { name, value, state, id }.
 -- name left, value right (cyan: you can open it), a one-cell stripe in the stock-state colour (not on narrow),
 -- the selected row gold. Tap a row to select it, tap it again or the value to open. Up/Down, PgUp/PgDn, Home/End
 -- move, Enter opens. Rows per page = the free rows between the rule and the footer (less one for an input row).
@@ -347,6 +347,7 @@ end
 function View:list(rows, o)
   o = o or {}
   local r = self:rect(o.input)
+  if o.top then r.y1 = max(r.y1, o.top) end          -- start lower, to leave room for a question above the list
   local rpp = max(r.y2 - r.y1 + 1, 1)
   local pages = max(1, ceil(#rows / rpp))
   self.pages = pages

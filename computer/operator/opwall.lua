@@ -85,6 +85,15 @@ return function(S)
     local word, role, gstate, wtone = S.state(r)
     local cx, cw = x + 2, w - 3
     local y = y0
+    if r.awaiting then
+      v:put(cx, y, D.fit(tostring(r.id and r.id:gsub("^BigReactors%-", "") or r.label), cw - 6), "fg", "bg")
+      v:put(cx + cw - 5, y, "setup", "info", "bg")
+      v:put(cx, y + 1, "New Reactor Awaiting Setup", "info", "bg")
+      v:put(cx, y + 3, D.fit("Not switched until it is set up.", cw), "dim", "bg")
+      v:put(cx, y + 4, D.fit("Finish it on the computer's screen.", cw), "dim", "bg")
+      for yy = y0, y0 + 4 do v:put(x, yy, " ", "fg", "info") end
+      return y0 + 5
+    end
     v:put(cx, y, D.fit(r.label, cw - #word - 3), S.heard(r) and "fg" or "dim", "bg")
     v:put(cx + cw - #word, y, word, wtone, "bg")
     v:glyph(cx + cw - #word - 2, y, gstate)

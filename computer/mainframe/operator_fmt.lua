@@ -24,6 +24,7 @@ end
 
 -- running | idle | waiting (something is missing) | offline
 function F.state(u)
+  if u.awaiting then return "setup" end
   if not u.present or not u.answers then return "offline" end
   if u.wasteStuck or missingCount(u) > 0 then return "waiting" end
   return u.active and "running" or "idle"
@@ -42,16 +43,18 @@ end
 function F.boardRows(op, seen)
   local R = F.reactors(op)
   local p = op.plant or {}
-  local worst, running = "idle", 0
+  local worst, running, setup = "idle", 0, 0
   for _, u in ipairs(R) do
     local s = F.state(u)
     if s == "running" then running = running + 1 end
     if s == "waiting" or s == "offline" then worst = s elseif worst == "idle" and s == "running" then worst = "running" end
     if worst == "running" and s == "waiting" then worst = "waiting" end
+    if s == "setup" then setup = setup + 1; if worst == "idle" or worst == "running" then worst = "setup" end end
   end
   if #R == 0 then worst = "waiting" end
   local lead = #R > 1 and ("%d of %d on, "):format(running, #R) or ((running > 0 and "ON, " or "OFF, "))
   if #R == 0 then lead = "no reactor found, " end
+  if setup > 0 then lead = ("%d awaiting setup, "):format(setup) .. lead end
   local rows = { { op.label or "Operator", worst, ("%s%s FE/t, buffer %s, %s"):format(lead, num(p.fe or 0), pct(p.buf), uranium(op)), seen } }
   if #R > 1 then
     for _, u in ipairs(R) do
@@ -64,6 +67,7 @@ end
 
 -- Chat: one line for a reactor
 function F.unitLine(u)
+  if u.awaiting then return u.label .. ": New Reactor Awaiting Setup. Finish it on the Operator's screen; until then it is not switched." end
   local bits = { ("%s: %s"):format(u.label, F.state(u) == "offline" and "NOT ANSWERING" or (u.active and "ON" or "OFF")) }
   bits[#bits + 1] = ("%s FE/t, buffer %s"):format(num(u.fe or 0), pct(u.buf))
   if u.level then bits[#bits + 1] = "level " .. math.floor(u.level + 0.5) .. "%" end
@@ -102,6 +106,7 @@ function F.problems(op, low)
   for _, u in ipairs(F.reactors(op)) do
     if not u.present then out["gone:" .. u.label] = u.label .. " is not on the cable any more."
     elseif not u.answers then out["quiet:" .. u.label] = u.label .. " is not answering. Check its computer port and the cable."
+    elseif u.awaiting then -- not set up yet: nothing to report
     elseif u.wasteStuck then out["waste:" .. u.label] = u.label .. ": waste not clearing. The outlet port isn't emptying; is Storage running?" end
   end
   local sup = op.plant and op.plant.supply

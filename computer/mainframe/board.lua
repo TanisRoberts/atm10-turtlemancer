@@ -14,7 +14,7 @@ local STATE_COLOUR = {
   returning = colours.yellow, docked = colours.lightBlue, done = colours.lightBlue,
   waiting = colours.orange, error = colours.red, lost = colours.red,
   running = colours.lime, paused = colours.orange, rebooting = colours.purple, idle = colours.lightBlue,
-  offline = colours.red,
+  offline = colours.red, setup = colours.cyan,
 }
 
 local function ago(t)

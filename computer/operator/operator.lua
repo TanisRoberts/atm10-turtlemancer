@@ -37,6 +37,7 @@ local env = envfile.new("operator.env", "Operator settings.", {
   { "ON_BELOW",     30, "Switch a reactor ON when its buffer drops below this percent." },
   { "OFF_ABOVE",    90, "Switch a reactor OFF when its buffer rises above this percent." },
   { "POLICY",       "follow", "Who runs: follow = every reactor on its own thresholds." },
+  { "SETUP_WIZARD", "yes", "yes = a new reactor waits for the setup wizard (and is not switched until it is done); no = skip the wizard and work its ports out from what they hold." },
   { "RODS",         "auto", "auto = the power level follows the buffer; off = leave the control rods alone." },
   { "LEVEL_MIN",    10, "Lowest power level (percent, 100 = rods fully out) Auto will run a reactor at." },
   { "LEVEL_MAX",    100, "Highest power level Auto will run a reactor at." },
@@ -67,6 +68,7 @@ local function log(msg)
 end
 
 local plant = plantlib.new(CFG, function(m) print(m); log(m) end)
+plant.wizard = E.SETUP_WIZARD ~= "no"
 
 -- Radio -------------------------------------------------------------------
 local netOn = false
@@ -140,6 +142,7 @@ end
 local function tick()
   if env.refresh() then log("settings reloaded") end
   if plant:reloadIfEdited() then st.dirty = true end
+  if (E.SETUP_WIZARD ~= "no") ~= plant.wizard then plant.wizard = E.SETUP_WIZARD ~= "no"; st.dirty = true end
   local now = os.clock()
   if st.dirty or now - st.lastScan >= E.SLOW then
     if plant:scan() then log("cable changed: " .. plant.sig) end
@@ -161,7 +164,7 @@ local function tick()
       local lo, hi = rods.limits(u, E)
       if s.level then u.level = s.level end
       list[#list + 1] = { id = u.id, label = u.label, mode = u.hold and u.hold.mode or u.cfg.mode or "auto",
-                          enabled = u.cfg.enabled ~= false, manage = u.cfg.manage ~= false, on = on, off = off, lo = lo, hi = hi,
+                          enabled = u.cfg.enabled ~= false, manage = u.cfg.manage ~= false and not u.awaiting, on = on, off = off, lo = lo, hi = hi,
                           manual = rods.manual(u, E), status = s.answers and s or nil }
     end
   end
@@ -247,7 +250,8 @@ local function record()
       r.level, r.rodCount, r.rodLevels = s.level or u.level, s.rodCount, s.rodLevels
       r.levelWhy, r.levelAt, r.holdLeft = u.levelWhy, u.levelAt, rods.holdLeft(u, os.clock())
       local lo, hi = rods.limits(u, E)
-      r.lo, r.hi, r.manage = lo, hi, u.cfg.manage ~= false
+      r.lo, r.hi, r.manage, r.awaiting = lo, hi, u.cfg.manage ~= false, u.awaiting or false
+      r.portCount = #plant.found.port
       r.onBelow, r.offAbove = plantlib.thresholds(u, E)
       r.seen = u.heardAt and (os.clock() - u.heardAt) or nil
       r.wasteStuck, r.needs, r.outlet = u.wasteStuck or false, u.needs, u.outputCount

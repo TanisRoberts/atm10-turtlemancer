@@ -115,14 +115,8 @@ return function(plant, E, hooks)
     plant:save(); rescan()
   end
 
-  -- Everything on the cable that could be a port, ER2 access ports first. { name, type, port, taken }
-  function C.candidates()
-    local taken, isPort = {}, {}
-    for _, r in ipairs(reactors(nil)) do
-      if r.cfg.input then taken[r.cfg.input] = r.label .. " inlet" end
-      if r.cfg.output then taken[r.cfg.output] = r.label .. " outlet" end
-    end
-    for _, n in ipairs(plant.found and plant.found.port or {}) do isPort[n] = true end
+  -- Total items in each device that can list them, { [name] = count }: what the wizard's "Find it" watches
+  function C.snapshot()
     local out = {}
     for _, n in ipairs(peripheral.getNames()) do
       local types = { peripheral.getType(n) }
@@ -132,7 +126,77 @@ return function(plant, E, hooks)
         if l == "modem" or l == "monitor" or l:find("reactor$") or l:find("turbine") or l:find("energy_storage") then skip = true end
       end
       if not skip then
-        out[#out + 1] = { name = n, type = isPort[n] and "port" or (tostring(types[1]):gsub("^.-:", "")), port = isPort[n] or false, taken = taken[n] }
+        local ok, list = pcall(peripheral.call, n, "list")
+        if ok and type(list) == "table" then
+          local c = 0
+          for _, it in pairs(list) do c = c + (it.count or 1) end
+          out[n] = c
+        end
+      end
+    end
+    return out
+  end
+
+  -- Save a finished wizard: { input, output, name }. Returns a notice text when it refuses.
+  function C.finishSetup(ref, t)
+    local u = reactors(ref)[1]
+    if not u then return "no such reactor" end
+    if not (t.input and t.output) then return "Pick both ports first" end
+    if t.input == t.output then return "The inlet and the outlet can't be the same port" end
+    local name = tostring(t.name or ""):gsub("^%s+", ""):gsub("%s+$", "")
+    if name ~= "" and name ~= u.cfg.label then
+      for _, r in ipairs(reactors(nil)) do if r ~= u and r.cfg.label == name then return name .. " is already a reactor's name" end end
+      u.cfg.label = name
+    end
+    for _, r in ipairs(reactors(nil)) do
+      if r ~= u then
+        for _, k in ipairs({ "input", "output" }) do
+          if r.cfg[k] == t.input or r.cfg[k] == t.output then r.cfg[k] = nil end
+        end
+      end
+    end
+    u.cfg.input, u.cfg.output, u.cfg.setup = t.input, t.output, true
+    u.wTrack, u.wasteStuck = nil, false
+    log(("%s set up: inlet %s, outlet %s"):format(u.cfg.label, t.input, t.output))
+    if hooks.event then hooks.event(u.cfg.label, "set up") end
+    plant:save(); rescan(); kick()
+  end
+
+  -- Show the wizard for this reactor again (the ports are kept until it is finished)
+  function C.rerunSetup(ref)
+    for _, u in ipairs(reactors(ref)) do u.cfg.setup = false end
+    plant:save(); rescan(); kick()
+  end
+
+  -- Everything on the cable that could be a port, ER2 access ports first.
+  -- { name, type, port, taken, holds ("12 uranium", "3 cyanite", "empty" or nil), guess = "input"|"output"|nil }
+  function C.candidates(ref)
+    local taken, isPort = {}, {}
+    for _, r in ipairs(reactors(nil)) do
+      if r.cfg.input then taken[r.cfg.input] = r.label .. " inlet" end
+      if r.cfg.output then taken[r.cfg.output] = r.label .. " outlet" end
+    end
+    for _, n in ipairs(plant.found and plant.found.port or {}) do isPort[n] = true end
+    local u = ref and reactors(ref)[1]
+    local guess = u and u.guess or {}
+    local out = {}
+    for _, n in ipairs(peripheral.getNames()) do
+      local types = { peripheral.getType(n) }
+      local skip = false
+      for _, t in ipairs(types) do
+        local l = tostring(t):lower()
+        if l == "modem" or l == "monitor" or l:find("reactor$") or l:find("turbine") or l:find("energy_storage") then skip = true end
+      end
+      if not skip then
+        local fuel, waste = plantlib.contents(n)
+        local holds
+        if fuel and fuel > 0 then holds = fuel .. " uranium"
+        elseif waste and waste > 0 then holds = waste .. " cyanite"
+        elseif fuel ~= nil then holds = "empty" end
+        local g = (guess.input == n and "input") or (guess.output == n and "output") or
+          ((fuel or 0) > 0 and "input") or ((waste or 0) > 0 and "output") or nil
+        out[#out + 1] = { name = n, type = isPort[n] and "port" or (tostring(types[1]):gsub("^.-:", "")), port = isPort[n] or false,
+          taken = taken[n], holds = holds, guess = g }
       end
     end
     table.sort(out, function(a, b)

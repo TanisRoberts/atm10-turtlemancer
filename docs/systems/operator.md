@@ -23,6 +23,12 @@ Runs the Extreme Reactors 2 power plant headless. `computer/operator/`: `operato
 - Command (protocol `tanis-operator`): `{ type="operator_cmd", unit=<label or id; none = every reactor>, mode="auto"|"on"|"off", level=1..100 }`. A mode is saved in `operator.cfg`; a level is a hold.
 - Status per unit adds `level`, `rodCount`, `rodLevels`, `levelWhy` ("buffer falling" / "buffer filling" / "manual"), `levelAt` and `holdLeft` (seconds).
 
+## Setup wizard (`opwizard.lua`)
+
+A reactor with no saved setup (`setup` not `true` in its `operator.cfg` entry) is **awaiting setup**: the Operator reads it but does not switch it or move its rods, the overview shows a "New Reactor Awaiting Setup" card, and the mainframe board says `awaiting setup` without an alert. What the Operator thinks the ports are (from what they hold) is only a suggestion in the wizard and is never saved. A reactor that already has both ports saved is set up automatically (`setup = true`). `SETUP_WIZARD=no` in `operator.env` skips all of this: ports are worked out and saved as before.
+
+Four pages (style A, design in `docs/design/operator.md`): found, inlet, outlet, check and name. The port pages list every device on the cable with what it holds; the likely one is marked `suggested`. `Find it` watches every device that can list items while you drop one item into the right port by hand (the Operator only reads), and offers the one whose count went up. Finish saves `input`, `output`, `label` (if renamed) and `setup = true`. `Run setup again` on the Set tab (tap twice) sets `setup = false` and keeps the ports.
+
 ## Screens (`opscreen.lua`, `opwall.lua`, UI kit)
 
 Design: `docs/design/operator.md`. The computer's screen and every monitor touching a side are separate views, each with its own page. Taps and keys work on all of them.

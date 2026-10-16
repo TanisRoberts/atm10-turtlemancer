@@ -376,3 +376,14 @@ Decided with Tanis: tiles with a Needs tab (option B); a Power Grid column that 
 ## Data the screen needs from the core
 
 Per unit: state, waiting-for text, buffer %, FE/t, level (and rod count and each rod's level), mode (auto/on/off) with manual-hold time left, last auto change and reason, fuel %, inlet count, temperatures, waste outlet fill, and the needs list `{ id, label, state = ok|missing|unknown|na, value, reason }`. Plant: totals as shown, plus net FE/t.
+
+## Setup wizard (#40)
+
+Chosen by Tanis: style A (one question at a time) with a `Find it` button on the port pages. Mockups: https://claude.ai/artifact/XxGDy5Q8hkHvZLRsfY65EH
+
+- A reactor with no saved setup shows the **New Reactor Awaiting Setup** card (cyan `info` stripe, `setup` in place of the state, a `Set up >` button on the 5-row tile) in place of its tile. It is read but not switched. Tapping the card starts the wizard.
+- Pages: 1 found on the cable (`Not now` / `Start >`), 2 which port feeds fuel IN, 3 which port takes waste OUT, 4 check it (name field, the two ports, the switching defaults; `Back` / `Finish`). The header's right text is `step N of 4` (`N/4` under 40 wide).
+- Port pages: the kit list of devices, each with what it holds (`12 uranium`, `3 cyanite`, `empty`), the likely one marked `suggested`; search field on the computer's own screen; `Find it` and `Pick >` on the footer row. A device taken as the inlet is not offered as the outlet.
+- `Find it`: "Drop ONE uranium ingot into the fuel inlet port" (outlet: "Drop ONE item into the waste outlet port"), a spinner line `Watching N ports...`, then `Found: <port>` with `Not it` / `That's it >`. `Pick from list` goes back. If no device can list items it says so and offers the list.
+- Wall: the panel of a reactor awaiting setup says to finish on the computer's screen.
+- The Set tab gets `Run setup again` (tap twice).

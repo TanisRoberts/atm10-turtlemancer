@@ -33,6 +33,7 @@ S.heard = heard
 
 -- word, stripe colour role, glyph state, word colour role
 function S.state(r)
+  if r.awaiting then return "setup", "info", "waiting", "info" end
   if not heard(r) then return "not heard", "bar", "stale", "dim" end
   local _, miss = S.counts(r)
   local stripe = miss > 0 and "warn" or (r.active and "good" or "idle")
@@ -43,6 +44,7 @@ local function cap(s) return (tostring(s):gsub("^%l", string.upper)) end
 
 -- What a reactor waits for: the first missing thing, or why it is off, or "All good". text, tone.
 function S.waits(r)
+  if r.awaiting then return "New Reactor Awaiting Setup", "info" end
   if not r.present then return "Not on the cable", "bad" end
   if not r.answers then return "Not answering", "warn" end
   for _, n in ipairs(r.needs or {}) do
@@ -59,12 +61,13 @@ end
 function S.totals(rec, R)
   local p = rec.plant or {}
   local t = { fe = p.fe, buf = p.buf, net = p.net, n = #R, on = 0, problems = 0, supply = p.supply,
-              avgHour = p.avgHour, wasteFull = 0 }
+              avgHour = p.avgHour, wasteFull = 0, awaiting = 0 }
   local lvl, nl, fuel, nf, hot = 0, 0, 0, 0, nil
   for _, r in ipairs(R) do
     if r.active then t.on = t.on + 1; if r.level then lvl, nl = lvl + r.level, nl + 1 end end
     local _, miss = S.counts(r)
-    if miss > 0 then t.problems = t.problems + 1 end
+    if r.awaiting then t.awaiting = t.awaiting + 1
+    elseif miss > 0 then t.problems = t.problems + 1 end
     if r.wasteStuck then t.wasteFull = t.wasteFull + 1 end
     if r.fuel and r.fuelMax and r.fuelMax > 0 then fuel, nf = fuel + r.fuel / r.fuelMax, nf + 1 end
     if r.casing and (not hot or r.casing > hot) then hot = r.casing end
@@ -96,6 +99,28 @@ local function tell(msg) if msg then ui.say(msg, "warn") end end
 function S.tile(v, x, y, w, r, o)
   o = o or {}
   local rows = o.rows or 5
+  if r.awaiting then
+    for i = 0, rows - 1 do stripe(v, x, y + i, "info") end
+    local tx, tw = x + 2, w - 2
+    v:put(x + w - 5, y, "setup", "info", "bg")
+    v:put(tx, y, D.fit(tostring(r.id and r.id:gsub("^BigReactors%-", "") or r.label), w - 9), "fg", "bg")
+    if rows == 5 then
+      if tw >= 26 then
+        v:put(tx, y + 1, "New Reactor Awaiting Setup", "info", "bg")
+        v:put(tx, y + 2, D.fit("Not switched until set up", tw), "dim", "bg")
+        v:put(tx, y + 3, D.fit(("found %d port%s, %s rods"):format(r.portCount or 0, (r.portCount or 0) == 1 and "" or "s", tostring(r.rodCount or "?")), tw), "dim", "bg")
+      else
+        v:put(tx, y + 1, "New Reactor", "info", "bg")
+        v:put(tx, y + 2, "Awaiting Setup", "info", "bg")
+        v:put(tx, y + 3, D.fit("Not switched yet", tw), "dim", "bg")
+      end
+      v:buttons(tx, y + 4, { { label = "Set up  >", short = "Set up >", style = "primary", fn = function() if o.on then o.on(r) end end } })
+    else
+      v:put(tx, y + 1, D.fit("New Reactor Awaiting Setup", tw), "info", "bg")
+    end
+    if o.on then v:_box({ x, y, x + w - 1, y + rows - 1 }, nil, { fn = function() o.on(r) end, id = "tile:" .. r.label, focus = true }) end
+    return
+  end
   local word, role, gstate, wtone = S.state(r)
   local dead = word == "not heard"
   for i = 0, rows - 1 do stripe(v, x, y + i, role) end
@@ -190,11 +215,13 @@ local function pageSlice(v, list, per)
 end
 
 local function summary(t)
+  if t.awaiting > 0 then return ("%d reactor%s  %d to set up"):format(t.n, t.n == 1 and "" or "s", t.awaiting) end
   return ("%d reactor%s  %d problem%s"):format(t.n, t.n == 1 and "" or "s", t.problems, t.problems == 1 and "" or "s")
 end
 
 local function plantWord(t)
   if t.problems > 0 then return "waiting", "warn" end
+  if t.awaiting > 0 then return "setup", "info" end
   if t.on > 0 then return "running", "good" end
   return "idle", "idle"
 end
@@ -203,7 +230,7 @@ local function overview(v, ctx, R, t)
   local rec, W, H = ctx.rec, v.W, v.H
   local word, tone = plantWord(t)
   v:header("OPERATOR", { state = word, color = tone, right = summary(t) })
-  local open = function(r) openReactor(v, r, "power") end
+  local open = function(r) if r.awaiting then S.wizard.open(v, r) else openReactor(v, r, "power") end end
   if W >= 50 then
     local gw = 17
     S.grid(v, 1, 3, gw, H - 2, rec, t)
@@ -443,7 +470,7 @@ local function setRows(v, ctx, r)
   stepper("Lowest", "levelMin"); stepper("Highest", "levelMax"); stepper("Back to Auto after", "holdMin", " min")
   add({ kind = "blank" })
   add({ kind = "section", text = "REACTOR" })
-  add({ kind = "run" }); add({ kind = "reset" })
+  add({ kind = "run" }); add({ kind = "reset" }); add({ kind = "rerun" })
   return rows, unit
 end
 
@@ -497,6 +524,10 @@ local function setTab(v, ctx, r)
       v:switch(9, y, { { id = "yes", label = "YES" }, { id = "no", label = "NO" } }, r.manage == false and "no" or "yes",
         function(id) ctl.manage(r.label, id == "yes") end, { id = "manage" })
       if W >= 40 then v:put(24, y, "NO = leave it alone", "dim", "bg") end
+      y = y + 1
+    elseif row.kind == "rerun" then
+      v:buttons(2, y, { { label = "Run setup again", short = "Setup", confirm = true, id = "rerun",
+        fn = function() ctl.rerunSetup(r.label); o.page = "overview"; ui.say(r.label .. ": setup will run again", "good") end } })
       y = y + 1
     elseif row.kind == "reset" then
       v:buttons(2, y, { { label = "Reset to defaults", short = "Reset", confirm = true, id = "reset",
@@ -591,7 +622,7 @@ local function assignPage(v, ctx, r)
   v:header("ASSIGN " .. ROLE_NAME[role]:upper(), { state = r.label, color = "dim" })
   local want = f.text:lower()
   local rows = {}
-  for _, c in ipairs(ctl.candidates()) do
+  for _, c in ipairs(ctl.candidates(r.label)) do
     if want == "" or c.name:lower():find(want, 1, true) or c.type:lower():find(want, 1, true) then
       rows[#rows + 1] = { name = c.name .. (c.taken and ("  (" .. c.taken .. ")") or ""), value = c.type,
         state = c.port and "info" or "bar", id = c.name }
@@ -621,18 +652,23 @@ function S.draw(v, ctx)
   local t = S.totals(rec, R)
   if v.W >= 120 and v.H >= 50 then return require("opwall")(S).draw(v, ctx, R, t) end
   if o.page == nil then
-    o.page = (#R == 1 and v.W < 50) and "reactor" or "overview"
+    o.page = (#R == 1 and v.W < 50 and not R[1].awaiting) and "reactor" or "overview"
     o.rid = R[1] and R[1].label
   end
   local r
-  if o.page == "reactor" or o.page == "need" or o.page == "assign" then
+  if o.page == "reactor" or o.page == "need" or o.page == "assign" or o.page == "wizard" then
     for _, x in ipairs(R) do if x.label == o.rid then r = x end end
     if not r then o.page = "overview" end
   end
-  if o.page == "reactor" then reactorPage(v, ctx, r)
+  if o.page == "reactor" and r.awaiting then S.wizard.open(v, r)
+  elseif o.page == "wizard" and not r.awaiting then o.page, o.w = "overview", nil end
+  if o.page == "wizard" then S.wizard.draw(v, ctx, r)
+  elseif o.page == "reactor" then reactorPage(v, ctx, r)
   elseif o.page == "need" then needPage(v, ctx, r)
   elseif o.page == "assign" then assignPage(v, ctx, r)
   else overview(v, ctx, R, t) end
 end
+
+S.wizard = require("opwizard")(S)
 
 return S

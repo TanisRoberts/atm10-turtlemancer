@@ -50,7 +50,7 @@ local function build(opts)
   local opc = world:computer{ id = 5, label = "Operator" }
   opc:attach("back", cc.wired(net)); opc:attach("top", cc.wireless{ ender = true })
   opc:installRole("operator")
-  opc:writeTable("operator.cfg", { nextNum = { reactor = opts.reactors or 1 }, units = units })
+  if not opts.fresh then opc:writeTable("operator.cfg", { nextNum = { reactor = opts.reactors or 1 }, units = units }) end
   opc:run("operator")
   -- Storage stand-in: reports its uranium
   local st = world:computer{ id = 7, label = "Storage" }
@@ -153,4 +153,15 @@ T.test("operator mainframe: island operator status, on, off, auto, and a named r
   say(world, mf, "$island operator reactor-9 on")
   T.truthy(heard(chat, "No reactor called reactor%-9"), dump(chat))
   T.eq(mf.error, nil)
+end)
+
+T.test("operator mainframe: a reactor awaiting setup shows on the board and raises no alert", function()
+  local world, mf, opc, chat, mon = build{ supply = 100, fresh = true, fullOutlet = true }
+  say(world, mf, "$island alerts")
+  world:run(20)
+  T.truthy(mon:find("awaiting setup"), mon:text())
+  T.truthy(mon:find("SETUP"), mon:text())
+  T.falsy(heard(chat, "waste not clearing"), "no alert for a reactor that is not set up\n" .. dump(chat))
+  say(world, mf, "$island operator status")
+  T.truthy(heard(chat, "Awaiting Setup"), dump(chat))
 end)

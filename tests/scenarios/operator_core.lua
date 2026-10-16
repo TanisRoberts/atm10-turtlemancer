@@ -13,6 +13,7 @@ local function plant(w, net, opts)
   c:attach("back", cc.wired(net))
   c:attach("top", cc.wireless{ ender = true })
   c:installRole("operator")
+  c:writeFile("operator.env", "SETUP_WIZARD=no\n")      -- these scenarios are about the control loop, not the wizard
   c:writeFile("mon.lua", [[
     rednet.open("top"); _G.last, _G.beats = nil, 0
     while true do local _, m = rednet.receive("tanis-operator"); _G.last = m; _G.beats = _G.beats + 1 end]])

@@ -111,7 +111,7 @@ local M = {
           run = "operator",
           files = { "computer/operator/operator.lua", "computer/operator/opplant.lua", "computer/operator/opdrivers.lua",
                     "computer/operator/oppolicy.lua", "computer/operator/opneeds.lua", "computer/operator/oprods.lua", "computer/operator/opctl.lua",
-                    "computer/operator/opscreen.lua", "computer/operator/opwall.lua", "computer/operator/opdraw.lua", "shared/envfile.lua",
+                    "computer/operator/opscreen.lua", "computer/operator/opwall.lua", "computer/operator/opdraw.lua", "computer/operator/opwizard.lua", "shared/envfile.lua",
                     "shared/ui.lua", "shared/ui_widgets.lua", "shared/ui_parts.lua", "shared/ui_motion.lua" },
         },
         gps = {

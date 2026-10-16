@@ -128,10 +128,15 @@ function M:scan()
     end
   end
   if dirty then self:save() end
+  local resave = false
   local list = {}
   for id, c in pairs(self.cfg.units) do
     local u = self.byId[id] or { id = id }
     u.kind, u.cfg, u.label, u.plantCfg = c.kind, c, c.label, self.cfg.plant
+    -- A reactor that already has both ports saved was set up by hand (or by an earlier version): no wizard for it.
+    if c.kind == "reactor" and c.setup == nil and c.input and c.output then c.setup = true; resave = true end
+    u.awaiting = c.kind == "reactor" and self.wizard ~= false and c.setup ~= true
+    u.guess = nil
     u.present = present[id] ~= nil
     if u.present and u.kind == "reactor" then
       if not u.driver then u.driver = drivers.pick(id) end
@@ -146,6 +151,7 @@ function M:scan()
     return (a.cfg.num or 0) < (b.cfg.num or 0)
   end)
   self.units = list
+  if resave then self:save() end
   self:resolvePorts()
   return changed or dirty
 end
@@ -183,8 +189,12 @@ function M:resolvePorts()
           for _, n in ipairs(free) do if n ~= fuelPort then wastePort = n end end
         end
         local newly = false
-        if not c.input and fuelPort then c.input = fuelPort; claimed[fuelPort] = true; u.input = fuelPort; newly = true end
-        if not c.output and wastePort then c.output = wastePort; claimed[wastePort] = true; u.output = wastePort; newly = true end
+        if self.wizard ~= false and c.setup ~= true then
+          u.guess = { input = fuelPort, output = wastePort }       -- only a suggestion for the setup wizard; nothing is saved
+        else
+          if not c.input and fuelPort then c.input = fuelPort; claimed[fuelPort] = true; u.input = fuelPort; newly = true end
+          if not c.output and wastePort then c.output = wastePort; claimed[wastePort] = true; u.output = wastePort; newly = true end
+        end
         if newly then
           self.log(("%s ports: input %s, output %s (worked out from what they hold; assign them on the Needs tab to pin them)")
             :format(u.label, tostring(c.input), tostring(c.output)))

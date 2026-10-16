@@ -9,6 +9,7 @@ local function plant(w, net)
   c:attach("back", cc.wired(net))
   c:attach("top", cc.wireless{ ender = true })
   c:installRole("operator")
+  c:writeFile("operator.env", "SETUP_WIZARD=no\n")      -- these scenarios are about the control loop, not the wizard
   return c
 end
 local function mainframe(w)

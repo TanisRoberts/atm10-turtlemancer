@@ -223,7 +223,7 @@ T.test("operator screen: one reactor on a narrow screen opens straight on its Po
   local c = world:computer{ id = 5, label = "Operator", w = 26, h = 20 }
   c:attach("back", cc.wired(net)); c:attach("top", cc.wireless{ ender = true })
   COMP = c
-  c:installRole("operator"); c:run("operator"); world:run(10)
+  c:installRole("operator"); c:writeFile("operator.env", "SETUP_WIZARD=no\n"); c:run("operator"); world:run(10)
   T.truthy(c.screen:find("POWER LEVEL"), c.screen:text())
   c:click(2, 20); world:run(0.6)
   T.truthy(c.screen:find("OPERATOR"), "Back should show the overview\n" .. c.screen:text())
