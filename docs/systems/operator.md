@@ -19,7 +19,7 @@ Storage fills the inlet port and drains the outlet port (issue #37). The Operato
 
 ## Needs / has / missing (`opneeds.lua`)
 
-A list of small checks, each giving `ok | missing | unknown` and a one-line reason: computer port, control rods, temperatures, fuel input, fuel supply, fuel in reactor (inlet or reactor), fuel supply (Storage), outlet port, waste draining, power output, coolant, turbine. "Unknown" is used when the Operator can't tell (a passive reactor's power tap is not on the cable, so that one is always unknown). Recomputed on boot, every `SLOW` seconds, when the cable changes, and when waste starts or stops clearing. The list is in the unit's status record.
+A list of small checks, each giving `ok | missing | unknown` and a one-line reason: computer port, control rods, temperatures, inlet port, fuel in reactor (inlet or reactor), fuel supply (Storage), outlet port, waste draining, power output, coolant, turbine. "Unknown" is used when the Operator can't tell (a passive reactor's power tap is not on the cable, so that one is always unknown). Recomputed on boot, every `SLOW` seconds, when the cable changes, and when waste starts or stops clearing. The list is in the unit's status record.
 
 ## Status to the mainframe
 
@@ -27,7 +27,7 @@ Protocol `tanis-operator`, a `{type="operator", units={...}, plant={...}}` broad
 
 ## Log
 
-`operator.log` records what was found at boot (reactor, ports, barrel names), every on/off with the buffer, "waste not clearing", and what a full-buffer reactor does (burn and FE/t), so the real passive behaviour can be confirmed.
+`operator.log` records what was found at boot (every peripheral name and type on the cable, then the reactor and its ports), every on/off with the buffer, "waste not clearing", and what a full-buffer reactor does (burn and FE/t), so the real passive behaviour can be confirmed.
 
 ## Tests
 
