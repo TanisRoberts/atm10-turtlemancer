@@ -15,6 +15,7 @@ local function envDetector() return { types = { "environment_detector" }, periph
 local LAUNCH = [[
   local function sandbox(target)
     local e = {}
+    e.require = require           -- as mainframe.lua's sandbox does: os.run programs have no require of their own
     e.peripheral = setmetatable({ find = function(kind, ...)
       if kind == "monitor" then return target end
       return peripheral.find(kind, ...)
@@ -23,7 +24,7 @@ local LAUNCH = [[
   end
   parallel.waitForAll(
     function() os.run(sandbox(nil), "island.lua") end,
-    function() os.run({}, "board.lua") end,
+    function() os.run({ require = require }, "board.lua") end,
     function() os.run(sandbox(nil), "operator_link.lua") end)
 ]]
 

@@ -68,6 +68,8 @@ end
 -- only the touches from its own screen, shifted so its window's top row is y = 1.
 local function sandbox(target, quiet, screenName, yOffset)
   local env = {}
+  -- os.run gives a program the globals only, and `require` belongs to the shell's program (not a global), so pass it on
+  env.require = require
   env.peripheral = setmetatable({
     find = function(kind, ...)
       if kind == "monitor" then return target end

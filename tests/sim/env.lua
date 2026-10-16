@@ -535,7 +535,8 @@ function Env.build(world, c)
   function os.run(tEnv, path, ...)
     local p, src = findProgram(path)
     if not p then env.printError("No such program: " .. tostring(path)); return false end
-    local e = setmetatable(tEnv or {}, { __index = env })
+    -- like CC: the globals, but no `require` (that comes with the shell's own programs)
+    local e = setmetatable(tEnv or {}, { __index = function(_, k) if k ~= "require" then return env[k] end end })
     local fn, err = load(src, "@" .. p, "t", e)
     if not fn then env.printError(err); return false end
     local ok, perr = pcall(fn, ...)
