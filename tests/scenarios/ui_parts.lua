@@ -10,7 +10,7 @@ local ESC, ENTER, TAB, PGDN = 256, 257, 258, 267
 local LEFT, RIGHT, DOWN, UP, HOME, END = 263, 262, 264, 265, 268, 269
 
 local function install(c)
-  c:install("shared/ui.lua"); c:install("shared/ui_widgets.lua"); c:install("shared/ui_parts.lua")
+  c:install("shared/ui.lua"); c:install("shared/ui_widgets.lua"); c:install("shared/ui_parts.lua"); c:install("shared/ui_motion.lua")
 end
 local function demo3(w, h, cfg, opts)
   opts = opts or {}
@@ -250,7 +250,7 @@ T.test("ui3: without colour: ! stripe, [current] switch, - rule, | board stripe,
   T.truthy(inRow(c3.screen, 5, "[MAINFRAME]"), "title in brackets"); T.eq(c3.screen.ch[6][2], "|")
   key(w3, c3, DOWN); T.truthy(inRow(c3.screen, 5, "[STORAGE]"))
   local w4, c4 = demo3(51, 19, { screen = "wait" }, { colour = false })
-  T.eq(c4.screen.ch[5][4], "o", "still glyph without colour")
+  T.eq(c4.screen.ch[5][4], ".", "still glyph without colour")
   local w5, c5 = frame(40, 6, [[ ui.anim = "off"; v:spinner_line(2, 3, "x"); _G.an = v.animated ]])
   T.eq(c5.env._G.an, nil, "ANIM=off: still, not animated")
   local w6, c6 = frame(40, 6, [[ v:spinner_line(2, 3, "x"); _G.an = v.animated ]])

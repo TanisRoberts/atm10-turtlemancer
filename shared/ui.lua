@@ -284,10 +284,11 @@ function View:header(title, o)
   if state then
     local x = W - #state
     self:put(x, 1, state, o.color or ui.stateRole(state), "bg")
+    if x - 2 > chipW + 1 then self:glyph(x - 2, 1, state) end
     if o.onState then self:_box({ x, 1, W, 1 }, nil, { fn = o.onState, id = "state" }) end
     local right = (self.wc == "regular" or self.wc == "wide") and o.right
     if right then
-      local rx = x - 2 - #right
+      local rx = x - 4 - #right
       if rx > chipW + 1 then self:put(rx, 1, right, "dim", "bg") end
     end
   end
@@ -328,7 +329,7 @@ local STYLE = { idle = { "bar", "fg" }, primary = { "gold", "bg" }, danger = { "
 function View:_label(b)
   local lab = b.label
   if self.wc == "narrow" and b.short then lab = b.short end
-  if b.style == "busy" or b.busy then lab = "..." end
+  if b.style == "busy" or b.busy then lab = self:glyphChar("rebooting") .. " " .. lab end
   return lab
 end
 
@@ -541,6 +542,7 @@ function ui.run(views, draw, opts)
     if ui.notice then soon(ui.notice.expires) end
     for _, v in ipairs(views) do if v.armed then soon(v.armed.at + CONFIRM_S) end end
     if pending then soon(lastFrame + MIN) end
+    for _, v in ipairs(views) do if v.animated and v.animRate then soon(ui.nextBeat(v.animRate)) end end
     if timer then os.cancelTimer(timer); timer = nil end
     if at then timer = os.startTimer(math.max(at - os.clock(), 0.05)) end
   end
@@ -582,8 +584,10 @@ function ui.run(views, draw, opts)
 end
 
 -- Part 2 (tabs and paging footer, tiles, bars, fields, lists, map) lives in ui_widgets.lua and extends View;
--- part 3 (section, kv, alert, switch, board, picker, report, spinner line) in ui_parts.lua.
+-- part 3 (section, kv, alert, switch, board, picker, report, spinner line) in ui_parts.lua;
+-- motion (beat, glyphs, spinner, indeterminate bar, ANIM) in ui_motion.lua.
 require("ui_widgets")(ui)
 require("ui_parts")(ui)
+require("ui_motion")(ui)
 
 return ui

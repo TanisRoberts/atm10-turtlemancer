@@ -197,8 +197,14 @@ function View:tiles(items, o)
     local tx, w = x + 2, tw - 3
     local state = f.state and tostring(f.state) or ""
     local txt = stale and "dim" or "fg"
-    self:put(tx, y, fit(f.name or "", w - #state - 1), txt, "bg")
-    if #state > 0 then self:put(tx + w - #state, y, state, stale and "dim" or (f.color or ui.stateRole(f.state)), "bg") end
+    -- The state's icon (section 9) sits before the word. A name that would be cut to make room keeps its
+    -- space and the icon is left out: the name matters more.
+    local icon = #(f.name or "") + #state + 2 <= w
+    self:put(tx, y, fit(f.name or "", w - #state - (icon and 2 or 1)), txt, "bg")
+    if #state > 0 then
+      if icon then self:glyph(tx + w - #state - 2, y, f.state, { stale = stale }) end
+      self:put(tx + w - #state, y, state, stale and "dim" or (f.color or ui.stateRole(f.state)), "bg")
+    end
     if th == 2 then
       if f.fuel ~= nil or f.fuelText then self:bar(tx, y + 1, w, "Fuel", f.fuel, { text = f.fuelText }) end
     else

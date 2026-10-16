@@ -43,8 +43,21 @@ Loaded by `ui.lua` after `ui_widgets.lua`; every role that uses the kit lists al
 - `v:spinner_line(x, y, text)`: the orange waiting glyph (`. o O o`, 4 beats a second) then the text; sets `v.animated`. `ui.anim == "off"` or no colour shows a still glyph. It uses `ui.beat` when motion lands, else the clock at the same rate.
 - The furnace tile and the padlock live in the smelter's and storage's own screens modules.
 
+## Motion (#24): `shared/ui_motion.lua`
+
+Loaded by `ui.lua` last; every role that uses the kit lists it. Design: `docs/design/ui-kit.md` section 9.
+
+- `ui.anim` is `"full"` (default), `"calm"` (dashboard glyphs only, no bar) or `"off"` (everything still). `ui.setAnim(mode)`; `ui.loadAnim("x.env", default)` reads `ANIM=` from a device's .env-style file and appends the line if it is missing (an existing line is never overwritten). Read at start, so a change needs a reboot. Glasses should pass `"calm"`.
+- `ui.beat(rate)`: an integer that goes up `rate` times a second. Dashboards use 2, waiting screens 4. `ui.nextBeat(rate)` is the `os.clock()` time of the next one.
+- `v:glyph(x, y, state, { rate, stale, since })`: one character in the state's colour (working `\ | / |`, building, farming, smelting, waiting, returning, rebooting; still `=` docked, `+` done, `-` idle, `?` stale, `!` lost/error). Still when `ui.anim == "off"`, on a terminal without colour, for `stale`, and past 24 moving glyphs a view. `since` (an `os.clock()` time) makes an error pulse red/white for 3 seconds. `v:glyphChar(state, o)` gives the character and colour role without drawing.
+- `v:spinner(x, y, state)`: the waiting glyph at 4 a second. `v:indeterminate(x, y, w)`: a track with a 6-cell block bouncing one cell a beat; still on `calm` and `off`. `v:spinner_line` (part 3) uses the spinner.
+- Tiles and the header put a glyph two cells before the state word (a tile whose name would be cut to make room leaves the glyph out). A `busy` button keeps its label and puts the rebooting glyph before it.
+- A view that drew something moving sets `v.animated` and `v.animRate`; `ui.run` then wakes for the next beat, and sleeps again when nothing moves. A beat writes one `blit` per changed row.
+
 ## Tests
 
 `tests/scenarios/ui_core.lua` with the demo screen `tests/demo/ui_demo.lua`, and `tests/scenarios/ui_more.lua` with `tests/demo/ui_demo2.lua` (tabs: tiles, list, map, form): layout and tap targets at 57x24, 51x19, 39x13 and 26x20, confirm timer, notices, colourless fallback, monitors, resize.
 
 `tests/scenarios/ui_parts.lua` with `tests/demo/ui_demo3.lua` (screens: parts, board, picker, report, wait): every part-3 component at the four sizes, taps and keys, the squeeze, a monitor, and the colourless fallback.
+
+`tests/scenarios/ui_motion.lua` (beat, frames and colours, budget, `ANIM`, stale, cost of a beat, spinner and bar, busy button, no colour) and `tests/scenarios/smelter_motion.lua` (the smelter dashboard).

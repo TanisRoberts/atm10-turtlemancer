@@ -53,6 +53,7 @@ local TOPUP_AT      = 32      -- a busy furnace gets more of the same once it's 
 -- locals together with each function's, and stops at 200
 local FX = {}
 FX.FACTORY_BUFFER = 3     -- batches per process kept queued at a factory (feed barrel + its inputs)
+FX.kit = require("ui")    -- the UI kit's motion: ui.beat, ui.anim (ANIM=full|calm|off in smelter.env)
 FX.FALLBACK_AFTER = 300   -- seconds every factory can be down before ore goes to the furnaces again
 FX.STUCK_AFTER    = 120   -- seconds with ore waiting and nothing moving = that factory is stuck
 FX.TRIAL_REFUSE   = 20    -- seconds a new ore can sit untouched in the feed before it counts as refused
@@ -1648,7 +1649,7 @@ local function drawTile(fz, idx, x, y, w, th)
   if #label > w - 2 then label = label:sub(1, w - 2) end
   if th == 1 then
     -- One line: colour chip, item, count
-    local k = (frame + idx * 3) % 4 + 1
+    local k = math.floor(frame / 2) % 4 + 1                 -- one beat for every tile (2 a second)
     at(x, y, active and FLAME_CH[k] or " ", active and FLAME_FG[k] or t[5], t[4])
     local txt = active and (itemShort(s.inp.name)) or "idle"
     local cnt = active and tostring(s.inp.count) or ""
@@ -1657,22 +1658,18 @@ local function drawTile(fz, idx, x, y, w, th)
   else
     at(x, y, pad(" " .. label, w), t[5], t[4])
     if active then
-      local k = (frame + idx * 3) % 4 + 1
+      local k = math.floor(frame / 2) % 4 + 1
       at(x + w - 1, y, FLAME_CH[k], FLAME_FG[k], t[4])
     end
     -- Line 2: what's in it
     local txt = active and itemShort(s.inp.name) or (s and "idle" or "can't see it")
     at(x, y + 1, pad(" " .. txt, w), active and K.white or K.grey)
     if th >= 3 then
-      -- Line 3: flames + how many left, and finished items waiting (+N)
+      -- Line 3: how many left, and finished items waiting (+N). Nothing moves here.
       local row = y + 2
       at(x, row, (" "):rep(w))
       if active then
-        for c = 0, 1 do
-          local k = (nz(idx, c, frame) % 4) + 1
-          at(x + 1 + c, row, FLAME_CH[k], FLAME_FG[k])
-        end
-        at(x + 4, row, "x" .. s.inp.count, K.lightGrey)
+        at(x + 1, row, "x" .. s.inp.count, K.lightGrey)
       else
         at(x + 1, row, "--", K.grey)
       end
@@ -2329,6 +2326,7 @@ local function drawCmdLine(w, h)
 end
 
 local function draw()
+  frame = FX.kit.anim == "off" and 0 or FX.kit.beat(4)      -- the kit's shared beat (4 a second)
   for _, v in ipairs(views) do
     d = v.dev()
     if d then
@@ -2355,11 +2353,17 @@ local function draw()
   end
 end
 
-local function animating()
+-- Seconds until the screen next needs drawing without an event: the next beat while something moves (the
+-- Train and Pick pages and the trainer card at 4 a second, cooking tiles at 2), else 1.
+local function nextDraw()
+  if FX.kit.anim == "off" then return 1 end
+  local fast = cmdLine ~= nil or (cfg.trainer and trainSlots.inp ~= nil)
   for _, v in ipairs(views) do
-    if v.ui.page == "train" or v.ui.page == "pick" then return true end
+    if v.ui.page == "train" or v.ui.page == "pick" then fast = true end
   end
-  return activeCount > 0 or (cfg.trainer and trainSlots.inp ~= nil) or cmdLine ~= nil
+  if fast then return math.max(FX.kit.nextBeat(4) - os.clock(), 0.05) end
+  if activeCount > 0 then return math.max(FX.kit.nextBeat(2) - os.clock(), 0.05) end
+  return 1
 end
 
 ---------------------------------------------------------------------------
@@ -2482,15 +2486,15 @@ local function netLoop()
 end
 
 local function uiLoop()
+  FX.kit.loadAnim("smelter.env")
   draw()
   local timer = os.startTimer(FRAME)
   while true do
     local e, a, b, c = os.pullEvent()
     local v, x, y
     if e == "timer" and a == timer then
-      frame = frame + 1
       draw()
-      timer = os.startTimer(animating() and FRAME or 1)
+      timer = os.startTimer(nextDraw())
     elseif e == "smelter_draw" then
       draw()
     elseif e == "monitor_touch" and a == monSide then v, x, y = views[1], b, c

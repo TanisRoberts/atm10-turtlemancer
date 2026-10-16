@@ -3,6 +3,7 @@
 -- run it at every screen size; #15 and the Farmhand pilot can copy its shape. State is in _G.demo for tests.
 local ui = require("ui")
 
+if fs.exists("demo.anim") then local f = fs.open("demo.anim", "r"); ui.setAnim(f.readAll()); f.close() end
 local demo = { depth = 40, paused = false, pending = false, reboots = 0, forgotten = 0, backs = 0, stateTaps = 0 }
 _G.demo = demo
 

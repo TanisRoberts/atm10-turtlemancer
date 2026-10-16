@@ -6,6 +6,7 @@ local cfg = { tab = "tiles", tiles = 7, rows = 30 }
 if fs.exists("demo2.cfg") then
   local f = fs.open("demo2.cfg", "r"); for k, v in pairs(textutils.unserialise(f.readAll())) do cfg[k] = v end; f.close()
 end
+if cfg.anim then ui.setAnim(cfg.anim) end
 local d2 = { tab = cfg.tab, opened = nil, picked = nil, cmd = nil, backs = 0 }
 _G.d2 = d2
 

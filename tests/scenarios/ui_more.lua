@@ -10,7 +10,7 @@ local ESC, BKSP, ENTER, TAB, PGUP, PGDN = 256, 259, 257, 258, 266, 267
 local LEFT, RIGHT, DOWN, UP, HOME = 263, 262, 264, 265, 268
 
 local function install(c)
-  c:install("shared/ui.lua"); c:install("shared/ui_widgets.lua"); c:install("shared/ui_parts.lua")
+  c:install("shared/ui.lua"); c:install("shared/ui_widgets.lua"); c:install("shared/ui_parts.lua"); c:install("shared/ui_motion.lua")
 end
 local function demo2(w, h, cfg, opts)
   opts = opts or {}

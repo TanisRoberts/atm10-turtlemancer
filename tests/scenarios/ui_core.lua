@@ -18,8 +18,9 @@ local function demo(w, h, opts)
   local world = cc.world()
   local c = world:computer{ id = 1, label = "Demo", w = w, h = h, colour = opts.colour }
   local mon = opts.monitor and c:monitor("right", opts.monitor[1], opts.monitor[2])
-  c:install("shared/ui.lua"); c:install("shared/ui_widgets.lua"); c:install("shared/ui_parts.lua")
+  c:install("shared/ui.lua"); c:install("shared/ui_widgets.lua"); c:install("shared/ui_parts.lua"); c:install("shared/ui_motion.lua")
   c:install("tests/demo/ui_demo.lua")
+  if opts.anim then c:writeFile("demo.anim", opts.anim) end
   c:run("ui_demo")
   world:run(0.5)
   return world, c, mon
@@ -57,11 +58,11 @@ T.test("ui: manifest.lua ships shared/ui.lua to every role that will use it, and
   local want = { computer = { "mainframe", "storage", "smelter", "foreman", "nether", "farmhand", "architect", "plastic",
                               "neural" }, glasses = { "hud" } }
   local function has(r)
-    local a, b, d
+    local a, b, d, e
     for _, p in ipairs(r.files or {}) do
-      a = a or p == "shared/ui.lua"; b = b or p == "shared/ui_widgets.lua"; d = d or p == "shared/ui_parts.lua"
+      a = a or p == "shared/ui.lua"; b = b or p == "shared/ui_widgets.lua"; d = d or p == "shared/ui_parts.lua"; e = e or p == "shared/ui_motion.lua"
     end
-    return a and b and d
+    return a and b and d and e
   end
   for kind, roles in pairs(want) do
     for _, name in ipairs(roles) do
@@ -313,7 +314,7 @@ end)
 T.test("ui: an error notice stays until tapped; the next notice replaces it; action button", function()
   local world = cc.world()
   local c = world:computer{ id = 1, w = 51, h = 19 }
-  c:install("shared/ui.lua"); c:install("shared/ui_widgets.lua"); c:install("shared/ui_parts.lua")
+  c:install("shared/ui.lua"); c:install("shared/ui_widgets.lua"); c:install("shared/ui_parts.lua"); c:install("shared/ui_motion.lua")
   c:writeFile("t.lua", [[
     local ui = require("ui")
     local v = ui.view(term.current())
@@ -394,7 +395,7 @@ end)
 -- Flicker: the computer runs alongside the game, so a screen that is cleared and repainted can be seen blank.
 -- The kit draws into a buffer and sends only the rows that changed; it never clears the screen.
 T.test("ui: never clears the screen; a frame that changed nothing writes nothing", function()
-  local world, c = demo(51, 19)
+  local world, c = demo(51, 19, { anim = "off" })          -- (the header icon moves on the beat otherwise)
   local scr = c.screen
   T.eq(scr.clears or 0, 0, "the kit never clears the screen")
   local w0 = scr.writes
@@ -407,7 +408,7 @@ T.test("ui: never clears the screen; a frame that changed nothing writes nothing
 end)
 
 T.test("ui: a flood of unrelated events does not redraw the screen over and over", function()
-  local world, c = demo(51, 19)
+  local world, c = demo(51, 19, { anim = "off" })
   local scr, v = c.screen, c.env._G.demo.view
   local frames0, writes0 = v.frames, scr.writes
   for i = 1, 300 do c:queue("rednet_message", 99, "chatter " .. i, "somebody-elses-protocol") end

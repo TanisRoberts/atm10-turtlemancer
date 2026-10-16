@@ -12,14 +12,10 @@ local RULE = "\140"
 local function clamp(n, lo, hi) return max(lo, min(hi, n)) end
 local function rule(self) return self.colour and RULE or "-" end
 
--- The beat for the spinner: the shared one once motion (kit section 9) is in, else the clock at the same rate.
-local function beat(rate) if ui.beat then return ui.beat(rate) end return floor(os.clock() * rate) end
-
 local begin = View.begin
 function View:begin()
   begin(self)
   self.pickInfo = nil
-  self.animated = nil
 end
 
 ---------------------------------------------------------------------------------------------------------
@@ -297,14 +293,9 @@ function View:report(o)
   self:footer({ back = o.back })
 end
 
-local WAITING = { ".", "o", "O", "o" }
 -- v:spinner_line(x, y, "Waiting for storage"): the waiting glyph at 4 beats a second, then the sentence.
--- ANIM=off (ui.anim) or a terminal without colour shows the still glyph.
 function View:spinner_line(x, y, text)
-  local still = ui.anim == "off" or not self.colour
-  local g = still and "o" or WAITING[beat(4) % 4 + 1]
-  if not still then self.animated = true end
-  self:put(x, y, g, "warn", "bg")
+  self:spinner(x, y)
   self:put(x + 2, y, fit(text, self.W - x - 2), "fg", "bg")
   return y + 1
 end
