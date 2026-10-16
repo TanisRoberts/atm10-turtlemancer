@@ -223,3 +223,22 @@ T.test("operator: a reactor that goes silent is reported, and nothing crashes", 
   T.eq(unit(mf.env._G.last, "Reactor-1").present, false)
   T.eq(c.error, nil)
 end)
+
+T.test("operator: machines that merely have an energy buffer are not plant units, and old Storage-N entries go", function()
+  local w = cc.world(); local net = w:net()
+  local r = w:reactor{ stored = 500000 }
+  net:add("BigReactors-Reactor_0", r)
+  for i = 1, 5 do net:add("ironfurnaces:emerald_furnace_" .. i, cc.Inv.new{ size = 3, types = { "ironfurnaces:emerald_furnace", "inventory", "energy_storage" } }) end
+  local mf = listener(w)
+  local c = plant(w, net)
+  c:writeTable("operator.cfg", { nextNum = { reactor = 1, storage = 5 }, units = {
+    ["BigReactors-Reactor_0"] = { kind = "reactor", num = 1, label = "Reactor-1", mode = "auto", enabled = true },
+    ["ironfurnaces:emerald_furnace_1"] = { kind = "storage", num = 1, label = "Storage-1", mode = "auto", enabled = true } } })
+  c:run("operator")
+  w:run(12)
+  T.eq(#mf.env._G.last.units, 1, "only the reactor is a unit")
+  T.falsy(c.screen:find("(storage)", 1, true), c.screen:text())
+  local cfg = c:readTable("operator.cfg")
+  T.eq(cfg.units["ironfurnaces:emerald_furnace_1"], nil)
+  T.eq(cfg.nextNum.storage, nil)
+end)

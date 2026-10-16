@@ -88,7 +88,8 @@ local function classify(name)
   local t = lower(table.concat({ peripheral.getType(name) }, " "))
   if peripheral.getType(name) == REACTOR then return "reactor" end
   if t:find("turbine") then return "turbine" end
-  if t:find("energy_storage") then return "storage" end
+  -- (Not energy_storage: every machine with an energy buffer has that type, so furnaces and fabricators would all
+  -- become units. Energy cells join the plant with the turbine design.)
   -- The cable is shared with Storage and its chests: only ER2 reactor ports count, everything else is ignored.
   -- (Whether the ports show as inventories is not assumed; the type name is what we go by.)
   if t:find("reactor") and (t:find("access") or t:find("port")) and not t:find("computer") then return "port" end
@@ -114,6 +115,11 @@ function M:scan()
   local present = {}
   for _, k in ipairs({ "reactor", "turbine", "storage" }) do for _, n in ipairs(found[k]) do present[n] = k end end
   local dirty = false
+  -- units an earlier version made out of every machine that has an energy buffer
+  for id, c in pairs(self.cfg.units) do
+    if c.kind == "storage" then self.cfg.units[id] = nil; self.byId[id] = nil; dirty = true end
+  end
+  if self.cfg.nextNum.storage then self.cfg.nextNum.storage = nil; dirty = true end
   local ids = {}
   for id in pairs(present) do ids[#ids + 1] = id end
   table.sort(ids)                                   -- numbers go out in cable-name order, so they're repeatable
