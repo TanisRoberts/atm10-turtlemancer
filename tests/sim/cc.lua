@@ -116,6 +116,12 @@ function World:furnace(opts)
   return Inv.Furnace.new(opts)
 end
 
+function World:reactor(opts)
+  opts = opts or {}
+  opts.clock = function() return self.now end
+  return require("sim.reactor").new(opts)
+end
+
 -- Timers (and one-off world callbacks) live in one list ordered by time.
 function World:_addTimer(at, rec)
   self.timerSeq = self.timerSeq + 1

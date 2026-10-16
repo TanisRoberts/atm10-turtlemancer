@@ -25,8 +25,8 @@ local M = {
     computer = {
       name = "Computer",
       about = "A computer that sits at the base",
-      details = "The base's brains: storage, smelting, the mainframe, the Foreman, the Nether Foreman, the Farmhand, the Architect, GPS, the plastic factory, the neural lab and the art wall.",
-      order = { "mainframe", "storage", "smelter", "foreman", "nether", "farmhand", "architect", "gps", "plastic", "neural", "art" },
+      details = "The base's brains: storage, smelting, the mainframe, the Foreman, the Nether Foreman, the Farmhand, the Architect, the Operator, GPS, the plastic factory, the neural lab and the art wall.",
+      order = { "mainframe", "storage", "smelter", "foreman", "nether", "farmhand", "architect", "operator", "gps", "plastic", "neural", "art" },
       roles = {
         mainframe = {
           name = "Mainframe",
@@ -40,7 +40,7 @@ local M = {
                     "computer/mainframe/board.lua", "computer/mainframe/butler.lua",
                     "computer/mainframe/base_link.lua",
                     "computer/mainframe/dig_link.lua", "computer/mainframe/weaver_link.lua",
-                    "computer/mainframe/farm_link.lua" },
+                    "computer/mainframe/farm_link.lua", "computer/mainframe/operator_link.lua" },
         },
         storage = {
           name = "Storage",
@@ -99,6 +99,17 @@ local M = {
             .. "Needs a wireless or ender modem; no monitor.",
           run = "architect",
           files = { "computer/architect/architect.lua", "computer/art/art_gfx.lua", "shared/weaverplan.lua", "shared/ui.lua", "shared/ui_widgets.lua", "shared/ui_parts.lua", "shared/ui_motion.lua" },
+        },
+        operator = {
+          name = "Operator",
+          about = "Runs the Extreme Reactors power plant",
+          details = "Finds every reactor on its cable, switches each on below 30% and off above 90% of its "
+            .. "buffer (operator.env), moves waste into a barrel, lists what each reactor needs, has and "
+            .. "is missing, and reports to the mainframe. Wired modem on the reactor cable (computer port, "
+            .. "input and output access ports, a waste barrel) + wireless or ender modem; a monitor shows the status.",
+          run = "operator",
+          files = { "computer/operator/operator.lua", "computer/operator/opplant.lua", "computer/operator/opdrivers.lua",
+                    "computer/operator/oppolicy.lua", "computer/operator/opneeds.lua", "shared/envfile.lua" },
         },
         gps = {
           name = "GPS host",
