@@ -1,7 +1,9 @@
 -- architect.lua  --  Weaver's control computer (CC:Tweaked, ATM10 / MC 1.21.1)
 --
--- Needs: an advanced computer with a wireless or ender modem. No monitor: everything is on the
--- computer's own screen (click with the mouse, type commands at the bottom).
+-- Needs: an advanced computer with a wireless or ender modem. Everything is on the computer's own
+-- screen (click with the mouse, type commands at the bottom). An advanced monitor touching the
+-- computer (any size, made for 2x2) shows just the map, always following Weaver: his layer, him, the
+-- progress bar and the layer's gaps. It's display only; the computer's Map tab is the one you drive.
 --
 -- Tabs (click them, or press Tab):
 --   Status   what he's doing, where he is, fuel, what he's missing, buttons for every order
@@ -520,42 +522,43 @@ local C_DONE, C_TODO, C_BOX, C_RIG, C_NEXT, C_DOCK, C_MARK, C_BG, C_SEA, C_GROUN
   cidx(colors.yellow)
 local C_GAP = cidx(colors.magenta)
 
-local function viewLayer()
+-- v is a view ({ layer, ext, zoom, vx, vz, follow }): the Map tab's is `ui`, the monitor's is `monView`
+local function viewLayer(v)
   local s = st.status
-  if ui.layer then return ui.layer end
+  v = v or ui
+  if v.layer then return v.layer end
   return (s and s.phase == "layer" and s.layer) or (s and s.phase == "done" and st.info and st.info.layers) or 1
 end
-local function showingExt()
-  if ui.ext ~= nil then return ui.ext end
+local function showingExt(v)
+  v = v or ui
+  if v.ext ~= nil then return v.ext end
   local s = st.status
-  return s and s.phase == "ext" and not ui.layer
+  return s and s.phase == "ext" and not v.layer
 end
 
-local function fitZoom()
+local function fitZoom(g)
+  g = g or gfx
   local b = st.info.bounds
-  return math.max((b.x2 - b.x1 + 1 + 2 * PAD) / PW, (b.z2 - b.z1 + 1 + 2 * PAD) / PH)
+  return math.max((b.x2 - b.x1 + 1 + 2 * PAD) / g.PW, (b.z2 - b.z1 + 1 + 2 * PAD) / g.PH)
 end
-local function zoomNow() return ui.zoom or fitZoom() end
-local function viewCentre()
+local function zoomNow(v, g) return (v or ui).zoom or fitZoom(g) end
+local function viewCentre(v, g)
+  v = v or ui
   local b = st.info.bounds
-  local z = zoomNow()
+  local z = zoomNow(v, g)
   local at = st.status and st.status.at
-  if ui.follow and at and ui.zoom and ui.zoom < fitZoom() then return at.x, at.z end
-  if ui.vx then return ui.vx, ui.vz end
-  if z >= fitZoom() then return (b.x1 + b.x2) / 2, (b.z1 + b.z2) / 2 end
+  if v.follow and at and v.zoom and v.zoom < fitZoom(g) then return at.x, at.z end
+  if v.vx then return v.vx, v.vz end
   return (b.x1 + b.x2) / 2, (b.z1 + b.z2) / 2
 end
 
-local function drawMap()
+-- Draw the map into gfx `g` (w columns wide) for view `v`. Returns the caption (layer, progress, gaps).
+local function renderMap(g, w, v)
   local info, s = st.info, st.status
-  ui.mapLabel = nil
-  if not info then
-    put(2, TOP + 2, st.status and "Asking Weaver for the plan..." or "Waiting for Weaver...", colors.lightGray)
-    if st.status and now() - st.infoAsked > 10 then askInfo() end
-    return
-  end
-  local z = zoomNow()
-  local cx, cz = viewCentre()
+  local PW, PH = g.PW, g.PH
+  local gfx = g
+  local z = zoomNow(v, g)
+  local cx, cz = viewCentre(v, g)
   local function px(wx) return math.floor((wx - cx) / z + PW / 2) + 1 end
   local function pz(wz) return math.floor((wz - cz) / z + PH / 2) + 1 end
 
@@ -583,9 +586,9 @@ local function drawMap()
     if not t then t = { 0, 0 }; tally[i] = t end
     if done then t[1] = t[1] + 1 else t[2] = t[2] + 1 end
   end
-  local n = viewLayer()
+  local n = viewLayer(v)
   local label
-  if showingExt() then
+  if showingExt(v) then
     local upto = (s and s.phase == "ext") and (s.ext or 1) - 1 or ((s and (s.phase == "layer" or s.phase == "done")) and #info.ext or 0)
     for i, e in ipairs(info.ext) do add(e[1], e[2], i <= upto) end
     label = ("Edge walls %d/%d"):format(upto, #info.ext)
@@ -616,7 +619,7 @@ local function drawMap()
   end
   -- Gaps on this layer (or in the edge walls): left out until storage has the block
   if s and (tonumber(s.gaps) or 0) > 0 then
-    local key = showingExt() and "ext" or n
+    local key = showingExt(v) and "ext" or n
     local gl = st.gaps[tostring(key)]
     if gl then
       for _, g in ipairs(gl) do ov(g[1], g[2], C_GAP) end
@@ -643,16 +646,27 @@ local function drawMap()
   gfx.text(cells_, 1, 1, "N^", cidx(colors.white), C_BG)
   if at then
     local rel = ""
-    if not showingExt() and info then
+    if not showingExt(v) and info then
       local ly = info.site.sea + info.ybase + n - 1
       local d = at.y - ly - 1
       rel = d == 0 and " (on this layer)" or (d > 0 and (" (" .. d .. " above)") or (" (" .. -d .. " below)"))
     end
-    gfx.text(cells_, W - #("Weaver Y " .. at.y .. rel) + 1, 1, "Weaver Y " .. at.y .. rel, cidx(colors.red), C_BG)
+    gfx.text(cells_, w - #("Weaver Y " .. at.y .. rel) + 1, 1, "Weaver Y " .. at.y .. rel, cidx(colors.red), C_BG)
   end
   gfx.setLayer("labels", cells_)
   gfx.markAll()
   gfx.flush()
+  return label
+end
+
+local function drawMap()
+  ui.mapLabel = nil
+  if not st.info then
+    put(2, TOP + 2, st.status and "Asking Weaver for the plan..." or "Waiting for Weaver...", colors.lightGray)
+    if st.status and now() - st.infoAsked > 10 then askInfo() end
+    return
+  end
+  local label = renderMap(gfx, W, ui)
   ui.mapLabel = label
 
   -- toolbar
@@ -668,6 +682,72 @@ local function drawMap()
     (ui.follow and not ui.layer) and colors.black or colors.white, (ui.follow and not ui.layer) and colors.lime or colors.gray)
   x = button(x, y, "Ext", "ext", showingExt() and colors.black or colors.white, showingExt() and colors.orange or colors.gray)
   put(x, y, fit(label or "", W - x + 1), colors.lightGray)
+end
+
+---------------------------------------------------------------------------
+-- Monitor: the map alone, following Weaver
+---------------------------------------------------------------------------
+local monView = { follow = true }      -- no layer / zoom / pan set: his layer, fitted to the screen
+local mon = { dev = nil, side = nil, gfx = nil, w = 0, h = 0 }
+
+local function findMonitor()
+  for _, side in ipairs(redstone.getSides()) do
+    if peripheral.hasType(side, "monitor") then return peripheral.wrap(side), side end
+  end
+end
+
+-- (Re)attach to the monitor on one of our sides, and size the map to it
+local function syncMonitor()
+  local dev, side = findMonitor()
+  if not dev then mon.dev, mon.side, mon.gfx = nil, nil, nil; return end
+  pcall(dev.setTextScale, 0.5)
+  local w, h = dev.getSize()
+  if dev == mon.dev and mon.side == side and w == mon.w and h == mon.h and mon.gfx then return end
+  mon.dev, mon.side, mon.w, mon.h = dev, side, w, h
+  local rows = h - 2                    -- the top row is the progress line, the bottom one the caption
+  mon.gfx = G.new({
+    getSize = function() return w, rows end,
+    setCursorPos = function(x, y) dev.setCursorPos(x, y + 1) end,
+    blit = function(a, b, c) dev.blit(a, b, c) end,
+    setPaletteColour = function() end,
+  })
+end
+
+local function monPut(x, s, fg, bg, y)
+  s = tostring(s):sub(1, mon.w - x + 1)
+  if #s == 0 then return end
+  mon.dev.setCursorPos(x, y or 1)
+  mon.dev.blit(s, HEX[cidx(fg or colors.white)]:rep(#s), HEX[cidx(bg or colors.black)]:rep(#s))
+end
+
+local function drawMonitor()
+  if not mon.dev then return end
+  local w = mon.w
+  local s = st.status
+  monPut(1, (" "):rep(w), colors.white, colors.black)
+  if not (st.info and s) or mon.h < 5 then
+    mon.dev.setBackgroundColour(colors.black); mon.dev.clear()
+    monPut(1, fit(s and "Asking Weaver for the plan..." or "Waiting for Weaver...", w), colors.lightGray)
+    return
+  end
+  -- Progress line: Weaver, what he's doing, how much of the build is placed
+  local frac = (s.total or 0) > 0 and math.min(1, (s.placed or 0) / s.total) or 0
+  local col = alive() and (STATE_COL[s.state] or colors.white) or colors.gray
+  local pct = ("%3d%%"):format(math.floor(100 * frac))
+  local head = fit((s.label or "Weaver") .. " " .. tostring(s.state or "?"), math.max(1, w - #pct - 1))
+  local n = math.floor((w - #pct - 1) * frac + 0.5)
+  for x = 1, w - #pct - 1 do
+    -- the bar sits behind the text: lime for done, grey for to go
+    local ch = head:sub(x, x)
+    mon.dev.setCursorPos(x, 1)
+    mon.dev.blit(ch ~= "" and ch or " ", HEX[cidx(x <= n and colors.black or col)],
+      HEX[cidx(x <= n and colors.lime or colors.gray)])
+  end
+  monPut(w - #pct + 1, pct, colors.white, colors.black)
+  local label = renderMap(mon.gfx, w, monView)
+  monPut(1, (" "):rep(w), colors.white, colors.black, mon.h)
+  if not alive() then monPut(1, fit("not heard " .. ago(st.seen), w), colors.red, colors.black, mon.h)
+  else monPut(1, fit(label or "", w), colors.lightGray, colors.black, mon.h) end
 end
 
 ---------------------------------------------------------------------------
@@ -919,6 +999,7 @@ local function draw()
   elseif ui.tab == "corners" then drawCorners()
   elseif ui.tab == "log" then drawLog() end
   drawFooter()
+  pcall(drawMonitor)
   term.setCursorPos(math.min(W, 3 + #ui.input), H)
   term.setTextColour(colors.white); term.setBackgroundColour(colors.gray)
   term.setCursorBlink(true)
@@ -997,6 +1078,7 @@ end
 local function onEvent(e)
   local ev = e[1]
   if ev == "rednet_message" then onMessage(e[2], e[3], e[4])
+  elseif ev == "peripheral" or ev == "peripheral_detach" or ev == "monitor_resize" then pcall(syncMonitor)
   elseif ev == "mouse_click" then
     if ui.help then ui.help = false; return end
     for _, h in ipairs(ui.hits) do
@@ -1048,6 +1130,7 @@ if not fs.exists("startup.lua") then
   local f = fs.open("startup.lua", "w"); f.write('shell.run("architect")\n'); f.close()
 end
 loadLog()
+pcall(syncMonitor)
 addLog("Architect started")
 if hasModem then askInfo() end
 local tick = os.startTimer(0.5)
