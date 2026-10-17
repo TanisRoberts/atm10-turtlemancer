@@ -1139,16 +1139,21 @@ local function waitFor(sec)
   while os.clock() < t and not newOrder() and not rebootWanted() do refreshChunk(); os.sleep(0.5) end
 end
 
--- Wait at the dock until storage has any of these blocks again (seen in its broadcast), a new
--- order or reboot comes in, or `sec` runs out. Without storage's broadcast, just waits a minute.
+-- Wait at the dock until storage's count of any of these blocks goes UP (seen in its broadcast), a
+-- new order or reboot comes in, or `sec` runs out. A block storage merely has a few of doesn't
+-- count: he was just handed those, and returning for them again is the restock loop. Without
+-- storage's broadcast, just waits a minute.
 local function waitForStock(names, sec)
   local t = os.clock() + sec
+  local low = {}   -- the lowest count of each block seen while waiting
   while os.clock() < t and not newOrder() and not rebootWanted() do
     refreshChunk()
     os.sleep(1)
     if stock and stockAt and os.clock() - stockAt < 20 then
       for _, n in ipairs(names) do
-        if (tonumber(stock[n]) or 0) > 0 then return true end
+        local c = tonumber(stock[n]) or 0
+        if low[n] and c > low[n] then return true end
+        if not low[n] or c < low[n] then low[n] = c end
       end
     elseif os.clock() > t - sec + 60 then
       return false
@@ -1204,12 +1209,18 @@ local function mainLoop()
         -- blocks to get on with (unless the last trip already found nothing he could place)
         local canBuild = S.phase ~= "done" and (need == nil or slotOf(need) ~= nil
           or (isShort(need) and not S.dryOut and bagHasBlocks()))
+        -- His gap log is full: every block that needs a gap would stop him at once, so he waits
+        -- for the gaps' blocks (patching is all he can do) rather than flying out to turn back
+        local capped = G.n >= GAP_MAX or diskLow()
+        if capped and not canPatch then canBuild = false end
         if not canPatch and not canBuild then
           local m = {}
           for _, e in ipairs(S.missing or {}) do
             if e[1] ~= "fuel" then m[#m + 1] = { e[1], e[2] } end
           end
-          if S.phase == "done" then
+          if capped and S.phase ~= "done" then
+            setStatus("waiting", ("%d gaps is my limit: waiting for %s"):format(G.n, shortList(gapItems(true))))
+          elseif S.phase == "done" then
             setStatus("waiting", ("Built all I can. %d gaps left, waiting for %s"):format(G.n, shortList(gapItems(true))))
           else
             for i, e in ipairs(m) do m[i] = { e[1] } end   -- names only: the counts were just this batch
