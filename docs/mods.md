@@ -28,6 +28,8 @@ To refresh it, list that folder again and regenerate this file. The server shoul
 
 **Warning: two CC: Tweaked jars are installed** (`cc-tweaked-1.21.1-forge-1.113.1.jar` and `cc-tweaked-1.21.1-forge-1.120.2.jar`). Normally only one loads, and the server's copy is what turtles actually run. Check the API docs for 1.120.x, and ask Tanis to delete the older jar (it may be a leftover from a manual update).
 
+**Extreme Reactors 2: use active power taps.** A passive FE power tap never pushes energy out (it only gives when something pulls), so the buffer fills and nothing flows. Build every reactor and turbine with an *Active* Forge Energy Power Tap. See `docs/systems/operator.md`.
+
 ## Everything
 
 | Mod | Version | Jar |

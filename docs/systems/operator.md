@@ -41,6 +41,10 @@ Design: `docs/design/operator.md`. The computer's screen and every monitor touch
 - **Wall** (120 wide and 50 tall or more): Power Grid, up to three whole reactor panels, the plant buffer chart (last 30 minutes) and the recent events. More than three reactors become tiles. Chart and events come from `plant.hist` (one sample every 15 s, 120 of them) and `plant.events` (the last 8) in the status record.
 - A command from the mainframe or the screen acts at once, not at the next pass.
 
+## Power taps: always the active kind
+
+Every Extreme Reactors build (reactors now, turbines later) uses an **active** FE power tap, never a passive one. A passive tap only gives energy when something pulls from it, and in game (16 Oct 2026) a *Reinforced Passive Forge Energy Power Tap* filled its buffer to about 38 MFE and nothing flowed: not into Advanced Universal Cables (Normal or Pull), not into a machine placed directly on the tap, reactor on or off. Swapping in a *Reinforced Active Forge Energy Power Tap* fixed it at once with the cable on Normal. The mod author confirms it: ZeroNoRyouki/ExtremeReactors2#135. (#180, energy stopping when the buffer is full, does not apply.) The symptom of a wrong tap is a buffer that fills and stays full. Note that "passive" elsewhere on this page means a reactor that is not actively cooled, which has nothing to do with the tap.
+
 ## Items: the Operator never moves any
 
 Storage fills the inlet port and drains the outlet port (issue #37). The Operator reads: uranium in the inlet (ingots, blocks count 9) and the outlet. "Waste not clearing" = every outlet slot taken, or cyanite in the outlet that hasn't dropped for `STUCK_AFTER` seconds (default 120). Fuel left = reactor `getFuelAmount/Max`. Uranium in supply comes from Storage: a `{type="uranium", total=<ingots>}` broadcast on protocol `tanis-operator`; the plant totals and the mainframe alert use it. It is not a Needs check (the Needs tab used to have "Fuel supply" and "Power output"; both were removed because nothing on them could be fixed).
