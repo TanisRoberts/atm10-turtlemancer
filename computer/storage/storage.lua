@@ -147,14 +147,16 @@ local function isSmelterOut(n) return cfg.smelterOuts and cfg.smelterOuts[n] == 
 -- Fluid tanks on the cable (a PneumaticCraft small tank, a Mekanism tank...). Some also have item slots
 -- (PneumaticCraft tanks have bucket slots), so they can show up as inventories too: a tank is never
 -- storage, only a fluid depot or the source for one.
-local function isTank(n)
-  local fluid = peripheral.hasType(n, "fluid_storage")
-  if not fluid then
-    for _, m in ipairs(peripheral.getMethods(n) or {}) do
-      if m == "pullFluid" then fluid = true; break end
-    end
+local function hasFluid(n)
+  if peripheral.hasType(n, "fluid_storage") then return true end
+  for _, m in ipairs(peripheral.getMethods(n) or {}) do
+    if m == "pullFluid" then return true end
   end
-  if not fluid then return false end
+  return false
+end
+
+local function isTank(n)
+  if not hasFluid(n) then return false end
   -- Something with item slots as well is a tank only if it says so by name (PneumaticCraft's small_tank):
   -- a Functional Storage drawer controller also offers fluids and must stay storage.
   if peripheral.hasType(n, "inventory") then return n:find("tank") ~= nil end
@@ -255,6 +257,19 @@ end
 local function tankNames()
   local out = {}
   for _, n in ipairs(peripheral.getNames()) do if isTank(n) then out[#out + 1] = n end end
+  table.sort(out)
+  return out
+end
+
+-- Where fluid comes from for a fluid depot: the other tanks on the cable and the fluid drawers of the
+-- drawer network (the controller shows their fluids). Never an industrial machine or another depot.
+local function fluidSources()
+  local out = {}
+  for _, n in ipairs(peripheral.getNames()) do
+    if hasFluid(n) and not (cfg.fluidDepots or {})[n] and not isMachine(n) and (isTank(n) or isDrawer(n)) then
+      out[#out + 1] = n
+    end
+  end
   table.sort(out)
   return out
 end
@@ -1169,8 +1184,8 @@ local function topUpFluidDepots()
   local changed = false
   for d, fluid in pairs(cfg.fluidDepots or {}) do
     if fluid ~= "" and peripheral.isPresent(d) then
-      for _, src in ipairs(tankNames()) do
-        if src ~= d and not (cfg.fluidDepots or {})[src] then
+      for _, src in ipairs(fluidSources()) do
+        if src ~= d then
           local has = 0
           for _, f in pairs(call(src, "tanks") or {}) do
             if f.name == fluid then has = has + (f.amount or 0) end
@@ -2063,7 +2078,7 @@ local function assignScreen()
         end,
         items = function(n)
           local total, out = {}, {}
-          for _, t in ipairs(tankNames()) do
+          for _, t in ipairs(fluidSources()) do
             for _, f in pairs(call(t, "tanks") or {}) do
               if f.name and (f.amount or 0) > 0 then total[f.name] = (total[f.name] or 0) + f.amount end
             end

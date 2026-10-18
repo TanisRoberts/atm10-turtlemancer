@@ -174,3 +174,31 @@ T.test("storage: with no tank found, the Fluid depot picker shows what the cable
   T.absent(c.screen, "barrel_2", "only the small tank is probed")
   T.running(c)
 end)
+
+T.test("storage: fluids held in the drawer network's fluid drawers are offered and pulled into a fluid depot", function()
+  local w, c, inv = base()
+  local net = inv[0].net
+  local drawers = net:add("functionalstorage:storage_controller_0", cc.Inv.Tank.new{ capacity = 64000,
+    fluid = "minecraft:lava", amount = 20000, types = { "functionalstorage:storage_controller", "inventory", "fluid_storage" } })
+  drawers.peripheralMethods = { "tanks", "pushFluid", "pullFluid", "size", "list" }
+  function drawers:size() return 4 end
+  function drawers:list() return {} end
+  local depot = net:add("create:fluid_tank_0", cc.Inv.Tank.new{ capacity = 8000, types = { "create:fluid_tank", "fluid_storage" } })
+  c:run("storage")
+  w:run(5)
+  c:type("/assign"); c:key(257)
+  w:run(2)
+  tap(w, c, "+ Add")
+  c:click(3, 8); w:run(1)
+  c:type("fluid_tank_0"); w:run(1)
+  c:key(257); w:run(1)
+  T.contains(c.screen, "Lava")
+  c:type("lava"); w:run(1)
+  c:key(257); w:run(1)
+  c:click(3, select(2, c.screen:find("Cancel"))); w:run(2)
+  T.contains(c.screen, "Saved")
+  c:click(12, select(2, c.screen:find("Done"))); w:run(1)
+  T.waitFor(w, function() return depot.amount == 8000 end, 60, "depot never filled from the drawers")
+  T.eq(drawers.amount, 12000)
+  T.running(c)
+end)
