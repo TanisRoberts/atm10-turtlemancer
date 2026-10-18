@@ -83,6 +83,7 @@ local function loadCfg()
   cfg.fuels = cfg.fuels or {}
   cfg.drawers = cfg.drawers or {}   -- assigned as drawers (bulk storage) by hand, besides those found by name
   cfg.ignored = cfg.ignored or {}   -- never touched or counted
+  cfg.depots = cfg.depots or {}     -- container -> the item storage keeps it filled with ("" = not chosen yet)
   cfg.names = cfg.names or {}       -- network name -> nickname, shown in /assign
   -- The smelter's factory barrels (from its broadcast): feeds are filled for it and never storage,
   -- outs are emptied into storage like inputs
@@ -147,6 +148,7 @@ local function isSpecial(n)
   if n == cfg.output or n == cfg.weaver or n == cfg.pocketIn or n == cfg.pocketOut then return true end
   for _, d in ipairs(cfg.docks or {}) do if d == n then return true end end
   for _, d in ipairs(cfg.fuels) do if d == n then return true end end
+  if cfg.depots and cfg.depots[n] ~= nil then return true end
   for _, d in ipairs(cfg.ignored or {}) do if d == n then return true end end
   if isMachine(n) then return true end
   for _, i in ipairs(cfg.inputs) do if i == n then return true end end
@@ -171,6 +173,8 @@ local TYPES = {
     about = "The butler's top-ups wait here. Only one." },
   { key = "drawer",    label = "Drawers",        short = "Drawers", tag = "DRAWER", col = colours.lightBlue,
     about = "Bulk storage (a drawer controller): items it holds go there first. Still storage." },
+  { key = "depot",     label = "Depot",          short = "Depot",   tag = "DEPOT",  col = colours.brown,
+    about = "Kept full of one item from storage (buckets for a factory...). Not storage itself." },
   { key = "ignore",    label = "Ignore",         short = "Ignore",  tag = "IGNORE", col = colours.lightGrey,
     about = "Never touched or counted: storage pretends it isn't there." },
 }
@@ -180,6 +184,7 @@ local LISTS   = { input = "inputs", dock = "docks", fuel = "fuels", drawer = "dr
 local SINGLES = { output = "output", weaver = "weaver", pocketIn = "pocketIn", pocketOut = "pocketOut" }
 
 local function typeOf(n)
+  if cfg.depots and cfg.depots[n] ~= nil then return "depot" end
   for key, field in pairs(SINGLES) do if cfg[field] == n then return key end end
   for key, field in pairs(LISTS) do
     for _, x in ipairs(cfg[field] or {}) do if x == n then return key end end
@@ -187,6 +192,7 @@ local function typeOf(n)
 end
 
 local function unassign(n)
+  if cfg.depots then cfg.depots[n] = nil end
   for _, field in pairs(SINGLES) do if cfg[field] == n then cfg[field] = nil end end
   for _, field in pairs(LISTS) do if cfg[field] then listRemove(cfg[field], n) end end
   if cfg.dockKeep then cfg.dockKeep[n] = nil end
@@ -199,6 +205,7 @@ end
 -- Give n a job (taking any old one away). Returns the inventory it pushed out of a single job.
 local function assign(n, key)
   unassign(n)
+  if key == "depot" then cfg.depots = cfg.depots or {}; cfg.depots[n] = ""; return end
   local single = SINGLES[key]
   if single then
     local bumped = cfg[single]
@@ -1102,6 +1109,30 @@ local function topUpDocks()
   return changed
 end
 
+-- Keep every depot full of its item, as far as storage has it. Anything else in a depot is left alone.
+local function topUpDepots()
+  local changed = false
+  for d, name in pairs(cfg.depots or {}) do
+    if name ~= "" and (byName[name] or 0) > 0 and peripheral.isPresent(d) then
+      local list = call(d, "list")
+      local size = call(d, "size") or 0
+      if list then
+        local used, room = 0, false
+        local max = (info[name] and info[name].max) or 64
+        for _, it in pairs(list) do
+          used = used + 1
+          if it.name == name and it.count < max then room = true end
+        end
+        if used < size or room then
+          local moved = retrieve(name, byName[name], d)
+          if moved > 0 then changed = true; byName[name] = byName[name] - moved end
+        end
+      end
+    end
+  end
+  return changed
+end
+
 -- Fuel kept in each Canary fuel barrel: one stack of coal's worth (never more than a Canary's tank)
 local function canaryFuelTarget()
   return math.min(CANARY_FUEL, minerFuelLimit or REFILL)
@@ -1647,6 +1678,7 @@ local function workerLoop()
       if moved > 0 then buildItems() end
       if topUpFuel() then buildItems() end
       if topUpDocks() then buildItems() end
+      if topUpDepots() then buildItems() end
       if supplyWeaver() then buildItems() end
       if fillPocket() then buildItems() end
       if #jobs > 0 then
@@ -1910,8 +1942,34 @@ local function assignScreen()
       local out = {}
       for _, field in pairs(SINGLES) do if cfg[field] then out[#out + 1] = cfg[field] end end
       for _, field in pairs(LISTS) do for _, n in ipairs(cfg[field] or {}) do out[#out + 1] = n end end
+      for n in pairs(cfg.depots or {}) do out[#out + 1] = n end
       return out
     end,
+    depot = {
+      key = "depot",
+      items = function(n)
+        local seen, out = {}, {}
+        for _, it in ipairs(items) do
+          if not seen[it.name] then
+            seen[it.name] = #out + 1
+            out[#out + 1] = { name = it.name, label = it.label, count = it.count }
+          else
+            out[seen[it.name]].count = out[seen[it.name]].count + it.count
+          end
+        end
+        -- what the container holds now may not be in storage at all
+        for _, it in pairs(call(n, "list") or {}) do
+          if not seen[it.name] then
+            seen[it.name] = #out + 1
+            out[#out + 1] = { name = it.name, label = prettyName(it.name), count = 0 }
+          end
+        end
+        table.sort(out, function(a, b) return a.label:lower() < b.label:lower() end)
+        return out
+      end,
+      get = function(n) local d = cfg.depots and cfg.depots[n]; return d ~= "" and d or nil end,
+      set = function(n, item) cfg.depots[n] = item end,
+    },
     candidate = function(n) return not isMachine(n) and not isSmelterFeed(n) and not isSmelterOut(n) end,
     auto = function(n) if isDrawer(n) then return "drawer" end end,   -- drawers found by their name
     single = function(key) return SINGLES[key] and cfg[SINGLES[key]] or nil end,

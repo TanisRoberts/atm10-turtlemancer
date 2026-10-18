@@ -19,6 +19,10 @@
 --   o.extra         -> optional extra setting for one job: { key, init(n) -> state,
 --                      show(state) -> label, text,  click(n, state, plain) [plain = a cleared
 --                      screen for typed input is ready],  plain = true/false,  save(n, state) }
+--   o.depot         -> optional "keep this container filled with one item" job: { key,
+--                      items(n) -> { { name, label, count }, ... } offered under "pick the item",
+--                      get(n) -> item id or nil,  set(n, item) }. With it, + Add asks "Depot or
+--                      other job?" first, and a depot goes container -> item -> summary.
 --   o.hold()/o.release()  pause / resume the program's own moving while "Find it" watches
 --   o.beforeSave()  wait until the program's worker is idle;  o.afterSave()  save + rescan
 --   o.itemTotals()  -> { [inventory] = item count }
@@ -196,6 +200,7 @@ function A.run(o)
     st.edit = { name = n, orig = key, auto = autoKey ~= nil, autoKey = autoKey, nick = names[n] or "", isNew = isNew,
       key = key or autoKey or o.defaultKey(n) }
     if o.extra then st.edit.extra = o.extra.init(n) end
+    if o.depot and key == o.depot.key then st.edit.depot = o.depot.get(n) end
     st.page, st.note = "edit", nil
   end
 
@@ -242,11 +247,16 @@ function A.run(o)
 
   local function save()
     local e = st.edit
+    if o.depot and e.key == o.depot.key and not e.depot then
+      st.itemBack, st.depotName, st.filter, st.pg, st.page = "edit", e.name, "", 1, "item"
+      return
+    end
     o.beforeSave()
     local bumped
     if e.key ~= e.orig then bumped = o.assign(e.name, e.key) end
     if bumped == e.name then bumped = nil end
     if o.extra and e.key == o.extra.key then o.extra.save(e.name, e.extra) end
+    if o.depot and e.key == o.depot.key then o.depot.set(e.name, e.depot) end
     names[e.name] = e.nick ~= "" and e.nick or nil
     o.afterSave()
     backToList(("Saved: %s = %s%s"):format(shortName(e.name), TYPE_BY[e.key].label,
@@ -298,8 +308,74 @@ function A.run(o)
       local name = r.name
       region(1, w, y, function() openEdit(name, false) end)
     end
-    local x = btn(2, h - 1, "+ Add", true, function() st.page, st.filter, st.pg, st.note = "pick", "", 1, nil end)
+    local x = btn(2, h - 1, "+ Add", true, function()
+      st.page, st.filter, st.pg, st.note, st.depotFlow = o.depot and "kind" or "pick", "", 1, nil, false
+    end)
     btn(x, h - 1, "Done", false, function() st.done = true end)
+    searchBar()
+  end
+
+  -- A container was picked under + Add: a depot goes on to pick its item, anything else to the job page
+  local function chosen(n)
+    if st.depotFlow then
+      st.depotName, st.itemBack, st.filter, st.pg, st.page = n, "pick", "", 1, "item"
+    else
+      openEdit(n, true)
+    end
+  end
+
+  local function drawKind()
+    titleBar(" ADD", "what kind? ")
+    line2("A depot keeps a container filled with one item.")
+    local y = 4
+    put(2, y, "Depot", C.fg); put(10, y, "keeps a container topped up with one item", C.dim)
+    btn(2, y + 1, "Depot", true, function() st.depotFlow, st.page, st.filter, st.pg = true, "pick", "", 1 end, colours.lightBlue)
+    put(2, y + 3, "Other", C.fg); put(10, y + 3, "input, output, dock, fuel, drawers...", C.dim)
+    btn(2, y + 4, "Other job", false, function() st.depotFlow, st.page, st.filter, st.pg = false, "pick", "", 1 end)
+    btn(2, h - 1, "Back", false, function() st.page = "list" end)
+  end
+
+  local function drawItem()
+    local cands = o.depot.items(st.depotName)
+    local shown = {}
+    local q = st.filter:lower()
+    for _, it in ipairs(cands) do
+      if q == "" or it.name:lower():find(q, 1, true) or (it.label or ""):lower():find(q, 1, true) then
+        shown[#shown + 1] = it
+      end
+    end
+    st.shown = shown
+    local flow = st.itemBack == "pick"
+    titleBar(flow and " ADD DEPOT" or " DEPOT ITEM", flow and "step 2 of 3 " or nil)
+    if #shown == 1 and st.filter ~= "" then line2("Enter (or click) picks " .. (shown[1].label or prettyName(shown[1].name)), C.good)
+    else line2("What should " .. cut(shortName(st.depotName), w - 24) .. " hold? Type to narrow it down.") end
+    local top, rows = 3, math.max(1, h - 4)
+    pager(h - 1, #shown, rows)
+    if #shown == 0 then put(2, top, cut("Nothing matches. Storage holds no such item.", w - 2), C.dim) end
+    for i = 1, rows do
+      local it = shown[(st.pg - 1) * rows + i]
+      if not it then break end
+      local y = top + i - 1
+      local only = #shown == 1 and st.filter ~= ""
+      local bg = only and C.accent or (i % 2 == 0 and C.stripe or C.bg)
+      term.setCursorPos(1, y); term.setBackgroundColour(bg); term.clearLine()
+      local label = it.label or prettyName(it.name)
+      put(2, y, cut(label, w - 12), only and colours.black or C.fg, bg)
+      local cnt = fmt(it.count or 0)
+      put(w - #cnt, y, cnt, only and colours.black or C.dim, bg)
+      region(1, w, y, function()
+        if st.itemBack == "edit" and st.edit then
+          st.edit.depot, st.page = it.name, "edit"
+        else
+          openEdit(st.depotName, true)
+          st.edit.key, st.edit.depot, st.edit.flow = o.depot.key, it.name, true
+        end
+        st.filter, st.pg = "", 1
+      end)
+    end
+    btn(2, h - 1, "Back", false, function()
+      st.page, st.filter, st.pg = st.itemBack == "edit" and "edit" or "pick", "", 1
+    end)
     searchBar()
   end
 
@@ -309,14 +385,14 @@ function A.run(o)
     local shown = {}
     for _, n in ipairs(cands) do if matches(n) then shown[#shown + 1] = n end end
     st.shown = shown
-    titleBar(" ADD", "step 1 of 2 ")
+    titleBar(st.depotFlow and " ADD DEPOT" or " ADD", st.depotFlow and "step 1 of 3 " or "step 1 of 2 ")
     if #shown == 1 and st.filter ~= "" then line2("Enter (or click) picks " .. shortName(shown[1]), C.good)
     else line2("Type part of its name to narrow it down, or:") end
     btn(2, 3, "Find it: drop one item in", false, function()
       local n = findByItem()
       if not n then say("Didn't see an item go in. Try again?", C.warn)
-      elseif o.typeOf(n) then openEdit(n, false); say("That one has a job already: here it is.", C.warn)
-      else openEdit(n, true) end
+      elseif o.typeOf(n) then st.depotFlow = false; openEdit(n, false); say("That one has a job already: here it is.", C.warn)
+      else chosen(n) end
     end)
     local top, rows = 4, math.max(1, h - 5)
     pager(h - 1, #shown, rows)
@@ -333,9 +409,11 @@ function A.run(o)
       term.setCursorPos(1, y); term.setBackgroundColour(bg); term.clearLine()
       put(2, y, cutName(n, nw), only and colours.black or C.fg, bg)
       put(3 + nw, y, cut(names[n] or d.text, w - 3 - nw), only and colours.black or C.dim, bg)
-      region(1, w, y, function() openEdit(n, true) end)
+      region(1, w, y, function() chosen(n) end)
     end
-    btn(2, h - 1, "Back", false, function() st.page, st.filter, st.pg = "list", "", 1 end)
+    btn(2, h - 1, "Back", false, function()
+      st.page, st.filter, st.pg = o.depot and "kind" or "list", "", 1
+    end)
     searchBar()
   end
 
@@ -343,7 +421,8 @@ function A.run(o)
     local e = st.edit
     local t = TYPE_BY[e.key]
     local d = desc[e.name] or { text = "?" }
-    titleBar(e.isNew and " ADD" or " EDIT", e.isNew and "step 2 of 2 " or nil)
+    titleBar(e.isNew and (e.flow and " ADD DEPOT" or " ADD") or " EDIT",
+      e.isNew and (e.flow and "step 3 of 3 " or "step 2 of 2 ") or nil)
     line2(e.isNew and "Pick its job, then Save." or e.auto and "Found by its name. Give it a job, or Ignore it."
       or "Change its job or nickname, or Delete it.")
     put(2, 3, "Name", C.dim);     put(12, 3, cut(e.name, w - 12), C.fg)
@@ -397,6 +476,13 @@ function A.run(o)
       warn = o.warn(e, d)
     end
     if warn and y < h - 1 then put(2, y, cut(warn, w - 2), C.warn); y = y + 1 end
+    if o.depot and e.key == o.depot.key and y < h - 1 then
+      local x = btn(2, y, e.depot and "Change" or "Pick item", false, function()
+        st.itemBack, st.depotName, st.filter, st.pg, st.page = "edit", e.name, "", 1, "item"
+      end)
+      put(x, y, cut(e.depot and ("Keeps " .. prettyName(e.depot)) or "Which item should it hold?", w - x), e.depot and C.fg or C.warn)
+      y = y + 1
+    end
     if o.extra and e.key == o.extra.key and y < h - 1 then
       local label, text = o.extra.show(e.extra)
       local x = btn(2, y, label, false, function() e.extraClick = true end)
@@ -422,7 +508,8 @@ function A.run(o)
     hits = {}
     term.setCursorBlink(false)
     term.setBackgroundColour(C.bg); term.setTextColour(C.fg); term.clear()
-    if st.page == "list" then drawList() elseif st.page == "pick" then drawPick() else drawEdit() end
+    if st.page == "list" then drawList() elseif st.page == "pick" then drawPick()
+    elseif st.page == "kind" then drawKind() elseif st.page == "item" then drawItem() else drawEdit() end
     local redraw = false
     while not redraw do
       local ev, a, b, c = os.pullEvent()
@@ -448,15 +535,26 @@ function A.run(o)
             if e.focus then e.nick = e.nick:sub(1, -2)
             else st.page, st.edit = e.isNew and "pick" or "list", nil end
           elseif st.filter ~= "" then st.filter, st.pg = st.filter:sub(1, -2), 1
-          elseif st.page == "pick" then st.page = "list" end
+          elseif st.page == "item" then st.page = st.itemBack == "edit" and "edit" or "pick"
+          elseif st.page == "pick" then st.page = o.depot and "kind" or "list"
+          elseif st.page == "kind" then st.page = "list" end
         elseif a == keys.delete and st.page ~= "edit" then
           st.filter, st.pg = "", 1
         elseif a == keys.enter or a == keys.numPadEnter then
           if st.page == "edit" then
             if e.focus then e.focus = false else save() end
-          elseif st.shown and #st.shown == 1 and st.filter ~= "" then
+          elseif st.page == "item" and st.shown and #st.shown == 1 and st.filter ~= "" then
+            local it = st.shown[1]
+            if st.itemBack == "edit" and st.edit then st.edit.depot, st.page = it.name, "edit"
+            else
+              openEdit(st.depotName, true)
+              st.edit.key, st.edit.depot, st.edit.flow = o.depot.key, it.name, true
+            end
+            st.filter, st.pg = "", 1
+          elseif st.shown and #st.shown == 1 and st.filter ~= "" and st.page ~= "kind" then
             local only = st.shown[1]
-            openEdit(type(only) == "table" and only.name or only, st.page == "pick")
+            local n = type(only) == "table" and only.name or only
+            if st.page == "pick" then chosen(n) else openEdit(n, false) end
           else redraw = false end
         elseif a == keys.tab and st.page == "edit" then
           e.focus = not e.focus
