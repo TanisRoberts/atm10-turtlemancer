@@ -19,10 +19,13 @@
 --   o.extra         -> optional extra setting for one job: { key, init(n) -> state,
 --                      show(state) -> label, text,  click(n, state, plain) [plain = a cleared
 --                      screen for typed input is ready],  plain = true/false,  save(n, state) }
---   o.depot         -> optional "keep this container filled with one item" job: { key,
---                      items(n) -> { { name, label, count }, ... } offered under "pick the item",
---                      get(n) -> item id or nil,  set(n, item) }. With it, + Add asks "Depot or
---                      other job?" first, and a depot goes container -> item -> summary.
+--   o.depots        -> optional "keep this container filled with one thing" jobs, a list of
+--                      { key, kind = "Depot", title = "DEPOT", about, what = "item",
+--                        tank = true/false (its containers are tanks, not inventories),
+--                        items(n) -> { { name, label, count }, ... } offered under "pick the item",
+--                        get(n) -> id or nil,  set(n, id) }. With them, + Add asks which kind (or
+--                      "Other job") first, and a depot goes container -> item -> summary.
+--   o.describe(n)   -> optional { text, count, size } for a container that has no item list (a tank)
 --   o.hold()/o.release()  pause / resume the program's own moving while "Find it" watches
 --   o.beforeSave()  wait until the program's worker is idle;  o.afterSave()  save + rescan
 --   o.itemTotals()  -> { [inventory] = item count }
@@ -76,6 +79,22 @@ function A.run(o)
   for _, t in ipairs(o.types) do TYPE_BY[t.key] = t end
   local call = o.call
   local names = o.names
+  local DEPOT_BY, hasDepots = {}, false
+  for _, d in ipairs(o.depots or {}) do DEPOT_BY[d.key] = d; hasDepots = true end
+  local function isTank(n)
+    for _, d in pairs(DEPOT_BY) do if d.tank and d.owns and d.owns(n) then return true end end
+    return false
+  end
+  local function typesFor(n)   -- a tank can only be a fluid depot, and nothing else can
+    local out = {}
+    local tank = isTank(n)
+    for _, t in ipairs(o.types) do
+      local d = DEPOT_BY[t.key]
+      if (d and d.tank or false) == tank or (not d and not tank) then out[#out + 1] = t end
+    end
+    return out
+  end
+  local function curDepot() return DEPOT_BY[st.itemBack == "edit" and st.edit and st.edit.key or st.depotFlow] end
 
   -- What's in each inventory, for the lists (cached while the screen is open)
   local function describe(list)
@@ -83,6 +102,8 @@ function A.run(o)
     for _, n in ipairs(list) do
       if not desc[n] then
         fns[#fns + 1] = function()
+          local custom = o.describe and peripheral.isPresent(n) and o.describe(n)
+          if custom then desc[n] = custom; return end
           local items = peripheral.isPresent(n) and call(n, "list")
           if not items then desc[n] = { missing = true, text = "not on the cable", count = 0 }; return end
           local size = call(n, "size") or 0
@@ -133,7 +154,9 @@ function A.run(o)
   local function unassigned()
     local out = {}
     for _, n in ipairs(o.inventories()) do
-      if not o.typeOf(n) and o.candidate(n) then out[#out + 1] = n end
+      if not o.typeOf(n) and o.candidate(n) and (not hasDepots or isTank(n) == (st.depotFlow and DEPOT_BY[st.depotFlow].tank or false)) then
+        out[#out + 1] = n
+      end
     end
     return out
   end
@@ -200,7 +223,7 @@ function A.run(o)
     st.edit = { name = n, orig = key, auto = autoKey ~= nil, autoKey = autoKey, nick = names[n] or "", isNew = isNew,
       key = key or autoKey or o.defaultKey(n) }
     if o.extra then st.edit.extra = o.extra.init(n) end
-    if o.depot and key == o.depot.key then st.edit.depot = o.depot.get(n) end
+    if DEPOT_BY[key] then st.edit.depot = DEPOT_BY[key].get(n) end
     st.page, st.note = "edit", nil
   end
 
@@ -247,7 +270,8 @@ function A.run(o)
 
   local function save()
     local e = st.edit
-    if o.depot and e.key == o.depot.key and not e.depot then
+    local dp = DEPOT_BY[e.key]
+    if dp and not e.depot then
       st.itemBack, st.depotName, st.filter, st.pg, st.page = "edit", e.name, "", 1, "item"
       return
     end
@@ -256,7 +280,7 @@ function A.run(o)
     if e.key ~= e.orig then bumped = o.assign(e.name, e.key) end
     if bumped == e.name then bumped = nil end
     if o.extra and e.key == o.extra.key then o.extra.save(e.name, e.extra) end
-    if o.depot and e.key == o.depot.key then o.depot.set(e.name, e.depot) end
+    if dp then dp.set(e.name, e.depot) end
     names[e.name] = e.nick ~= "" and e.nick or nil
     o.afterSave()
     backToList(("Saved: %s = %s%s"):format(shortName(e.name), TYPE_BY[e.key].label,
@@ -309,7 +333,7 @@ function A.run(o)
       region(1, w, y, function() openEdit(name, false) end)
     end
     local x = btn(2, h - 1, "+ Add", true, function()
-      st.page, st.filter, st.pg, st.note, st.depotFlow = o.depot and "kind" or "pick", "", 1, nil, false
+      st.page, st.filter, st.pg, st.note, st.depotFlow = hasDepots and "kind" or "pick", "", 1, nil, false
     end)
     btn(x, h - 1, "Done", false, function() st.done = true end)
     searchBar()
@@ -326,17 +350,22 @@ function A.run(o)
 
   local function drawKind()
     titleBar(" ADD", "what kind? ")
-    line2("A depot keeps a container filled with one item.")
+    line2("A depot keeps a container filled with one thing.")
     local y = 4
-    put(2, y, "Depot", C.fg); put(10, y, "keeps a container topped up with one item", C.dim)
-    btn(2, y + 1, "Depot", true, function() st.depotFlow, st.page, st.filter, st.pg = true, "pick", "", 1 end, colours.lightBlue)
-    put(2, y + 3, "Other", C.fg); put(10, y + 3, "input, output, dock, fuel, drawers...", C.dim)
-    btn(2, y + 4, "Other job", false, function() st.depotFlow, st.page, st.filter, st.pg = false, "pick", "", 1 end)
+    for _, d in ipairs(o.depots) do
+      put(2, y, d.kind, C.fg); put(16, y, cut(d.about, w - 16), C.dim)
+      local key = d.key
+      btn(2, y + 1, d.kind, true, function() st.depotFlow, st.page, st.filter, st.pg = key, "pick", "", 1 end, colours.lightBlue)
+      y = y + 3
+    end
+    put(2, y, "Other", C.fg); put(16, y, "input, output, dock, fuel, drawers...", C.dim)
+    btn(2, y + 1, "Other job", false, function() st.depotFlow, st.page, st.filter, st.pg = false, "pick", "", 1 end)
     btn(2, h - 1, "Back", false, function() st.page = "list" end)
   end
 
   local function drawItem()
-    local cands = o.depot.items(st.depotName)
+    local dp = curDepot()
+    local cands = dp.items(st.depotName)
     local shown = {}
     local q = st.filter:lower()
     for _, it in ipairs(cands) do
@@ -346,12 +375,12 @@ function A.run(o)
     end
     st.shown = shown
     local flow = st.itemBack == "pick"
-    titleBar(flow and " ADD DEPOT" or " DEPOT ITEM", flow and "step 2 of 3 " or nil)
+    titleBar(flow and (" ADD " .. dp.title) or (" " .. dp.title .. " " .. dp.what:upper()), flow and "step 2 of 3 " or nil)
     if #shown == 1 and st.filter ~= "" then line2("Enter (or click) picks " .. (shown[1].label or prettyName(shown[1].name)), C.good)
-    else line2("What should " .. cut(shortName(st.depotName), w - 24) .. " hold? Type to narrow it down.") end
+    else line2("Which " .. dp.what .. " should " .. cut(shortName(st.depotName), w - 32) .. " hold? Type to narrow it down.") end
     local top, rows = 3, math.max(1, h - 4)
     pager(h - 1, #shown, rows)
-    if #shown == 0 then put(2, top, cut("Nothing matches. Storage holds no such item.", w - 2), C.dim) end
+    if #shown == 0 then put(2, top, cut("Nothing matches. None of that " .. dp.what .. " is around.", w - 2), C.dim) end
     for i = 1, rows do
       local it = shown[(st.pg - 1) * rows + i]
       if not it then break end
@@ -368,7 +397,7 @@ function A.run(o)
           st.edit.depot, st.page = it.name, "edit"
         else
           openEdit(st.depotName, true)
-          st.edit.key, st.edit.depot, st.edit.flow = o.depot.key, it.name, true
+          st.edit.key, st.edit.depot, st.edit.flow = dp.key, it.name, true
         end
         st.filter, st.pg = "", 1
       end)
@@ -385,7 +414,7 @@ function A.run(o)
     local shown = {}
     for _, n in ipairs(cands) do if matches(n) then shown[#shown + 1] = n end end
     st.shown = shown
-    titleBar(st.depotFlow and " ADD DEPOT" or " ADD", st.depotFlow and "step 1 of 3 " or "step 1 of 2 ")
+    titleBar(st.depotFlow and (" ADD " .. DEPOT_BY[st.depotFlow].title) or " ADD", st.depotFlow and "step 1 of 3 " or "step 1 of 2 ")
     if #shown == 1 and st.filter ~= "" then line2("Enter (or click) picks " .. shortName(shown[1]), C.good)
     else line2("Type part of its name to narrow it down, or:") end
     btn(2, 3, "Find it: drop one item in", false, function()
@@ -412,7 +441,7 @@ function A.run(o)
       region(1, w, y, function() chosen(n) end)
     end
     btn(2, h - 1, "Back", false, function()
-      st.page, st.filter, st.pg = o.depot and "kind" or "list", "", 1
+      st.page, st.filter, st.pg = hasDepots and "kind" or "list", "", 1
     end)
     searchBar()
   end
@@ -421,7 +450,7 @@ function A.run(o)
     local e = st.edit
     local t = TYPE_BY[e.key]
     local d = desc[e.name] or { text = "?" }
-    titleBar(e.isNew and (e.flow and " ADD DEPOT" or " ADD") or " EDIT",
+    titleBar(e.isNew and (e.flow and (" ADD " .. DEPOT_BY[e.key].title) or " ADD") or " EDIT",
       e.isNew and (e.flow and "step 3 of 3 " or "step 2 of 2 ") or nil)
     line2(e.isNew and "Pick its job, then Save." or e.auto and "Found by its name. Give it a job, or Ignore it."
       or "Change its job or nickname, or Delete it.")
@@ -440,7 +469,12 @@ function A.run(o)
     put(2, 7, "Job", C.dim)
     local per = 3
     local bw = math.floor((w - 1) / per) - 1
-    for i, ty in ipairs(o.types) do
+    local types = typesFor(e.name)
+    local ok = false
+    for _, ty in ipairs(types) do if ty.key == e.key then ok = true end end
+    if not ok then e.key = types[1].key end
+    t = TYPE_BY[e.key]
+    for i, ty in ipairs(types) do
       local col, row = (i - 1) % per, math.floor((i - 1) / per)
       local x, y = 2 + col * (bw + 1), 8 + row
       local label = #ty.label <= bw - 1 and ty.label or ty.short
@@ -451,7 +485,7 @@ function A.run(o)
       local key = ty.key
       region(x, x + bw - 1, y, function() e.key = key; e.delArm = false end)
     end
-    local y = 8 + math.ceil(#o.types / per) + 1
+    local y = 8 + math.ceil(#types / per) + 1
     -- About the chosen job, wrapped over two lines
     local about, lines = t.about, {}
     while #about > 0 and #lines < 2 do
@@ -476,11 +510,12 @@ function A.run(o)
       warn = o.warn(e, d)
     end
     if warn and y < h - 1 then put(2, y, cut(warn, w - 2), C.warn); y = y + 1 end
-    if o.depot and e.key == o.depot.key and y < h - 1 then
-      local x = btn(2, y, e.depot and "Change" or "Pick item", false, function()
+    if DEPOT_BY[e.key] and y < h - 1 then
+      local dp = DEPOT_BY[e.key]
+      local x = btn(2, y, e.depot and "Change" or ("Pick " .. dp.what), false, function()
         st.itemBack, st.depotName, st.filter, st.pg, st.page = "edit", e.name, "", 1, "item"
       end)
-      put(x, y, cut(e.depot and ("Keeps " .. prettyName(e.depot)) or "Which item should it hold?", w - x), e.depot and C.fg or C.warn)
+      put(x, y, cut(e.depot and ("Keeps " .. prettyName(e.depot)) or ("Which " .. dp.what .. " should it hold?"), w - x), e.depot and C.fg or C.warn)
       y = y + 1
     end
     if o.extra and e.key == o.extra.key and y < h - 1 then
@@ -536,7 +571,7 @@ function A.run(o)
             else st.page, st.edit = e.isNew and "pick" or "list", nil end
           elseif st.filter ~= "" then st.filter, st.pg = st.filter:sub(1, -2), 1
           elseif st.page == "item" then st.page = st.itemBack == "edit" and "edit" or "pick"
-          elseif st.page == "pick" then st.page = o.depot and "kind" or "list"
+          elseif st.page == "pick" then st.page = hasDepots and "kind" or "list"
           elseif st.page == "kind" then st.page = "list" end
         elseif a == keys.delete and st.page ~= "edit" then
           st.filter, st.pg = "", 1
@@ -544,11 +579,11 @@ function A.run(o)
           if st.page == "edit" then
             if e.focus then e.focus = false else save() end
           elseif st.page == "item" and st.shown and #st.shown == 1 and st.filter ~= "" then
-            local it = st.shown[1]
+            local it, dp = st.shown[1], curDepot()
             if st.itemBack == "edit" and st.edit then st.edit.depot, st.page = it.name, "edit"
             else
               openEdit(st.depotName, true)
-              st.edit.key, st.edit.depot, st.edit.flow = o.depot.key, it.name, true
+              st.edit.key, st.edit.depot, st.edit.flow = dp.key, it.name, true
             end
             st.filter, st.pg = "", 1
           elseif st.shown and #st.shown == 1 and st.filter ~= "" and st.page ~= "kind" then

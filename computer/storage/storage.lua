@@ -83,6 +83,7 @@ local function loadCfg()
   cfg.fuels = cfg.fuels or {}
   cfg.drawers = cfg.drawers or {}   -- assigned as drawers (bulk storage) by hand, besides those found by name
   cfg.ignored = cfg.ignored or {}   -- never touched or counted
+  cfg.fluidDepots = cfg.fluidDepots or {}   -- tank -> the fluid storage keeps it filled with ("" = not chosen yet)
   cfg.depots = cfg.depots or {}     -- container -> the item storage keeps it filled with ("" = not chosen yet)
   cfg.names = cfg.names or {}       -- network name -> nickname, shown in /assign
   -- The smelter's factory barrels (from its broadcast): feeds are filled for it and never storage,
@@ -175,6 +176,8 @@ local TYPES = {
     about = "Bulk storage (a drawer controller): items it holds go there first. Still storage." },
   { key = "depot",     label = "Depot",          short = "Depot",   tag = "DEPOT",  col = colours.brown,
     about = "Kept full of one item from storage (buckets for a factory...). Not storage itself." },
+  { key = "fluidDepot", label = "Fluid depot",   short = "Fluid",   tag = "FLUID",  col = colours.blue,
+    about = "A tank kept full of one fluid, pulled from the other tanks on the cable. Not storage." },
   { key = "ignore",    label = "Ignore",         short = "Ignore",  tag = "IGNORE", col = colours.lightGrey,
     about = "Never touched or counted: storage pretends it isn't there." },
 }
@@ -184,6 +187,7 @@ local LISTS   = { input = "inputs", dock = "docks", fuel = "fuels", drawer = "dr
 local SINGLES = { output = "output", weaver = "weaver", pocketIn = "pocketIn", pocketOut = "pocketOut" }
 
 local function typeOf(n)
+  if cfg.fluidDepots and cfg.fluidDepots[n] ~= nil then return "fluidDepot" end
   if cfg.depots and cfg.depots[n] ~= nil then return "depot" end
   for key, field in pairs(SINGLES) do if cfg[field] == n then return key end end
   for key, field in pairs(LISTS) do
@@ -192,6 +196,7 @@ local function typeOf(n)
 end
 
 local function unassign(n)
+  if cfg.fluidDepots then cfg.fluidDepots[n] = nil end
   if cfg.depots then cfg.depots[n] = nil end
   for _, field in pairs(SINGLES) do if cfg[field] == n then cfg[field] = nil end end
   for _, field in pairs(LISTS) do if cfg[field] then listRemove(cfg[field], n) end end
@@ -205,6 +210,7 @@ end
 -- Give n a job (taking any old one away). Returns the inventory it pushed out of a single job.
 local function assign(n, key)
   unassign(n)
+  if key == "fluidDepot" then cfg.fluidDepots = cfg.fluidDepots or {}; cfg.fluidDepots[n] = ""; return end
   if key == "depot" then cfg.depots = cfg.depots or {}; cfg.depots[n] = ""; return end
   local single = SINGLES[key]
   if single then
@@ -224,6 +230,18 @@ local function inventories()
   for _, n in ipairs(peripheral.getNames()) do
     if peripheral.hasType(n, "inventory") then out[#out + 1] = n end
   end
+  table.sort(out)
+  return out
+end
+
+-- Fluid tanks on the cable (a PneumaticCraft small tank, a Mekanism tank...): peripherals with fluids but no
+-- item slots. They are never storage; only fluid depots and their source tanks.
+local function isTank(n)
+  return peripheral.hasType(n, "fluid_storage") and not peripheral.hasType(n, "inventory")
+end
+local function tankNames()
+  local out = {}
+  for _, n in ipairs(peripheral.getNames()) do if isTank(n) then out[#out + 1] = n end end
   table.sort(out)
   return out
 end
@@ -1133,6 +1151,28 @@ local function topUpDepots()
   return changed
 end
 
+-- Keep every fluid depot full of its fluid, pulled from the other tanks on the cable (never from another depot).
+local function topUpFluidDepots()
+  local changed = false
+  for d, fluid in pairs(cfg.fluidDepots or {}) do
+    if fluid ~= "" and peripheral.isPresent(d) then
+      for _, src in ipairs(tankNames()) do
+        if src ~= d and not (cfg.fluidDepots or {})[src] then
+          local has = 0
+          for _, f in pairs(call(src, "tanks") or {}) do
+            if f.name == fluid then has = has + (f.amount or 0) end
+          end
+          if has > 0 then
+            local moved = call(d, "pullFluid", src, nil, fluid) or 0
+            if moved > 0 then changed = true else break end   -- nothing moved: the depot is full
+          end
+        end
+      end
+    end
+  end
+  return changed
+end
+
 -- Fuel kept in each Canary fuel barrel: one stack of coal's worth (never more than a Canary's tank)
 local function canaryFuelTarget()
   return math.min(CANARY_FUEL, minerFuelLimit or REFILL)
@@ -1679,6 +1719,7 @@ local function workerLoop()
       if topUpFuel() then buildItems() end
       if topUpDocks() then buildItems() end
       if topUpDepots() then buildItems() end
+      topUpFluidDepots()
       if supplyWeaver() then buildItems() end
       if fillPocket() then buildItems() end
       if #jobs > 0 then
@@ -1937,38 +1978,80 @@ local function assignScreen()
     emptyText = "Nothing assigned yet. + Add, or /setup (markers).",
     types = TYPES, names = cfg.names, call = call,
     typeOf = typeOf, assign = assign, unassign = unassign,
-    inventories = inventories,
+    inventories = function()
+      local out = inventories()
+      for _, n in ipairs(tankNames()) do out[#out + 1] = n end
+      return out
+    end,
+    describe = function(n)
+      if not isTank(n) then return nil end
+      local tanks = call(n, "tanks") or {}
+      local best, kinds, total = nil, 0, 0
+      for _, t in pairs(tanks) do
+        if t.name and (t.amount or 0) > 0 then
+          kinds, total = kinds + 1, total + t.amount
+          if not best or t.amount > best.amount then best = t end
+        end
+      end
+      return { count = total, size = 0, text = best
+        and ((total >= 1000 and (math.floor(total / 100) / 10 .. " B") or (total .. " mB")) .. " " .. prettyName(best.name)
+          .. (kinds > 1 and (" +" .. (kinds - 1) .. " more") or ""))
+        or "empty tank" }
+    end,
     assignedNames = function()
       local out = {}
       for _, field in pairs(SINGLES) do if cfg[field] then out[#out + 1] = cfg[field] end end
       for _, field in pairs(LISTS) do for _, n in ipairs(cfg[field] or {}) do out[#out + 1] = n end end
       for n in pairs(cfg.depots or {}) do out[#out + 1] = n end
+      for n in pairs(cfg.fluidDepots or {}) do out[#out + 1] = n end
       return out
     end,
-    depot = {
-      key = "depot",
-      items = function(n)
-        local seen, out = {}, {}
-        for _, it in ipairs(items) do
-          if not seen[it.name] then
-            seen[it.name] = #out + 1
-            out[#out + 1] = { name = it.name, label = it.label, count = it.count }
-          else
-            out[seen[it.name]].count = out[seen[it.name]].count + it.count
+    depots = {
+      { key = "depot", kind = "Depot", title = "DEPOT", what = "item", tank = false,
+        about = "keeps a container topped up with one item",
+        items = function(n)
+          local seen, out = {}, {}
+          for _, it in ipairs(items) do
+            if not seen[it.name] then
+              seen[it.name] = #out + 1
+              out[#out + 1] = { name = it.name, label = it.label, count = it.count }
+            else
+              out[seen[it.name]].count = out[seen[it.name]].count + it.count
+            end
           end
-        end
-        -- what the container holds now may not be in storage at all
-        for _, it in pairs(call(n, "list") or {}) do
-          if not seen[it.name] then
-            seen[it.name] = #out + 1
-            out[#out + 1] = { name = it.name, label = prettyName(it.name), count = 0 }
+          -- what the container holds now may not be in storage at all
+          for _, it in pairs(call(n, "list") or {}) do
+            if not seen[it.name] then
+              seen[it.name] = #out + 1
+              out[#out + 1] = { name = it.name, label = prettyName(it.name), count = 0 }
+            end
           end
-        end
-        table.sort(out, function(a, b) return a.label:lower() < b.label:lower() end)
-        return out
-      end,
-      get = function(n) local d = cfg.depots and cfg.depots[n]; return d ~= "" and d or nil end,
-      set = function(n, item) cfg.depots[n] = item end,
+          table.sort(out, function(a, b) return a.label:lower() < b.label:lower() end)
+          return out
+        end,
+        get = function(n) local d = cfg.depots and cfg.depots[n]; return d ~= "" and d or nil end,
+        set = function(n, item) cfg.depots[n] = item end,
+      },
+      { key = "fluidDepot", kind = "Fluid depot", title = "FLUID DEPOT", what = "fluid", tank = true,
+        about = "keeps a tank full of one fluid from the other tanks",
+        owns = isTank,
+        items = function(n)
+          local total, out = {}, {}
+          for _, t in ipairs(tankNames()) do
+            for _, f in pairs(call(t, "tanks") or {}) do
+              if f.name and (f.amount or 0) > 0 then total[f.name] = (total[f.name] or 0) + f.amount end
+            end
+          end
+          for _, f in pairs(call(n, "tanks") or {}) do
+            if f.name and f.name ~= "minecraft:empty" and not total[f.name] then total[f.name] = 0 end
+          end
+          for name, amount in pairs(total) do out[#out + 1] = { name = name, label = prettyName(name), count = amount } end
+          table.sort(out, function(a, b) return a.label:lower() < b.label:lower() end)
+          return out
+        end,
+        get = function(n) local d = cfg.fluidDepots and cfg.fluidDepots[n]; return d ~= "" and d or nil end,
+        set = function(n, fluid) cfg.fluidDepots[n] = fluid end,
+      },
     },
     candidate = function(n) return not isMachine(n) and not isSmelterFeed(n) and not isSmelterOut(n) end,
     auto = function(n) if isDrawer(n) then return "drawer" end end,   -- drawers found by their name

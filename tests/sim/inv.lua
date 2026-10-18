@@ -212,4 +212,45 @@ function Furnace:touch()
   end
 end
 
+---------------------------------------------------------------------------
+-- Tank: a fluid_storage peripheral (a PneumaticCraft small tank): tanks(), pushFluid(), pullFluid().
+-- Like CC:Tweaked it reports name and amount only (no capacity). One fluid at a time, `capacity` mB.
+---------------------------------------------------------------------------
+local Tank = {}
+Tank.__index = Tank
+Inv.Tank = Tank
+Tank.peripheralMethods = { "tanks", "pushFluid", "pullFluid" }
+function Tank.new(opts)
+  opts = opts or {}
+  return setmetatable({ capacity = opts.capacity or 16000, fluid = opts.fluid, amount = opts.amount or 0,
+                        types = opts.types or { "pneumaticcraft:small_tank", "fluid_storage" } }, Tank)
+end
+function Tank:tanks()
+  if self.fluid and self.amount > 0 then return { { name = self.fluid, amount = self.amount } } end
+  return { { name = "minecraft:empty", amount = 0 } }
+end
+function Tank:pushFluid(toName, limit, fluidName)
+  if not self.net then error("Not on a wired network", 2) end
+  local to = self.net:get(toName)
+  if not to or not to.fill then error("Target '" .. tostring(toName) .. "' is not a fluid tank", 2) end
+  if not self.fluid or self.amount <= 0 or (fluidName and fluidName ~= self.fluid) then return 0 end
+  local n = to:fill(self.fluid, math.min(limit or self.amount, self.amount))
+  self.amount = self.amount - n
+  return n
+end
+function Tank:pullFluid(fromName, limit, fluidName)
+  if not self.net then error("Not on a wired network", 2) end
+  local from = self.net:get(fromName)
+  if not from or not from.fill then error("Target '" .. tostring(fromName) .. "' is not a fluid tank", 2) end
+  return from:pushFluid(self.netName, limit, fluidName)
+end
+-- test-side: returns how much was taken in
+function Tank:fill(fluid, n)
+  if self.fluid and self.amount > 0 and self.fluid ~= fluid then return 0 end
+  n = math.min(n, self.capacity - self.amount)
+  if n <= 0 then return 0 end
+  self.fluid, self.amount = fluid, self.amount + n
+  return n
+end
+
 return Inv
