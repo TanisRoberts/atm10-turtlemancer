@@ -122,3 +122,26 @@ T.test("storage: a tank is never touched when it is not a fluid depot or the flu
   T.waitFor(w, function() return depot.amount == 3000 end, 60, "lava never moved")
   T.running(c)
 end)
+
+T.test("storage: a tank that also has item slots (PneumaticCraft bucket slots) is still a tank, not storage", function()
+  local w, c, inv = base()
+  local net = inv[0].net
+  net:add("pneumaticcraft:small_tank_0", cc.Inv.Tank.new{ capacity = 16000, fluid = "minecraft:lava", amount = 9000 })
+  local depot = net:add("pneumaticcraft:small_tank_1", cc.Inv.Tank.new{ capacity = 4000,
+    types = { "pneumaticcraft:small_tank", "fluid_storage", "inventory" } })
+  depot.peripheralMethods = { "tanks", "pushFluid", "pullFluid", "size", "list" }
+  function depot:size() return 2 end
+  function depot:list() return {} end
+  inv[0]:give("minecraft:iron_ingot", 10)
+  c:run("storage")
+  T.waitFor(w, function() return inv[0]:isEmpty() end, 60)
+  c:type("/assign"); c:key(257)
+  w:run(2)
+  tap(w, c, "+ Add")
+  c:click(3, 8); w:run(1)
+  T.contains(c.screen, "small_tank_1")
+  local text = c.screen:text()
+  local _, count = text:gsub("small_tank_1", "")
+  T.eq(count, 1, "listed once")
+  T.running(c)
+end)

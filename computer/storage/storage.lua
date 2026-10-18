@@ -144,7 +144,19 @@ local smelterHold = {}   -- out barrels the smelter is counting (trying an ore):
 local function isSmelterFeed(n) return cfg.smelterFeeds and cfg.smelterFeeds[n] == true end
 local function isSmelterOut(n) return cfg.smelterOuts and cfg.smelterOuts[n] == true end
 
+-- Fluid tanks on the cable (a PneumaticCraft small tank, a Mekanism tank...). Some also have item slots
+-- (PneumaticCraft tanks have bucket slots), so they can show up as inventories too: a tank is never
+-- storage, only a fluid depot or the source for one.
+local function isTank(n)
+  if peripheral.hasType(n, "fluid_storage") then return true end
+  for _, m in ipairs(peripheral.getMethods(n) or {}) do
+    if m == "pullFluid" then return true end
+  end
+  return false
+end
+
 local function isSpecial(n)
+  if isTank(n) then return true end
   if isSmelterFeed(n) or isSmelterOut(n) then return true end
   if n == cfg.output or n == cfg.weaver or n == cfg.pocketIn or n == cfg.pocketOut then return true end
   for _, d in ipairs(cfg.docks or {}) do if d == n then return true end end
@@ -234,11 +246,6 @@ local function inventories()
   return out
 end
 
--- Fluid tanks on the cable (a PneumaticCraft small tank, a Mekanism tank...): peripherals with fluids but no
--- item slots. They are never storage; only fluid depots and their source tanks.
-local function isTank(n)
-  return peripheral.hasType(n, "fluid_storage") and not peripheral.hasType(n, "inventory")
-end
 local function tankNames()
   local out = {}
   for _, n in ipairs(peripheral.getNames()) do if isTank(n) then out[#out + 1] = n end end
@@ -1979,8 +1986,9 @@ local function assignScreen()
     types = TYPES, names = cfg.names, call = call,
     typeOf = typeOf, assign = assign, unassign = unassign,
     inventories = function()
-      local out = inventories()
-      for _, n in ipairs(tankNames()) do out[#out + 1] = n end
+      local out, seen = inventories(), {}
+      for _, n in ipairs(out) do seen[n] = true end
+      for _, n in ipairs(tankNames()) do if not seen[n] then out[#out + 1] = n end end
       return out
     end,
     describe = function(n)
