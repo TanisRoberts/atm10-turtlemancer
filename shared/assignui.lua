@@ -426,7 +426,16 @@ function A.run(o)
     local top, rows = 4, math.max(1, h - 5)
     pager(h - 1, #shown, rows)
     if #shown == 0 then
-      put(2, top, cut(#cands == 0 and "Every inventory on the cable has a job already." or "Nothing without a job matches.", w - 2), C.dim)
+      local dp = st.depotFlow and DEPOT_BY[st.depotFlow]
+      if #cands == 0 and dp and dp.diagnose then
+        put(2, top, cut("No " .. dp.what .. " containers found. What the cable shows:", w - 2), C.warn)
+        for i, l in ipairs(dp.diagnose()) do
+          if top + i >= h - 1 then break end
+          put(2, top + i, cut(l, w - 2), C.dim)
+        end
+      else
+        put(2, top, cut(#cands == 0 and "Every inventory on the cable has a job already." or "Nothing without a job matches.", w - 2), C.dim)
+      end
     end
     local nw = math.max(10, math.floor((w - 4) / 2))
     for i = 1, rows do

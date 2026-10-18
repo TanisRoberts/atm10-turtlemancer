@@ -2049,6 +2049,18 @@ local function assignScreen()
       { key = "fluidDepot", kind = "Fluid depot", title = "FLUID DEPOT", what = "fluid", tank = true,
         about = "keeps a tank full of one fluid from the other tanks",
         owns = isTank,
+        diagnose = function()   -- shown when no tank is found: what the cable has that looks like one
+          local out = {}
+          for _, n in ipairs(peripheral.getNames()) do
+            if n:find("tank") or n:find("fluid") or n:find("pneumatic") or peripheral.hasType(n, "fluid_storage") then
+              out[#out + 1] = n
+              out[#out + 1] = "  type: " .. table.concat({ peripheral.getType(n) }, ",")
+              out[#out + 1] = "  methods: " .. table.concat(peripheral.getMethods(n) or {}, " ")
+            end
+          end
+          if #out == 0 then out[1] = "nothing named tank/fluid/pneumatic" end
+          return out
+        end,
         items = function(n)
           local total, out = {}, {}
           for _, t in ipairs(tankNames()) do
