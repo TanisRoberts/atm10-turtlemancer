@@ -148,11 +148,17 @@ local function isSmelterOut(n) return cfg.smelterOuts and cfg.smelterOuts[n] == 
 -- (PneumaticCraft tanks have bucket slots), so they can show up as inventories too: a tank is never
 -- storage, only a fluid depot or the source for one.
 local function isTank(n)
-  if peripheral.hasType(n, "fluid_storage") then return true end
-  for _, m in ipairs(peripheral.getMethods(n) or {}) do
-    if m == "pullFluid" then return true end
+  local fluid = peripheral.hasType(n, "fluid_storage")
+  if not fluid then
+    for _, m in ipairs(peripheral.getMethods(n) or {}) do
+      if m == "pullFluid" then fluid = true; break end
+    end
   end
-  return false
+  if not fluid then return false end
+  -- Something with item slots as well is a tank only if it says so by name (PneumaticCraft's small_tank):
+  -- a Functional Storage drawer controller also offers fluids and must stay storage.
+  if peripheral.hasType(n, "inventory") then return n:find("tank") ~= nil end
+  return true
 end
 
 local function isSpecial(n)

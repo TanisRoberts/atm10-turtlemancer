@@ -145,3 +145,17 @@ T.test("storage: a tank that also has item slots (PneumaticCraft bucket slots) i
   T.eq(count, 1, "listed once")
   T.running(c)
 end)
+
+T.test("storage: a drawer controller that also offers fluids stays storage, not a tank", function()
+  local w, c, inv = base()
+  local net = inv[0].net
+  local drawer = net:add("functionalstorage:storage_controller_0", cc.Inv.new{ size = 4, slotLimit = 100000,
+    types = { "functionalstorage:storage_controller", "inventory", "fluid_storage" } })
+  drawer.peripheralMethods = { "size", "list", "getItemDetail", "getItemLimit", "pushItems", "pullItems", "tanks", "pushFluid", "pullFluid" }
+  inv[0]:give("minecraft:copper_ingot", 64)
+  c:run("storage")
+  T.waitFor(w, function() return inv[0]:isEmpty() end, 60, "input never emptied")
+  w:run(10)
+  T.eq(drawer:count("minecraft:copper_ingot"), 64, "drawers come first for storage")
+  T.running(c)
+end)
