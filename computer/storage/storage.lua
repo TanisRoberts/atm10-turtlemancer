@@ -2052,13 +2052,13 @@ local function assignScreen()
         diagnose = function()   -- shown when no tank is found: what the cable has that looks like one
           local out = {}
           for _, n in ipairs(peripheral.getNames()) do
-            if n:find("tank") or n:find("fluid") or n:find("pneumatic") or peripheral.hasType(n, "fluid_storage") then
+            if n:find("^pneumaticcraft:small_tank") then
               out[#out + 1] = n
               out[#out + 1] = "  type: " .. table.concat({ peripheral.getType(n) }, ",")
               out[#out + 1] = "  methods: " .. table.concat(peripheral.getMethods(n) or {}, " ")
             end
           end
-          if #out == 0 then out[1] = "nothing named tank/fluid/pneumatic" end
+          if #out == 0 then out[1] = "no pneumaticcraft:small_tank on the cable" end
           return out
         end,
         items = function(n)

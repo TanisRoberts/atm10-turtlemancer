@@ -171,5 +171,6 @@ T.test("storage: with no tank found, the Fluid depot picker shows what the cable
   c:click(3, 8); w:run(1)
   T.contains(c.screen, "No fluid containers found")
   T.contains(c.screen, "type: pneumaticcraft:small_tank")
+  T.absent(c.screen, "barrel_2", "only the small tank is probed")
   T.running(c)
 end)
