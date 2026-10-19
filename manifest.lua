@@ -216,10 +216,19 @@ local M = {
   },
 }
 
+-- Every turtle role gets the turtle core (docs/systems/turtle.md): one list here, appended to each role's files.
+-- A new core file is added to this list only. (Aliases below share the role tables, so they get it too.)
+local T = M.types.turtle
+T.core = { "shared/turtlecore.lua", "shared/turtlecore_gps.lua", "shared/turtlecore_fuel.lua", "shared/turtlecore_dock.lua" }
+-- (The manifest runs with an empty environment: no ipairs, only plain Lua.)
+for i = 1, #T.order do
+  local files = T.roles[T.order[i]].files
+  for j = 1, #T.core do files[#files + 1] = T.core[j] end
+end
+
 -- The turtles were renamed in Oct 2026 (birds). Devices still set up under an old role id boot through
 -- the alias once; startup.lua then switches their device.cfg (and a label starting with the old
 -- name, e.g. Digger-04 -> Canary-04) to the new one. Aliases aren't in `order`, so setup never offers them.
-local T = M.types.turtle
 T.renamed = { digger = "canary", pigger = "canary", firecrest = "canary", rigger = "weaver",
               tigger = "woodpecker", figger = "partridge", zigger = "seagull" }
 T.oldNames = { canary = "Digger", weaver = "Rigger",

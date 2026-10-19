@@ -145,14 +145,7 @@ local function survey(fresh)
   local old = (not fresh) and B.Z or nil
   local anchor = old and old.anchor
   if fresh then S.x, S.y, S.z, S.h = 0, 0, 0, 0; B.save() end
-  for s = 1, 16 do
-    local d = turtle.getItemDetail(s)
-    if d and not isSapling(d.name) and B.fuel() < 2000 then
-      turtle.select(s)
-      if turtle.refuel(0) then turtle.refuel() end
-    end
-  end
-  turtle.select(1)
+  B.core.fuel.refuelFromInventory(2000)
   if B.fuel() < 300 then
     error(("Only %d fuel. Put some coal in me and say: island %s survey"):format(B.fuel(), B.NAME:lower()), 0)
   end
@@ -331,7 +324,6 @@ local function dock()
   return B.dock({
     keep = function(name, already) if isSapling(name) then return B.E.KEEP_SAPLINGS - already end return 0 end,
     want = function(name, have) if isSapling(name) then return B.E.KEEP_SAPLINGS - have end return 0 end,
-    burnOwn = isLog,
   })
 end
 

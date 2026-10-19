@@ -13,6 +13,8 @@
 -- The turtle program supplies the farming itself (see R in B.run).
 
 local B = {}
+local core = dofile("turtlecore.lua")   -- fuel, dock and GPS shared by every turtle (docs/systems/turtle.md)
+B.core = core
 
 local PROTOCOL = "tanis-farm"
 local DX = { [0] = 0, 1, 0, -1 }
@@ -192,10 +194,7 @@ end
 function B.dirTo(x, z)
   for h = 0, 3 do if S.x + DX[h] == x and S.z + DZ[h] == z then return h end end
 end
-function B.fuel()
-  local f = turtle.getFuelLevel()
-  return f == "unlimited" and math.huge or f
-end
+function B.fuel() return core.fuel.level() end
 function B.freeSlots()
   local n = 0
   for s = 1, 16 do if turtle.getItemCount(s) == 0 then n = n + 1 end end
@@ -253,13 +252,11 @@ end
 -- (compass direction of farm heading 0) }
 ---------------------------------------------------------------------------
 B.gpsOk = nil
-function B.locate(timeout)
-  local ok, x, y, z = pcall(gps.locate, timeout or 2)
-  if ok and x then
-    B.gpsOk = true
-    return math.floor(x + 0.5), math.floor(y + 0.5), math.floor(z + 0.5)
-  end
-  B.gpsOk = false
+-- x, y, z of a fresh GPS fix, or nil. The last known fix (core.gps) is no use here: where he IS matters.
+function B.locate(timeout, retries)
+  local ok, x, y, z, stale = core.gps.locate(timeout, retries)
+  B.gpsOk = ok and not stale
+  if B.gpsOk then return x, y, z end
 end
 
 local function rot(x, z, f)          -- turn a flat vector f quarter-turns clockwise
@@ -395,117 +392,39 @@ end
 ---------------------------------------------------------------------------
 -- Dock
 ---------------------------------------------------------------------------
-local DOCK_FUEL = { ["minecraft:coal"] = true, ["minecraft:charcoal"] = true, ["minecraft:coal_block"] = true,
-  ["minecraft:blaze_rod"] = true }
-B.DOCK_FUEL = DOCK_FUEL
-
-local function dockOps(dir)
-  if dir == "up" then return turtle.dropUp, turtle.suckUp end
-  if dir == "down" then return turtle.dropDown, turtle.suckDown end
-  return turtle.drop, turtle.suck
+-- Where his dock barrel is in the world (needs the map pinned to GPS): x, y, z, or nil
+function B.dockPos()
+  local Z = B.Z
+  if not (Z and Z.anchor and Z.dockDir) then return nil end
+  local hx, hz = unkey(Z.home or "0,0")
+  local dx, dy, dz = 0, 0, 0
+  if Z.dockDir == "up" then dy = 1 elseif Z.dockDir == "down" then dy = -1
+  else dx, dz = DX[Z.dockDir], DZ[Z.dockDir] end
+  return B.toAbs(hx + dx, dy, hz + dz)
 end
 
-local DOCK_SIDE = { up = "top", down = "bottom" }
-
--- What's in the dock barrel (a turtle can read the inventory next to it), or nil if it can't tell
-local function dockList(dir)
-  local side = DOCK_SIDE[dir] or "front"
-  if not peripheral.hasType or not peripheral.hasType(side, "inventory") then return nil end
-  local ok, l = pcall(peripheral.call, side, "list")
-  return ok and type(l) == "table" and l or nil
-end
-
-local function holding(name, except)
-  local n = 0
-  for s = 1, 16 do
-    if s ~= except then
-      local d = turtle.getItemDetail(s)
-      if d and d.name == name then n = n + d.count end
-    end
-  end
-  return n
-end
-
--- Take what he needs out of the dock: fuel up to the target, plus o.want(name, have) more of
--- anything he restocks from it (saplings, say). suck() always hands over the barrel's FIRST stack,
--- so things he doesn't want are held in spare slots and only put back at the end: dropping them
--- straight back would just get them sucked again (and used to stop him looking any further).
--- Returns { [name] = taken } for the restocked items.
-local function rummage(drop, suck, dir, target, want)
-  local got = {}
-  local function fuelNeeded() return target > 0 and B.fuel() < target end
-  local function wantsFromDock()
-    if not want then return false end
-    local l = dockList(dir)
-    if not l then return true end              -- can't see in: have a look anyway
-    for _, it in pairs(l) do if want(it.name, holding(it.name)) > 0 then return true end end
-    return false
-  end
-  local function fuelInDock()
-    local l = dockList(dir)
-    if not l then return true end
-    for _, it in pairs(l) do if DOCK_FUEL[it.name] then return true end end
-    return false
-  end
-  local held = {}
-  for _ = 1, 27 do
-    local needFuel = fuelNeeded() and fuelInDock()
-    if not needFuel and not wantsFromDock() then break end
-    local free
-    for s = 16, 1, -1 do if turtle.getItemCount(s) == 0 then free = s; break end end
-    if not free then break end
-    turtle.select(free)
-    if not suck() then break end
-    local d = turtle.getItemDetail(free)
-    if d and DOCK_FUEL[d.name] and fuelNeeded() then
-      while fuelNeeded() and turtle.getItemCount(free) > 0 do turtle.refuel(1) end
-    end
-    local count = turtle.getItemCount(free)
-    if d and count > 0 then
-      local keep = want and math.max(0, math.min(count, want(d.name, holding(d.name, free)))) or 0
-      if keep > 0 then
-        got[d.name] = (got[d.name] or 0) + keep
-        if count > keep then drop(count - keep) end   -- he has enough now, so it won't be taken again
-        if turtle.getItemCount(free) > keep then held[#held + 1] = free end   -- dock full: hand it back later
-      else
-        held[#held + 1] = free
-      end
-    end
-  end
-  for _, s in ipairs(held) do
-    turtle.select(s)
-    local d = turtle.getItemDetail(s)
-    if d then
-      local keep = want and math.max(0, math.min(d.count, want(d.name, holding(d.name, s)))) or 0
-      if d.count > keep then drop(d.count - keep) end
-    end
-  end
-  turtle.select(1)
-  return got
+-- Tell Storage where the dock is (core.dock.report), now and then
+function B.reportDock()
+  local x, y, z = B.dockPos()
+  if not x then return end
+  core.dock.set({ x = x, y = y, z = z }, B.Z.dockDir)
+  core.dock.maybeReport({ role = B.ROLE })
 end
 
 -- Refuel first (so he never grabs his own produce back), then unload everything except what
--- o.keep(name, alreadyKept) says to keep. o.burnOwn(name): his own items he may burn if the dock is dry.
+-- o.keep(name, alreadyKept) says to keep. If the dock is dry he burns fuel he carries (core.fuel: sticks
+-- at the bottom, never logs).
 -- o.want(name, have): how many more of an item to take FROM the dock (restocking; storage keeps it
 -- there through the dock's Keeps list on the storage computer). B.lastRestock = what he took.
 function B.dock(o)
   B.setStatus("docked", "Unloading")
   local dir = B.Z.dockDir
   if dir ~= "up" and dir ~= "down" then B.face(dir) end
-  local drop, suck = dockOps(dir)
+  local drop, suck = core.dock.ops(dir)
   local limit = turtle.getFuelLimit()
   local target = math.min(B.E.FUEL_TARGET or 3000, limit == "unlimited" and 0 or limit)
-  local restocked = rummage(drop, suck, dir, target, o.want)
-  if B.fuel() < 500 and o.burnOwn then
-    for s = 1, 16 do
-      local d = turtle.getItemDetail(s)
-      if d and o.burnOwn(d.name) then
-        turtle.select(s)
-        while B.fuel() < 1000 and turtle.getItemCount(s) > 0 and turtle.refuel(1) do end
-      end
-      if B.fuel() >= 1000 then break end
-    end
-  end
+  local restocked = core.fuel.refuelFromDock(dir, target, o.want)
+  if B.fuel() < 500 then core.fuel.refuelFromInventory(1000) end
   local haul, kept = {}, {}
   for s = 1, 16 do
     local d = turtle.getItemDetail(s)
@@ -524,7 +443,7 @@ function B.dock(o)
   end
   turtle.select(1)
   -- Second look now he has room (fuel or saplings may have been behind things he couldn't hold)
-  for n, c in pairs(rummage(drop, suck, dir, target, o.want)) do restocked[n] = (restocked[n] or 0) + c end
+  for n, c in pairs(core.fuel.refuelFromDock(dir, target, o.want)) do restocked[n] = (restocked[n] or 0) + c end
   B.lastRestock = next(restocked) and restocked or nil
   local list = {}
   S.totals = S.totals or {}
@@ -798,6 +717,7 @@ function B.mainLoop(R)
       if settle(R, "found") then B.setStatus("docked", "Found my way, thanks") end
     end
     B.save()
+    if B.Z and not S.lost then pcall(B.reportDock) end
 
     if S.lost then
       if S.status ~= "lost" then B.setStatus("lost", "Lost. Put me back on my home spot, then press Found") end
@@ -816,7 +736,7 @@ function B.mainLoop(R)
       end
     elseif not S.paused and now() >= (S.nextAt or 0) then
       if B.fuel() < (B.E.FUEL_LOW or 150) then
-        pcall(R.goHome); pcall(R.dock)
+        core.dock.visit(R.dock)
         if B.fuel() < (B.E.FUEL_LOW or 150) then
           B.setStatus("waiting", "Need fuel in my dock")
           S.nextAt = now() + 60000
@@ -873,6 +793,7 @@ function B.run(cfg, R, args)
     local f = fs.open("startup.lua", "w"); f.write('shell.run("' .. cfg.prog .. '")\n'); f.close()
   end
   if S.x == nil then S.x, S.y, S.z, S.h = 0, 0, 0, 0 end
+  core.dock.setHooks({ go = R.goHome })
   -- Restarted mid-move: fuel tells whether the move happened
   if S.pending then
     local f = turtle.getFuelLevel()

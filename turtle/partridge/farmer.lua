@@ -141,14 +141,7 @@ local function survey(fresh)
     B.save()
   end
   -- Fuel check before wandering anywhere: burn anything burnable he's carrying first
-  for s = 1, 16 do
-    local d = turtle.getItemDetail(s)
-    if d and not isSeedItem(d.name) and B.fuel() < 2000 then
-      turtle.select(s)
-      if turtle.refuel(0) then turtle.refuel() end
-    end
-  end
-  turtle.select(1)
+  B.core.fuel.refuelFromInventory(2000)
   if B.fuel() < 300 then
     error(("Only %d fuel. Put some coal in me and say: island %s survey"):format(B.fuel(), B.NAME:lower()), 0)
   end

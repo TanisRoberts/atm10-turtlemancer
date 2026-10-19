@@ -24,7 +24,7 @@ Most files are big (smelter 109 KB, storage 88 KB, miner 74 KB, nether 72 KB, ne
 - `computer/<role>/`: mainframe (island strip, status board, butler, links to every other system), storage (the only computer that moves items in or out of storage), smelter, foreman (Overworld miners), nether (Nether Foreman), farmhand, architect (Weaver's controller), gps, plastic, neural, art.
 - `turtle/<role>/`: miner (one program, named by dimension), weaver (builder), woodpecker (lumberjack), partridge (farmer), seagull (cartographer), bowerbird (crafter).
 - `glasses/hud/`: smart glasses HUD.
-- `shared/`: modules used by several roles (farmbot, assignui, mapchunk, weaverplan).
+- `shared/`: modules used by several roles (turtlecore: every turtle's fuel, dock and GPS, see `docs/systems/turtle.md`; farmbot, assignui, mapchunk, weaverplan).
 - `docs/`: workflow, team prompts, design specs, per-system notes.
 
 ## Names

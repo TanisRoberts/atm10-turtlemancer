@@ -24,7 +24,8 @@ Turtle.drops = {
 Turtle.unbreakable = { ["minecraft:bedrock"] = true }
 -- seconds of smelting a unit of fuel is worth in turtle fuel
 Turtle.fuelValue = { ["minecraft:coal"] = 80, ["minecraft:charcoal"] = 80, ["minecraft:lava_bucket"] = 1000,
-                     ["minecraft:blaze_rod"] = 120, ["minecraft:stick"] = 5, ["minecraft:oak_planks"] = 15 }
+                     ["minecraft:blaze_rod"] = 120, ["minecraft:stick"] = 5, ["minecraft:oak_planks"] = 15,
+                     ["minecraft:coal_block"] = 800, ["mekanism:bio_fuel"] = 5, ["minecraft:oak_log"] = 15 }
 -- placed blocks that carry an inventory
 Turtle.containers = {
   ["minecraft:barrel"] = function() return Inv.new({ size = 27, types = { "minecraft:barrel", "inventory" } }) end,
@@ -230,7 +231,9 @@ function Turtle.api(world, c)
         local s = inv.slots[i]
         if s then
           local want = math.min(count or s.count, s.count, Inv.stackOf(s.name))
-          local put = b.inv:insert(s.name, want)
+          -- like CC: the selected slot fills first, then any other
+          local put = b.inv:insert(s.name, want, b.sel)
+          if put < want then put = put + b.inv:insert(s.name, want - put) end
           if put > 0 then inv:extract(i, put); return true end
         end
       end
