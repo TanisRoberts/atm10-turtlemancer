@@ -36,10 +36,15 @@ function rangeText(a, b, r1, r2)
   return (n and (n .. " ") or "") .. a .. ".." .. b
 end
 function sq(r) return 2 * r + 1 end
+-- How many chunks rings r1..r2 cover (ring 0 = the dock's chunk; from ring r1 skips the middle (2*r1-1)^2)
+function chunkCount(r1, r2)
+  r1, r2 = r1 or 0, r2 or DEF_R2
+  return sq(r2) * sq(r2) - (r1 > 0 and sq(r1 - 1) * sq(r1 - 1) or 0)
+end
 function ringText(r1, r2)
   r1, r2 = r1 or 0, r2 or DEF_R2
-  if r1 <= 0 then return ("chunk rings 0-%d, %dx%d chunks"):format(r2, sq(r2), sq(r2)) end
-  return ("chunk rings %d-%d, %dx%d chunks"):format(r1, r2, sq(r2), sq(r2))
+  if r1 <= 0 then return ("chunk rings 0-%d, %d chunks (%dx%d)"):format(r2, chunkCount(r1, r2), sq(r2), sq(r2)) end
+  return ("chunk rings %d-%d, %d chunks"):format(r1, r2, chunkCount(r1, r2))
 end
 function isSelected(dd, p)
   return dd.pMin == p.minY and dd.pMax == p.maxY and dd.pR1 == p.r1 and dd.pR2 == p.r2

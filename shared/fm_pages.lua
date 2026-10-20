@@ -353,8 +353,8 @@ function drawControls(id, x, y, w, maxY)
   numRow(x, y, w, "Max Y", dd.pMax, yStep, function(dv) adjust(id, dd, "pMax", dv) end); y = y + 1
   numRow(x, y, w, w >= 26 and "From ring" or "Ring>", dd.pR1, rStep, function(dv) adjust(id, dd, "pR1", dv) end); y = y + 1
   numRow(x, y, w, w >= 26 and "To ring" or "Ring<", dd.pR2, rStep, function(dv) adjust(id, dd, "pR2", dv) end); y = y + 1
-  local hint, hc = ("Area %dx%d chunks"):format(sq(dd.pR2), sq(dd.pR2)), K.grey
-  if dd.pR1 > 0 then hint = hint .. (", skips middle %dx%d"):format(sq(dd.pR1 - 1), sq(dd.pR1 - 1)) end
+  local hint, hc = ("%d chunks, %dx%d"):format(chunkCount(dd.pR1, dd.pR2), sq(dd.pR2), sq(dd.pR2)), K.grey
+  if dd.pR1 > 0 then hint = hint .. (" minus %dx%d"):format(sq(dd.pR1 - 1), sq(dd.pR1 - 1)) end
   -- A force-loaded dock keeps the 8 chunks round it running too; further out needs a chunk controller
   if dd.pR2 > 1 and s and not s.chunky then hint, hc = "Past ring 1: needs a chunk controller", K.orange end
   if s and s.seq ~= dd.seq then hint, hc = "Sending...", K.yellow

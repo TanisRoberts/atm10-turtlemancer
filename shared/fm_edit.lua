@@ -175,8 +175,8 @@ function drawEdit(w, h, kind)
   do local c = e.maxY - 1; while c + 1 >= e.minY and c >= Y_MIN do passes = passes + 1; c = c - 3 end end
   local info = {
     { ("Mines Y %d..%d: %d pass%s of 3 levels"):format(e.minY, e.maxY, passes, passes == 1 and "" or "es"), K.lightGrey },
-    { e.r1 > 0 and ("%dx%d chunks, skipping the middle %dx%d"):format(sq(e.r2), sq(e.r2), sq(e.r1 - 1), sq(e.r1 - 1))
-        or ("%dx%d chunks round the dock's chunk"):format(sq(e.r2), sq(e.r2)), K.lightGrey },
+    { e.r1 > 0 and ("%d chunks: %dx%d, skipping the middle %dx%d"):format(chunkCount(e.r1, e.r2), sq(e.r2), sq(e.r2), sq(e.r1 - 1), sq(e.r1 - 1))
+        or ("%d chunks: %dx%d round the dock's chunk"):format(chunkCount(e.r1, e.r2), sq(e.r2), sq(e.r2)), K.lightGrey },
   }
   if e.r2 > 1 then info[#info + 1] = { "Past ring 1: needs a chunk controller", K.orange } end
   if e.err then info[#info + 1] = { e.err, K.red } end

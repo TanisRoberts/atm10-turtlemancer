@@ -217,3 +217,14 @@ T.test("nether: presets page and editor", function()
   local p = e.c:readTable("nether.cfg").presets
   T.eq(p[#p].name, "Deep")
 end)
+
+T.test("nether: the preset editor and a Firecrest's page say how many chunks the rings cover", function()
+  local e = base()
+  e.c:type("/new Wide"); e.c:key(257); e.w:run(1)
+  for _ = 1, 4 do local x, y = e.c.screen:find("From ring"); local l = e.c.screen:line(y); e.c:click(l:find("+", 1, true), y); e.w:run(0.2) end
+  for _ = 1, 7 do local x, y = e.c.screen:find("To ring"); local l = e.c.screen:line(y); e.c:click(l:find("+", 1, true), y); e.w:run(0.2) end
+  e.w:run(1)
+  T.contains(e.c.screen, "240 chunks: 17x17, skipping the middle 7x7")
+  tap(e, "Firecrest-01")
+  T.contains(e.mon, "9 chunks, 3x3")
+end)
