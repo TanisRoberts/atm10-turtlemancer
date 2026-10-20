@@ -1,9 +1,9 @@
-# Turtle core: fuel, dock and GPS for every turtle
+# Turtle core: fuel, dock, GPS and chunk loading for every turtle
 
-`shared/turtlecore.lua` is the one place a turtle gets its fuel table, refuelling, dock handling and GPS. A change here reaches every turtle on its next boot. The core never digs.
+`shared/turtlecore.lua` is the one place a turtle gets its fuel table, refuelling, dock handling, GPS and chunk loading. A change here reaches every turtle on its next boot. The core never digs.
 
 Files (flat on the device, loaded with `dofile`, each part is `return function(core) ... end`):
-`turtlecore.lua` (entry), `turtlecore_gps.lua`, `turtlecore_fuel.lua`, `turtlecore_dock.lua`.
+`turtlecore.lua` (entry), `turtlecore_gps.lua`, `turtlecore_fuel.lua`, `turtlecore_dock.lua`, `turtlecore_chunk.lua`.
 
 ```lua
 local core = dofile("turtlecore.lua")
@@ -77,6 +77,18 @@ The turtle works fine without an answer (Storage not updated yet, out of range).
 
 Callers that need to know where he is NOW (finding his heading, checking he wasn't carried off) must treat `stale` as no fix. Farmbot's `B.locate` does this: it returns x, y, z of a fresh fix only.
 
+## Chunk loading: `core.chunk`
+
+An Advanced Peripherals chunk controller in his bag keeps the chunk he's in loaded. He swaps it onto his modem's side for a moment (at least a tick), then swaps the modem back: the chunk stays loaded until AP's `chunkLoadValidTime` (600 s), and loading a new chunk releases the old one, so he holds one chunk at a time. Worn all the time (no swap), it reloads by itself.
+
+- `chunk.have()`: a controller in his bag or worn.
+- `chunk.ensure(key, force)`: load the chunk `key` names (the role's `"cx,cz"`). Swaps only in a new chunk, `chunk.every` seconds (45, well under 600) after the last swap, or when `force`. True when it loaded it now. `chunk.swaps` counts the swaps.
+- `chunk.note`: why it couldn't, for his screen: `"Chunk controller missing"` or `"No modem to swap with"`. `nil` after a good swap.
+- `chunk.restore(hint)`: at boot, puts the modem back on if a swap was cut short (the side is kept in `chunkswap.txt` during a swap; `hint` is a side the role remembered). True if it had to.
+- `chunk.ITEM` (the controller's item id) and `chunk.isModem(name)`, for roles that keep them out of their cargo.
+
+Farm turtles don't call it. The miner calls `ensure` after every move and while waiting.
+
 ## Moving another turtle onto the core
 
 1. It already gets the files: `manifest.lua` appends `types.turtle.core` to every turtle role. A new core file goes in that one list.
@@ -86,4 +98,4 @@ Callers that need to know where he is NOW (finding his heading, checking he wasn
 5. Keep the role's `FUEL_*` thresholds in its `.env` file.
 6. Delete the old copies, and add a scenario (see `tests/scenarios/turtle_core.lua`).
 
-Not on the core yet: Canary/Firecrest/Starling (miner), Weaver. Seagull keeps its own fuel-up before a scouting trip. Bowerbird never moves.
+Not fully on the core yet: the miner (chunk loading and the one-barrel dock's fallback use it; its own fuel and GPS go in #59's last stage), Weaver. Seagull keeps its own fuel-up before a scouting trip. Bowerbird never moves.

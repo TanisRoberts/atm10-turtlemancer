@@ -114,3 +114,27 @@ T.test("miner: a reboot in the middle of a run resumes where it was", function()
   T.eq(dock:count("minecraft:diamond"), 1)
   T.eq(dock:count("minecraft:raw_iron"), 1)
 end)
+
+T.test("miner: with a chunk controller he swaps it on as he goes (core.chunk) and keeps his modem", function()
+  local w = cc.world()
+  w.gpsOn = true
+  w:fill(-20, 40, -20, 20, 63, 20, "minecraft:stone")
+  local dock = MS.barrel()
+  dock:give("minecraft:coal", 64)
+  w:setBlock(1, 64, 0, "minecraft:barrel", dock)
+  local t = MS.turtle(w, { items = { [16] = { "advancedperipherals:chunk_controller", 1 } } })
+  local f = MS.foreman(w)
+  MS.setup(w, t)
+  w:run(10)
+  T.contains(t:output(), "Chunk controller on board")
+  MS.order(f)
+  T.waitFor(w, MS.finished(f), 1200, "never finished the range")
+  local s = f.env._G.lastStatus
+  T.eq(s.chunky, true)
+  T.truthy((s.swaps or 0) >= 2, "swapped at the start and during the run")
+  T.eq(s.chunkyNote, nil)
+  T.eq(t.body.up.right, "computercraft:wireless_modem_advanced")
+  local n = 0
+  for _, sl in pairs(t.body.slots) do if sl.name == "advancedperipherals:chunk_controller" then n = n + sl.count end end
+  T.eq(n, 1, "controller still in the bag")
+end)

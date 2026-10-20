@@ -219,7 +219,8 @@ local M = {
 -- Every turtle role gets the turtle core (docs/systems/turtle.md): one list here, appended to each role's files.
 -- A new core file is added to this list only. (Aliases below share the role tables, so they get it too.)
 local T = M.types.turtle
-T.core = { "shared/turtlecore.lua", "shared/turtlecore_gps.lua", "shared/turtlecore_fuel.lua", "shared/turtlecore_dock.lua" }
+T.core = { "shared/turtlecore.lua", "shared/turtlecore_gps.lua", "shared/turtlecore_fuel.lua", "shared/turtlecore_dock.lua",
+          "shared/turtlecore_chunk.lua" }
 -- (The manifest runs with an empty environment: no ipairs, only plain Lua.)
 for i = 1, #T.order do
   local files = T.roles[T.order[i]].files

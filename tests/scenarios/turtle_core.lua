@@ -208,3 +208,64 @@ T.test("Woodpecker on the core: low on fuel it goes to its dock, drinks the lava
   T.truthy(rep, "Storage was told where his dock is")
   T.eq(rep.label, "Woodpecker-01"); T.eq(rep.x, 0); T.eq(rep.y, 64); T.eq(rep.z, -1)
 end)
+
+-- core.chunk: the chunk controller swap (docs/systems/turtle.md)
+local CHUNKY = "advancedperipherals:chunk_controller"
+T.test("turtle core: chunk.ensure swaps the controller on in a new chunk and puts the modem back", function()
+  local w, t = setup({ items = { [3] = { CHUNKY, 1 } }, body = [[
+    result.have = core.chunk.have()
+    result.first = core.chunk.ensure("0,0")
+    result.again = core.chunk.ensure("0,0")
+    result.next = core.chunk.ensure("1,0")
+    os.sleep(50)
+    result.late = core.chunk.ensure("1,0")
+    result.forced = core.chunk.ensure("1,0", true)
+    result.swaps, result.note = core.chunk.swaps, core.chunk.note
+  ]] })
+  t:run("probe"); w:run(60)
+  local r = t.env._G.result
+  T.eq(r.have, true)
+  T.eq(r.first, true, "a first chunk loads")
+  T.eq(r.again, false, "the same chunk soon after: no swap")
+  T.eq(r.next, true, "a new chunk loads at once")
+  T.eq(r.late, true, "the same chunk after 45 s loads again")
+  T.eq(r.forced, true)
+  T.eq(r.swaps, 4); T.eq(r.note, nil)
+  T.eq(t.body.up.right, "computercraft:wireless_modem_advanced", "modem back on")
+  T.eq(slotsOf(t, CHUNKY), 1, "controller back in the bag")
+  T.falsy(t:readFile("chunkswap.txt"), "no swap left half-done")
+end)
+
+T.test("turtle core: chunk notes when the controller or the modem is missing", function()
+  local w, t = setup({ body = [[
+    result.have = core.chunk.have()
+    result.ok = core.chunk.ensure("0,0")
+    result.note = core.chunk.note
+  ]] })
+  t:run("probe"); w:run(5)
+  T.eq(t.env._G.result.have, false)
+  T.eq(t.env._G.result.ok, false)
+  T.eq(t.env._G.result.note, "Chunk controller missing")
+
+  local w2, t2 = setup({ items = { [2] = { CHUNKY, 1 } }, body = [[
+    turtle.select(1); turtle.equipRight()             -- the modem goes into the bag
+    result.ok = core.chunk.ensure("0,0")
+    result.note = core.chunk.note
+  ]] })
+  t2:run("probe"); w2:run(5)
+  T.eq(t2.env._G.result.ok, false)
+  T.eq(t2.env._G.result.note, "No modem to swap with")
+end)
+
+T.test("turtle core: chunk.restore puts the modem back after a swap cut short", function()
+  local w, t = setup({ items = { [4] = { CHUNKY, 1 } }, body = [[
+    turtle.select(4); turtle.equipRight()             -- controller on, modem into the bag: unloaded mid-swap
+    local f = fs.open("chunkswap.txt", "w"); f.write("right"); f.close()
+    result.fixed = core.chunk.restore()
+  ]] })
+  t:run("probe"); w:run(5)
+  T.eq(t.env._G.result.fixed, true)
+  T.eq(t.body.up.right, "computercraft:wireless_modem_advanced")
+  T.eq(slotsOf(t, CHUNKY), 1)
+  T.falsy(t:readFile("chunkswap.txt"))
+end)

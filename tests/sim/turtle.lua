@@ -281,7 +281,8 @@ function Turtle.api(world, c)
         if s.count <= 0 then b.slots[b.sel] = nil end
       end
       b:equip(side, new)
-      if old then give(old, 1) end
+      -- like CC: the upgrade taken off goes into the selected slot (it's empty now), else anywhere
+      if old and b.inv:insert(old, 1, b.sel) == 0 then give(old, 1) end
       return true
     end
   end

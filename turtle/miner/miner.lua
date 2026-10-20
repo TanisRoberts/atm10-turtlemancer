@@ -521,12 +521,8 @@ local function emptySlots()
 end
 
 -- Gear: things I carry for myself and never unload, stash or throw away
-local CHUNKY_ITEM = "advancedperipherals:chunk_controller"
 local function isBox(name) return type(name) == "string" and name:find("shulker_box", 1, true) ~= nil end
-local function isModemItem(name)
-  return name == "computercraft:wireless_modem_advanced" or name == "computercraft:wireless_modem_normal"
-end
-local function isGear(name) return name == CHUNKY_ITEM or isModemItem(name) or isBox(name) end
+local function isGear(name) return name == core.chunk.ITEM or core.chunk.isModem(name) or isBox(name) end
 local function freeSlot()
   for s = 1, 16 do if turtle.getItemCount(s) == 0 then return s end end
 end
@@ -817,26 +813,11 @@ local function checkUpDown()
 end
 
 ---------------------------------------------------------------------------
--- Chunk loader (Advanced Peripherals' chunk controller, the "Chunky Turtle" upgrade)
--- With one in my bag I swap it onto my modem's side for a moment whenever I cross into a new chunk,
--- and every REFRESH_EVERY seconds anyway. While it's on it force-loads the chunk I'm in; taken off,
--- that chunk stays loaded until the mod's timeout (chunkLoadValidTime, 600 s by default, never under
--- 60 s), so I only ever hold ONE chunk. Equipping it in a new chunk releases the old one at once.
--- No controller: no swaps (keep me inside loaded chunks: my dock and area, or near a player).
+-- Chunk loader: core.chunk (shared/turtlecore_chunk.lua) swaps a chunk controller onto my modem's side in
+-- every new chunk (and every 45 s), so only the chunk I'm in is force-loaded. No controller: keep my area
+-- loaded (or stay near it).
 ---------------------------------------------------------------------------
-local REFRESH_EVERY = 45
-local chunkyAt, chunkyKey = -1e9, nil
-local EQUIP = { left = turtle.equipLeft, right = turtle.equipRight }
-local function sideOfType(t)
-  for _, sd in ipairs({ "left", "right" }) do
-    local types = { peripheral.getType(sd) }
-    for _, x in ipairs(types) do if x == t then return sd end end
-  end
-end
-local function chunkySlot()
-  for s = 1, 16 do local d = turtle.getItemDetail(s); if d and d.name == CHUNKY_ITEM then return s end end
-end
-local function haveChunky() return chunkySlot() ~= nil or sideOfType("chunky") ~= nil end
+local function haveChunky() return core.chunk.have() end
 local function chunkKey()
   local x, _, z = absPos()
   if not x then return nil end
@@ -845,43 +826,15 @@ end
 
 refreshChunk = function(force)
   if not S.chunky then return end
-  local key = chunkKey()
-  if not force and key == chunkyKey and os.clock() - chunkyAt < REFRESH_EVERY then return end
-  if sideOfType("chunky") then
-    os.sleep(0.1) -- worn all the time (no modem swap): it reloads my chunk by itself every tick
-  else
-    local slot, side = chunkySlot(), sideOfType("modem")
-    if not (slot and side) then
-      S.chunkyNote = slot and "No modem to swap with" or "Chunk controller missing"
-      return
-    end
-    local prev = turtle.getSelectedSlot()
-    turtle.select(slot)
-    S.swapSide = side; save()            -- if I'm unloaded mid-swap, boot puts the modem back
-    if EQUIP[side]() then
-      os.sleep(0.15)                       -- at least one server tick with it on: loads + touches this chunk
-      turtle.select(slot)
-      EQUIP[side]()                        -- modem back on; the controller goes back into that slot
-    end
-    S.swapSide = nil; save()
-    turtle.select(prev)
-    pcall(rednet.open, side)
-    S.swaps = (S.swaps or 0) + 1
-  end
-  S.chunkyNote = nil
-  chunkyAt, chunkyKey = os.clock(), key
+  local before = core.chunk.swaps
+  core.chunk.ensure(chunkKey(), force)
+  S.chunkyNote = core.chunk.note
+  if core.chunk.swaps ~= before then S.swaps = (S.swaps or 0) + 1 end
 end
 
 -- Boot: a swap that was cut short leaves the modem in my bag and the controller on. Put it back.
 local function restoreRadio()
-  if sideOfType("modem") then S.swapSide = nil; return end
-  local ms
-  for s = 1, 16 do local d = turtle.getItemDetail(s); if d and isModemItem(d.name) then ms = s end end
-  local side = sideOfType("chunky") or S.swapSide
-  if ms and side then
-    turtle.select(ms); EQUIP[side](); turtle.select(1)
-    print("Put my modem back on (a chunk swap was cut short).")
-  end
+  if core.chunk.restore(S.swapSide) then print("Put my modem back on (a chunk swap was cut short).") end
   S.swapSide = nil
   save()
 end
