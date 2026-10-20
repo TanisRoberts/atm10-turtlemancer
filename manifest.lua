@@ -25,8 +25,8 @@ local M = {
     computer = {
       name = "Computer",
       about = "A computer that sits at the base",
-      details = "The base's brains: storage, smelting, the mainframe, the Foreman, the Nether Foreman, the Farmhand, the Architect, the Operator, GPS, the plastic factory, the neural lab and the art wall.",
-      order = { "mainframe", "storage", "smelter", "foreman", "nether", "farmhand", "architect", "operator", "gps", "plastic", "neural", "art" },
+      details = "The base's brains: storage, smelting, the mainframe, the Foreman, the MD and Nether Foremans, the Farmhand, the Architect, the Operator, GPS, the plastic factory, the neural lab and the art wall.",
+      order = { "mainframe", "storage", "smelter", "foreman", "mdforeman", "nether", "farmhand", "architect", "operator", "gps", "plastic", "neural", "art" },
       roles = {
         mainframe = {
           name = "Mainframe",
@@ -70,6 +70,18 @@ local M = {
             .. "modem and an advanced monitor.",
           run = "foreman",
           files = { "computer/foreman/foreman.lua", "shared/ui.lua", "shared/ui_widgets.lua", "shared/ui_parts.lua", "shared/ui_motion.lua" },
+        },
+        mdforeman = {
+          name = "MD Foreman",
+          about = "Canary control + the Mining Dimension dock barrels",
+          details = "Lives in the Mining Dimension by the Canaries' docks. Canary cards on its monitor (layers, START, "
+            .. "dock, reboot, retire), and the barrels on its cable: empties the docks, gives the Canaries lava buckets, "
+            .. "keeps the lava factory in empty buckets, sends the haul home through the output barrel (hopper -> "
+            .. "ender chest), with an overflow barrel for when home is full. Ender modem + wired modem; /assign.",
+          run = "mdforeman",
+          files = { "computer/mdforeman/mdforeman.lua", "shared/assignui.lua",
+                    "shared/fm.lua", "shared/fm_reg.lua", "shared/fm_barrels.lua", "shared/fm_draw.lua", "shared/fm_pages.lua",
+                    "shared/fm_edit.lua", "shared/fm_cmd.lua", "shared/fm_net.lua", "shared/fm_remote.lua" },
         },
         nether = {
           name = "Nether Foreman",

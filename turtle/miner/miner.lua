@@ -2,7 +2,7 @@
 --
 -- One program for every miner. Who he is depends on the dimension he's set up in:
 --   The Mining Dimension (allthemodium:mining), the Overworld, anything else: a CANARY (Canary-04).
---     Orders from the Foreman. ONE dock barrel: he empties his haul into it and asks for fuel (lava
+--     Orders from the MD Foreman. ONE dock barrel: he empties his haul into it and asks for fuel (lava
 --     buckets); nobody answering, he takes whatever fuel is in it. Empty buckets go back in.
 --   The Nether: a FIRECREST (Firecrest-01). Orders from the Nether Foreman. Advanced turtle, ONE dock
 --     barrel (a Dock on the Nether Foreman's cable: it empties it and puts in what he asks for), and
@@ -54,7 +54,7 @@ local STATUS_EVERY = 3      -- seconds between status broadcasts
 -- the dock's chunk, ring 3 = 7x7 chunks), reserve = spare fuel kept on top of the trip home,
 -- floor = lowest Y a level may reach.
 local MODES = {
-  canary    = { name = "Canary",    protocol = "tanis-miner",  boss = "the Foreman", oneDock = true,
+  canary    = { name = "Canary",    protocol = "tanis-miner",  boss = "the MD Foreman", oneDock = true,
                 r2 = 3, reserve = 150, floor = -64 },
   firecrest = { name = "Firecrest", protocol = "tanis-nether", boss = "the Nether Foreman", nether = true, oneDock = true,
                 r2 = 1, reserve = 200, floor = 5 },
@@ -1524,8 +1524,8 @@ local function setupDock(keep)
   print("I'm sitting on top of my future shaft.")
   if MODE.oneDock then
     print("I need ONE barrel next to me (a side")
-    print(("or above): my dock, a Dock on %s's"):format(MODE.boss))
-    print("cable.")
+    print("or above): my dock, a Dock on")
+    print(("%s's cable."):format(MODE.boss))
     if MODE.nether then print("And one empty bucket in my inventory, for lava.") end
   else
     print("I need two barrels next to me (sides or above):")
@@ -1863,6 +1863,13 @@ local function statusMsg()
   return m
 end
 
+-- Orders only from my own Foreman: cmd.kind names the bird it's for. On tanis-miner (Canaries and Starlings) an
+-- order for a Canary must say so, so an old Overworld Foreman can't order the MD's Canaries about.
+local function cmdForMe(msg)
+  if msg.kind ~= nil then return msg.kind == MODE_KEY end
+  return MODE_KEY ~= "canary"
+end
+
 local function netLoop()
   local modem = peripheral.find("modem", function(_, m) return m.isWireless() end)
   if not modem then
@@ -1883,7 +1890,7 @@ local function netLoop()
       save()
     elseif type(msg) == "table" and msg.type == "dock_ready" and msg.id == me then
       dockReply = msg
-    elseif type(msg) == "table" and msg.type == "cmd" and msg.to == me then
+    elseif type(msg) == "table" and msg.type == "cmd" and msg.to == me and cmdForMe(msg) then
       ctrl = msg
       if MODE.nether and type(msg.junk) == "table" then
         S.junk = msg.junk; setJunk(S.junk); valuableCache = {}

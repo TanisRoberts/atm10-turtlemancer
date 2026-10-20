@@ -66,7 +66,7 @@ end)
 -- A dock chunk with three ores in it and the Foreman's order to mine Y 60..63.
 local function mineWorld(two, dim)
   local w, t, dock, fuel = base(two)
-  local f = MS.foreman(w)
+  local f = MS.foreman(w, { kind = two and "starling" or "canary" })
   w:setBlock(3, 62, 3, "minecraft:iron_ore")
   w:setBlock(5, 61, 7, "minecraft:diamond_ore")
   w:setBlock(9, 62, 12, "minecraft:coal_ore")

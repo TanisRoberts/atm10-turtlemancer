@@ -26,7 +26,7 @@ function MS.setup(w, t, dim)
 end
 
 -- A stand-in Foreman: numbers every miner that registers (Canary-0N), and once _G.order is set sends it to
--- every miner it has heard. o.protocol (tanis-miner), o.kind (sent as cmd.kind when given), o.id (1).
+-- every miner it has heard. o.protocol (tanis-miner), o.kind (sent as cmd.kind, default "canary"), o.id (1).
 -- o.dock = { [turtle id] = inv }: answers dock_req by putting o.lava lava buckets (default: what it asks for)
 -- in that inventory; _G.requests counts them.
 function MS.foreman(w, o)
@@ -61,7 +61,7 @@ function MS.foreman(w, o)
   ]]):format(o.protocol or "tanis-miner"))
   f:run("foreman")
   f.env._G.docks = o.dock or {}
-  f.env._G.kind = o.kind
+  f.env._G.kind = o.kind or "canary"
   f.env._G.requests = 0
   return f
 end
@@ -106,6 +106,22 @@ function MS.standIn(w, o)
   ]]):format(o.protocol or "tanis-nether", o.bird or "Firecrest", o.kind or "firecrest", o.dim or "the_nether", tostring(o.num or "nil")))
   c:run("standin")
   return c
+end
+
+-- A computer that only listens: _G.last[id] = the latest status heard on `protocol` (tanis-miner)
+function MS.listen(w, protocol, id)
+  local c = w:computer{ id = id or 50, label = "Listener" }
+  c:attach("top", cc.wireless{ ender = true })
+  c:writeFile("listen.lua", ([[
+    rednet.open("top")
+    _G.last = {}
+    while true do
+      local from, msg = rednet.receive(%q)
+      if type(msg) == "table" and msg.type == "status" then _G.last[from] = msg end
+    end
+  ]]):format(protocol or "tanis-miner"))
+  c:run("listen")
+  return function(mid) return c.env._G.last[mid] end
 end
 
 function MS.order(f, o)
