@@ -113,6 +113,11 @@ if P.remote == "dimension" then
   -- Until it has the Overworld Foreman's list, the MD Foreman neither numbers nor adopts Canaries (the Overworld
   -- Foreman still owns them, so there's only ever one brain). /fresh starts without it.
   if P.kind == "canary" then
+    local baseLine = barrelLine
+    function barrelLine()
+      if not cfg.imported then return "Waiting for the Overworld Foreman's Canary list (/fresh: start without)", K.orange end
+      return baseLine()
+    end
     function numbersNow() return cfg.imported == true end
     function adoptOK() return cfg.imported == true end
     function remoteCommand(cmd)

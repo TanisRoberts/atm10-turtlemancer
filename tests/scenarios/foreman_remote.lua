@@ -189,6 +189,7 @@ T.test("remote: without the Overworld Foreman's list the MD Foreman numbers nobo
   local c = MS.standIn(w, { id = 20, protocol = "tanis-miner", bird = "Canary", kind = "canary", dim = "allthemodium:mining" })
   w:run(15)
   T.eq(c.label, nil, "no number yet")
+  T.contains(md.screen, "Waiting for the Overworld Foreman's Canary list")
   md:type("/fresh"); md:key(257)
   w:run(5)
   T.eq(c.label, "Canary-01")
