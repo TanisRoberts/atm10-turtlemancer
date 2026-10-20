@@ -61,9 +61,9 @@ Foremans share one engine in `shared/fm*.lua` (each a `return function(F) ... en
 | Dock | One per Canary. Emptied every pass (except while he takes his supplies); filled with fuel when he asks. |
 | Output | Goes home: barrel → hopper → ender chest (same frequency as the Nether's Output; its twin feeds storage). |
 | Overflow | Haul goes here when every Output is full. When an Output has room, Overflow drains into it first. |
-| Stock | Stays in the MD: lava and empty buckets up to their keep counts (Rules page), fuel. |
+| Stock | Stays in the MD: every lava bucket from the factory, empty buckets and fuel up to their keep counts (Rules page). |
 | Factory in | The lava factory's input: gets every empty bucket (from docks, and Stock above its keep). |
-| Factory out | The factory's output: lava buckets go to Stock up to its keep count, or straight into a dock that asked; the rest wait here. |
+| Factory out | The factory's output: emptied into Stock every pass, so the factory never stalls on a full output. Only a full Stock leaves lava waiting here ("Factory out full" on the overview); a dock that asked can still take it straight from here. |
 | Input | Dropped in by hand: routed like a haul. |
 | Ignore | Never touched. |
 

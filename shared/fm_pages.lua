@@ -15,6 +15,7 @@ function barrelLine()
     return ("Output full: haul waits in Overflow (%d/%d slots)"):format(barrel.overflow.used, barrel.overflow.size), K.orange
   end
   if barrel.outFull then return "Output full: is the hopper into the ender chest flowing?", K.red end
+  if barrel.factoryFull then return "Factory out full: no room in Stock for more lava", K.orange end
   if #cfg.stocks == 0 then
     return P.neverHome and "No Stock barrel: buckets wait in the docks and the factory"
       or "No Stock barrel: everything goes home, spare buckets too", K.orange

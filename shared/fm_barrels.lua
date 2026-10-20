@@ -27,7 +27,7 @@ local JOBS = {
   factory_in  = { key = "factory_in", label = "Factory in", short = "Fact in", tag = "FACT IN", col = colours.orange,
     about = "The lava factory's input: I keep it supplied with empty buckets." },
   factory_out = { key = "factory_out", label = "Factory out", short = "Fact out", tag = "FACT OUT", col = colours.red,
-    about = "The lava factory's output: lava buckets go to Stock or a dock; the rest wait here." },
+    about = "The lava factory's output: I move its lava buckets to Stock, so it never fills up." },
   overflow = { key = "overflow", label = "Overflow", short = "Overflow", tag = "OVERFLOW", col = colours.purple,
     about = "Haul waits here when every Output is full, and drains back first when there's room." },
 }
@@ -200,17 +200,15 @@ local function drainOverflow()
   end
 end
 
--- The lava factory: its lava buckets go to Stock up to the keep count (the rest wait in Factory out)
+-- The lava factory: every lava bucket in Factory out goes to Stock while Stock has room, so the factory never
+-- stalls on a full output (lava never goes home). Only a full Stock leaves it waiting there.
 local function factoryPass()
   for _, n in ipairs(cfg.factoryOuts) do
-    local want = (cfg.keep[LAVA] or 0) - (barrel.stock[LAVA] or 0)
-    if want <= 0 then break end
     for slot, it in pairs(call(n, "list") or {}) do
-      if it.name == LAVA and want > 0 then
-        local m = pushInto(cfg.stocks, n, slot, LAVA, math.min(want, it.count))
+      if it.name == LAVA then
+        local m = pushInto(cfg.stocks, n, slot, LAVA, it.count)
         barrel.stock[LAVA] = (barrel.stock[LAVA] or 0) + m
         barrel.factoryLava = barrel.factoryLava - m
-        want = want - m
       end
     end
   end
@@ -319,6 +317,8 @@ function barrelPass()
   barrel.outFree, barrel.outSlots = slots - used, slots
   local u, s = room(cfg.factoryIns)
   barrel.factoryIn = { used = u, size = s }
+  local fu, fs_ = room(cfg.factoryOuts)
+  barrel.factoryFull = fs_ > 0 and fu >= fs_
   local ou, os_, oi = room(cfg.overflows)
   barrel.overflow = { used = ou, size = os_, items = oi }
   if oi > 0 and #cfg.outputs > 0 then barrel.outFull = true end

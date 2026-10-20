@@ -8,9 +8,9 @@
 --   Dock         one per Canary: he empties into it; I take everything out and put in the fuel he asks for
 --   Output       goes home: barrel > hopper > ender chest (the same frequency as the Nether's Output)
 --   Overflow     haul waits here while every Output is full, and drains back into it first
---   Stock        what stays in the MD: lava and empty buckets up to their keep counts, fuel (Rules)
+--   Stock        what stays in the MD: every lava bucket the factory makes, fuel up to its keep count (Rules)
 --   Factory in   the lava factory's input: I keep it supplied with empty buckets
---   Factory out  the lava factory's output: lava buckets go to Stock (keep count) or a dock that asked
+--   Factory out  the lava factory's output: emptied into Stock, so the factory never stalls
 --   Input        drop things in by hand: sorted like a Canary's haul
 --   Ignore       never touched
 -- Empty and lava buckets never go home. Canaries' junk lists are junk.txt on each Canary.
