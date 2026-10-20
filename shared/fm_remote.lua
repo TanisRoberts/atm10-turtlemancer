@@ -1,0 +1,2 @@
+-- fm_remote.lua  --  Foreman engine: the remote link between the dimension Foremans and the Overworld Foreman
+-- (protocol tanis-remote, docs/systems/miner.md). A part of fm.lua (one shared environment: see there).

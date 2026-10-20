@@ -79,7 +79,9 @@ local M = {
             .. "what the Rules say in Nether stock, sends the rest home through the output barrel "
             .. "(hopper -> ender chest). Ender modem + wired modem; /assign for the barrels.",
           run = "nether",
-          files = { "computer/nether/nether.lua", "shared/assignui.lua", "shared/ui.lua", "shared/ui_widgets.lua", "shared/ui_parts.lua", "shared/ui_motion.lua" },
+          files = { "computer/nether/nether.lua", "shared/assignui.lua", "shared/ui.lua", "shared/ui_widgets.lua", "shared/ui_parts.lua", "shared/ui_motion.lua",
+                    "shared/fm.lua", "shared/fm_reg.lua", "shared/fm_barrels.lua", "shared/fm_draw.lua", "shared/fm_pages.lua",
+                    "shared/fm_edit.lua", "shared/fm_cmd.lua", "shared/fm_net.lua", "shared/fm_remote.lua" },
         },
         farmhand = {
           name = "Farmhand",
