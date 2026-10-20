@@ -99,3 +99,23 @@ T.test("miner moved: carried a few blocks along his own level he waits for an or
   T.contains(f.env._G.lastStatus.msg, "Moved by hand")
   T.absent(t.screen, "I'VE BEEN MOVED")
 end)
+
+T.test("miner moved: a saved state with no dock barrel sets up again at boot, keeping his number", function()
+  local w = cc.world()
+  w.gpsOn = true
+  w:fill(-20, 40, -20, 20, 63, 20, "minecraft:stone")
+  local dock = MS.barrel()
+  dock:give("minecraft:coal", 16)
+  w:setBlock(1, 64, 0, "minecraft:barrel", dock)
+  local t = MS.turtle(w)
+  t:writeTable("miner.state", { x = 0, y = 0, z = 0, h = 0, dockY = 64, home = { x = 0, y = 64, z = 0 }, facing = 0,
+    num = 3, dim = "Mining Dimension", cbc = true, want = "dock" })
+  t:run("miner"); w:run(2)
+  T.contains(t:output(), "I don't know my dock barrel")
+  t:key(257)                                      -- Mining
+  w:run(20)
+  T.running(t)
+  local st = t:readTable("miner.state")
+  T.eq(st.dockDir, 1); T.eq(st.num, 3); T.eq(st.dim, "allthemodium:mining")
+  T.contains(t:output(), "I'm still")
+end)

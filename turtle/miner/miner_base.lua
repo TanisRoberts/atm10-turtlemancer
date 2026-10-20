@@ -117,7 +117,11 @@ function loadState()
   local t = textutils.unserialize(f.readAll())
   f.close()
   if type(t) == "table" then S = t end
+  -- A dimension typed by hand ("Mining Dimension") is the Mining Dimension
+  if type(S.dim) == "string" and not S.dim:find(":") and S.dim:lower():find("mining") then S.dim = "allthemodium:mining" end
 end
+-- Does he know his dock barrel(s)? (one barrel, or a Starling's dump + fuel)
+function knowsDock() return S.dockDir ~= nil or (S.dumpDir ~= nil and S.fuelDir ~= nil) end
 
 -- Pick Canary / Firecrest / Starling from the dimension, and load the right junk list
 function setMode()

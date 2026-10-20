@@ -180,7 +180,12 @@ function start()
     local f = fs.open("startup.lua", "w"); f.write('shell.run("miner")\n'); f.close()
   end
   loadState()
-  if not S.dockY then setupDock() else recover() end
+  if not S.dockY then setupDock()
+  elseif not knowsDock() then
+    -- A dock position but no barrel in my state (a setup that never finished): set up again, same number
+    print("I don't know my dock barrel. Setting up again (I keep my number).")
+    setupDock(S)
+  else recover() end
   setMode()
   -- Chunk by chunk since Oct 2026: progress from the old ring miner means nothing now. Start the
   -- Foreman's order afresh (forgetting its seq makes the next order count as new).
