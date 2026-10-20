@@ -97,6 +97,8 @@ function MS.standIn(w, o)
         if type(m) == "table" and m.type == "assigned" and m.id == me then _G.num = m.num; os.setComputerLabel(m.label) end
         if type(m) == "table" and m.type == "cmd" and m.to == me then
           _G.lastCmd, _G.cmdFrom, _G.seq, _G.want = m, from, m.seq, m.want
+          _G.senders = _G.senders or {}
+          _G.senders[from] = true
           if m.want == "run" then _G.minY, _G.maxY = m.minY, m.maxY end
           _G.cmds = (_G.cmds or 0) + 1
         end

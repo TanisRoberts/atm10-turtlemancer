@@ -11,6 +11,7 @@ REBOOT_WAIT = 600000 -- ms: stop asking a miner to reboot if it hasn't confirmed
 PROTOCOL, BASE = P.protocol, "tanis-base"
 DEF_R2, Y_MIN, Y_MAX = P.defR2, P.yMin, P.yMax
 WORK = "fm_work"   -- event: a barrel pass now
+ONE = P.one or P.bird   -- "every Firecrest", or "every miner" on the Overworld Foreman
 
 ---------------------------------------------------------------------------
 -- Registry: every miner ever seen, keyed by computer ID (cfg[P.regKey], also called `reg`)
@@ -164,6 +165,15 @@ end
 function sortKey(id) return entry(id).num end
 -- A status heard on my protocol that's for me (the Overworld Foreman also hears other birds on tanis-miner)
 function ownsStatus(s) return not P.ownKinds or P.ownKinds[s and s.kind or ""] == true end
+
+-- The presets a miner's page offers, and the list the presets page edits (the Overworld Foreman: per Foreman)
+function presetsOf(id) return cfg.presets end
+function presetSetOf(id) return nil end
+function presetList() return cfg.presets end
+function presetsChanged()
+  saveCfg()
+  if remoteChanged then remoteChanged() end
+end
 
 -- Pick the layers a miner runs on his next START (not sent until then)
 function pick(id, minY, maxY, r1, r2)

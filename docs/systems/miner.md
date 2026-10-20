@@ -58,10 +58,12 @@ Empty and lava buckets never go home. The overview shows "OUTPUT FULL" and how f
 
 ## Remote protocol: `tanis-remote`
 
-- **`fleet`** (dimension Foreman → broadcast, every 3 s and at once after a change): `{ type, dim, kind, bird, title, foreman = <its id>, miners = { [id] = registry entry }, presets, line, lineCol }`. Registry entry: `num label retired want minY maxY r1 r2 pMin pMax pR1 pR2 seq reboot`. The remote reads miners' own `status` broadcasts directly (ender modems hear every dimension).
+- **`fleet`** (dimension Foreman → broadcast, every 3 s and at once after a change): `{ type, kind, bird, birds, short, title, name, dim, foreman = <its id>, miners = { [id] = registry entry }, presets, line, full, fullAt, hungryAt, lava, fuelTarget, imported }`. Registry entry: `num label retired want minY maxY r1 r2 pMin pMax pR1 pR2 seq reboot`. The remote reads miners' own `status` broadcasts directly (ender modems hear every dimension), on `tanis-miner` and `tanis-nether`.
 - **`remote_cmd`** (remote → that Foreman, `rednet.send`): `{ type, kind, rseq, op, id, ... }`, ops `pick` (pMin pMax pR1 pR2), `order` (want, and the picks to run with), `reboot`, `retire`, `presets` (the whole list). Answered with `remote_ack { rseq, ok, msg }`; resent every 3 s until acked (30 s at most). The Foreman applies it exactly like a tap on its own screen, so its screen and the remote always agree.
 - **`caps`** (Overworld Foreman → broadcast): storage's junk caps, passed on to every dimension Foreman.
-- **`registry_req` / `registry` / `registry_ack`:** once only. The MD Foreman asks for the Canary registry until it has it; the Overworld Foreman hands over `foreman.cfg`'s Canaries (numbers, retired numbers, `nextNum`, presets) and stops ordering them. Until then the MD Foreman adopts numbered Canaries but numbers no new ones.
+- **`registry_req` / `registry` / `registry_ack`:** once only. The MD Foreman asks for the Canary registry every 10 s until it has it; the Overworld Foreman sends `foreman.cfg`'s Canaries (every entry not labelled Starling), retired numbers and `nextNum`, and on the ack drops them from its own list (a copy stays in `cfg.handed`). Until then the Overworld Foreman still orders the Canaries and the MD Foreman neither numbers nor adopts any, so there is one brain at every moment. `/fresh` on the MD Foreman starts without the list.
+
+On the Overworld Foreman a miner's page offers his own Foreman's presets; the Presets page edits its own (Starlings') list, and "Of:" switches it to a dimension Foreman's (sent whole as a `presets` op).
 
 ## Tests
 

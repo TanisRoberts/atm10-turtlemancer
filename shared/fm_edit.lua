@@ -6,16 +6,16 @@
 function findPreset(name)
   name = (name or ""):lower()
   if name == "" then return nil end
-  for i, p in ipairs(cfg.presets) do if p.name:lower() == name then return i end end
+  for i, p in ipairs(presetList()) do if p.name:lower() == name then return i end end
   local hitI, count = nil, 0
-  for i, p in ipairs(cfg.presets) do
+  for i, p in ipairs(presetList()) do
     if p.name:lower():sub(1, #name) == name then hitI, count = i, count + 1 end
   end
   if count == 1 then return hitI end
 end
 
 function openEditor(idx, name)
-  local p = idx and cfg.presets[idx] or { name = name or "", minY = -59, maxY = -48, r1 = 0, r2 = DEF_R2 }
+  local p = idx and presetList()[idx] or { name = name or "", minY = -59, maxY = -48, r1 = 0, r2 = DEF_R2 }
   ui.edit = { idx = idx, name = p.name, minY = p.minY, maxY = p.maxY, r1 = p.r1, r2 = p.r2,
               focus = (idx == nil and (name or "") == "") and "name" or nil, buf = "", err = nil, confirmDel = false }
   if ui.edit.focus == "name" then ui.edit.buf = "" end
@@ -45,7 +45,7 @@ end
 
 function validate(e)
   if e.name == "" then return "Give it a name" end
-  for i, p in ipairs(cfg.presets) do
+  for i, p in ipairs(presetList()) do
     if i ~= e.idx and p.name:lower() == e.name:lower() then return "There's already a preset called " .. p.name end
   end
   if e.minY > e.maxY then return "Min Y is above Max Y" end
@@ -58,51 +58,49 @@ function savePreset()
   local err = validate(e)
   if err then e.err = err; return end
   local new = { name = e.name, minY = e.minY, maxY = e.maxY, r1 = e.r1, r2 = e.r2 }
-  if e.idx and cfg.presets[e.idx] then
-    local old = cfg.presets[e.idx]
+  if e.idx and presetList()[e.idx] then
+    local old = presetList()[e.idx]
     -- Miners that had the old version picked (not started yet) get the new one picked instead
-    for _, dd in pairs(reg) do
+    for _, dd in pairs(ui.pset and {} or reg) do
       if isSelected(dd, old) then dd.pMin, dd.pMax, dd.pR1, dd.pR2 = new.minY, new.maxY, new.r1, new.r2 end
     end
-    cfg.presets[e.idx] = new
+    presetList()[e.idx] = new
   else
-    cfg.presets[#cfg.presets + 1] = new
+    presetList()[#presetList() + 1] = new
   end
-  saveCfg()
-  if remoteChanged then remoteChanged() end
+  presetsChanged()
   ui.edit, ui.page = nil, "presets"
-  say(("Saved %s: pick it on a%s %s's page."):format(new.name, P.bird:match("^[AEIOU]") and "n" or "", P.bird))
+  say(("Saved %s: pick it on a%s %s's page."):format(new.name, ONE:match("^[AEIOUaeiou]") and "n" or "", ONE))
 end
 
 function deletePreset(idx)
-  local p = cfg.presets[idx]
+  local p = presetList()[idx]
   if not p then return end
-  table.remove(cfg.presets, idx)
-  saveCfg()
-  if remoteChanged then remoteChanged() end
+  table.remove(presetList(), idx)
+  presetsChanged()
   say(("Deleted %s. %s keep what they're running."):format(p.name, P.birds), K.orange)
 end
 
 function movePreset(idx, dir)
   local j = idx + dir
-  if j < 1 or j > #cfg.presets then return end
-  cfg.presets[idx], cfg.presets[j] = cfg.presets[j], cfg.presets[idx]
-  saveCfg()
-  if remoteChanged then remoteChanged() end
+  if j < 1 or j > #presetList() then return end
+  local list = presetList()
+  list[idx], list[j] = list[j], list[idx]
+  presetsChanged()
 end
 
 function drawPresets(w, h)
-  header(w, "< PRESETS", ("%d preset%s"):format(#cfg.presets, #cfg.presets == 1 and "" or "s"))
+  header(w, nextPresetSet and ("< PRESETS of " .. presetSetName()) or "< PRESETS", ("%d preset%s"):format(#presetList(), #presetList() == 1 and "" or "s"))
   hit(1, 1, 12, 1, function() ui.page = "overview" end)
   local top, bottom = 3, h - 2
   local per = math.max(1, bottom - top + 1)
-  local pages = math.max(1, math.ceil(#cfg.presets / per))
+  local pages = math.max(1, math.ceil(#presetList() / per))
   ui.lscroll = math.max(1, math.min(ui.lscroll or 1, pages))
-  if #cfg.presets == 0 then at(2, top, "No presets yet: + New", K.grey) end
+  if #presetList() == 0 then at(2, top, "No presets yet: + New", K.grey) end
   local arrows = w >= 40
   for i = 1, per do
     local idx = (ui.lscroll - 1) * per + i
-    local p = cfg.presets[idx]
+    local p = presetList()[idx]
     if not p then break end
     local y = top + i - 1
     local bg = (i % 2 == 0) and K.grey or K.black
@@ -116,12 +114,15 @@ function drawPresets(w, h)
     hit(1, y, w - (arrows and 7 or 0), y, function() openEditor(idx) end)
     if arrows then
       smallButton(w - 6, y, "^", idx > 1 and K.lightBlue or bg, function() movePreset(idx, -1) end)
-      smallButton(w - 3, y, "v", idx < #cfg.presets and K.lightBlue or bg, function() movePreset(idx, 1) end)
+      smallButton(w - 3, y, "v", idx < #presetList() and K.lightBlue or bg, function() movePreset(idx, 1) end)
     end
   end
   at(1, h, (" "):rep(w))
   local x = smallButton(2, h, "+ New", K.lime, function() openEditor(nil) end)
   x = smallButton(x, h, "Back", K.grey, function() ui.page = "overview" end, K.white)
+  if nextPresetSet then
+    x = smallButton(x, h, "Of: " .. presetSetName(), K.cyan, function() nextPresetSet(); ui.lscroll = 1 end)
+  end
   if pages > 1 then
     local label = ("%d/%d"):format(ui.lscroll, pages)
     local px = w - #label - 9
@@ -136,7 +137,7 @@ end
 function drawEdit(w, h, kind)
   local e = ui.edit
   if not e then ui.page = "presets"; return drawPresets(w, h) end
-  header(w, e.idx and ("< EDIT " .. (cfg.presets[e.idx] and cfg.presets[e.idx].name or "")) or "< NEW PRESET")
+  header(w, e.idx and ("< EDIT " .. (presetList()[e.idx] and presetList()[e.idx].name or "")) or "< NEW PRESET")
   hit(1, 1, 12, 1, function() ui.edit, ui.page = nil, "presets" end)
   local cw = math.min(w - 2, 46)
   local x, y = 2, 3

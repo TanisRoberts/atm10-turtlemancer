@@ -40,7 +40,7 @@ function runCommand(line)
   elseif cmd == "new" or cmd == "add" then openEditor(nil, arg)
   elseif cmd == "reboot" or cmd == "restart" then
     local a = arg:lower()
-    if a == "" then say(("/reboot <%s number or name> or /reboot all"):format(P.bird:lower()), K.red); return end
+    if a == "" then say(("/reboot <%s number or name> or /reboot all"):format(ONE:lower()), K.red); return end
     local hits = {}
     for _, id in ipairs(allIds()) do
       local dd = entry(id)
@@ -49,16 +49,18 @@ function runCommand(line)
         if a == "all" or lbl == a or tonumber(a) == dd.num or lbl:find(a, 1, true) then hits[#hits + 1] = id end
       end
     end
-    if #hits == 0 then say(("No %s matches %s"):format(P.bird, arg), K.red); return end
+    if #hits == 0 then say(("No %s matches %s"):format(ONE, arg), K.red); return end
     if a ~= "all" and #hits > 1 then say(("%s matches %d %s: be more exact"):format(arg, #hits, P.birds), K.red); return end
     for _, id in ipairs(hits) do requestReboot(id) end
-    say(#hits == 1 and ((entry(hits[1]).label or P.bird) .. ": reboot sent.") or
+    say(#hits == 1 and ((entry(hits[1]).label or ONE) .. ": reboot sent.") or
       ("Reboot sent to %d %s."):format(#hits, P.birds), K.purple)
   elseif cmd == "edit" or cmd == "delete" or cmd == "remove" or cmd == "del" then
     local idx = findPreset(arg)
     if not idx then say(arg == "" and ("/" .. cmd .. " <preset name>") or ("No preset called " .. arg), K.red); return end
     openEditor(idx)
     if cmd ~= "edit" then ui.edit.confirmDel = true; say("Tap Sure? (or Enter) to delete " .. cfg.presets[idx].name, K.orange) end
+  elseif remoteCommand and remoteCommand(cmd, arg) then
+    return
   else
     say("Unknown command. " .. HELP, K.red)
   end

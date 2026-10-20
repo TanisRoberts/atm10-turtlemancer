@@ -129,7 +129,7 @@ function drawOverview(w, h)
   if not ui.showRetired then
     x = smallButton(x, fy, "Dock all", K.red, function()
       for _, id in ipairs(digIds(false)) do order(id, "dock") end
-      say(("Sent every %s home."):format(P.bird), K.yellow)
+      say(("Sent every %s home."):format(ONE), K.yellow)
     end)
   end
   if retiredN > 0 or ui.showRetired then
@@ -145,7 +145,7 @@ function drawOverview(w, h)
     if active > 0 and w >= 64 then
       x = smallButton(x, fy, "Reboot all", K.purple, function()
         for _, id in ipairs(digIds(false)) do if entry(id) then requestReboot(id) end end
-        say(("Reboot sent to every %s: they finish the block they're on first."):format(P.bird), K.purple)
+        say(("Reboot sent to every %s: they finish the block they're on first."):format(ONE), K.purple)
       end, K.white)
     end
   end
@@ -311,21 +311,22 @@ function drawControls(id, x, y, w, maxY)
   local room = maxY - y + 1
   local function fixedRows(bh, gap) return 1 + 4 + 1 + bh + gap + bh + 1 + 1 end
   local bh, gap = 3, 1
-  if room - fixedRows(3, 1) < math.min(#cfg.presets, 4) then bh, gap = 1, 0 end
+  local presets = presetsOf(id)
+  if room - fixedRows(3, 1) < math.min(#presets, 4) then bh, gap = 1, 0 end
   local listRows = math.max(1, room - fixedRows(bh, gap))
 
   at(x, y, pad("LAYERS", w), K.grey)
   if w >= 16 then
-    smallButton(x + w - 6, y, "Edit", K.lightBlue, function() ui.page, ui.lscroll = "presets", 1 end)
+    smallButton(x + w - 6, y, "Edit", K.lightBlue, function() ui.page, ui.lscroll, ui.pset = "presets", 1, presetSetOf(id) end)
   end
   y = y + 1
   -- Preset list (paged if it doesn't fit)
-  local n = #cfg.presets
+  local n = #presets
   local per = (n > listRows) and math.max(1, listRows - 1) or listRows
   local pages = math.max(1, math.ceil(n / per))
   ui.pscroll = math.max(1, math.min(ui.pscroll or 1, pages))
   for i = 1, per do
-    local p = cfg.presets[(ui.pscroll - 1) * per + i]
+    local p = presets[(ui.pscroll - 1) * per + i]
     if not p then break end
     local sel = isSelected(dd, p)
     local bg, fg = sel and K.cyan or K.black, sel and K.black or K.white

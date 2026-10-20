@@ -64,12 +64,14 @@ local M = {
         },
         foreman = {
           name = "Foreman",
-          about = "Mining control for every Canary",
-          details = "Overview of all Canaries on its monitor; tap one to set its layers, start or "
-            .. "dock it, see where it is, or retire it. Hands out Canary numbers. Needs an ender "
-            .. "modem and an advanced monitor.",
+          about = "The remote for every miner, in every dimension",
+          details = "Every Canary, Firecrest and Starling on its monitor, with its dimension; tap one to set its "
+            .. "layers, start or dock it, reboot or retire it. Canaries and Firecrests through their own Foreman "
+            .. "(MD, Nether); Starlings directly. Needs an ender modem and an advanced monitor.",
           run = "foreman",
-          files = { "computer/foreman/foreman.lua", "shared/ui.lua", "shared/ui_widgets.lua", "shared/ui_parts.lua", "shared/ui_motion.lua" },
+          files = { "computer/foreman/foreman.lua", "shared/assignui.lua", "shared/ui.lua", "shared/ui_widgets.lua", "shared/ui_parts.lua", "shared/ui_motion.lua",
+                    "shared/fm.lua", "shared/fm_reg.lua", "shared/fm_barrels.lua", "shared/fm_draw.lua", "shared/fm_pages.lua",
+                    "shared/fm_edit.lua", "shared/fm_cmd.lua", "shared/fm_net.lua", "shared/fm_remote.lua" },
         },
         mdforeman = {
           name = "MD Foreman",
@@ -79,7 +81,7 @@ local M = {
             .. "keeps the lava factory in empty buckets, sends the haul home through the output barrel (hopper -> "
             .. "ender chest), with an overflow barrel for when home is full. Ender modem + wired modem; /assign.",
           run = "mdforeman",
-          files = { "computer/mdforeman/mdforeman.lua", "shared/assignui.lua",
+          files = { "computer/mdforeman/mdforeman.lua", "shared/assignui.lua", "shared/ui.lua", "shared/ui_widgets.lua", "shared/ui_parts.lua", "shared/ui_motion.lua",
                     "shared/fm.lua", "shared/fm_reg.lua", "shared/fm_barrels.lua", "shared/fm_draw.lua", "shared/fm_pages.lua",
                     "shared/fm_edit.lua", "shared/fm_cmd.lua", "shared/fm_net.lua", "shared/fm_remote.lua" },
         },
