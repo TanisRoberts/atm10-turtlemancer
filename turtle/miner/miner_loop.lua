@@ -10,6 +10,13 @@ function safeHome()
 end
 
 function runOnce()
+  if #layerList() == 0 then
+    -- Nothing to mine: say why (not "Range finished") and wait for a new order
+    if not atDock() then setStatus("returning", "Heading home"); safeHome() end
+    setStatus("waiting", noLayersWhy())
+    waitCtrl(15)
+    return
+  end
   if atDock() then
     local need = fuelToStart()
     if not dockService(need) then

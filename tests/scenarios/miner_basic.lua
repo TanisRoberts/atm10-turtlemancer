@@ -138,3 +138,20 @@ T.test("miner: with a chunk controller he swaps it on as he goes (core.chunk) an
   for _, sl in pairs(t.body.slots) do if sl.name == "advancedperipherals:chunk_controller" then n = n + sl.count end end
   T.eq(n, 1, "controller still in the bag")
 end)
+
+T.test("miner: an order with no range, or one above his dock, says why instead of 'Range finished'", function()
+  local w, t = base()
+  local f = MS.foreman(w)
+  MS.setup(w, t)
+  w:run(10)
+  f.env._G.order = { want = "run", seq = 5 }                    -- no minY / maxY
+  w:run(10)
+  T.contains(f.env._G.lastStatus.msg, "No range from the MD Foreman")
+  T.eq(t.body.y, 64)
+  MS.order(f, { minY = 70, maxY = 80, seq = 6 })
+  w:run(10)
+  T.contains(f.env._G.lastStatus.msg, "Range Y 70..80 isn't below my dock (Y 64)")
+  T.absent(f.env._G.lastStatus.msg, "Range finished")
+  MS.order(f, { seq = 7 })                                       -- a good one: he goes
+  T.waitFor(w, MS.finished(f), 1200, "never mined the good range")
+end)

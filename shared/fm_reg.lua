@@ -61,9 +61,11 @@ function loadCfg()
     for _, p in ipairs(P.presets) do cfg.presets[#cfg.presets + 1] = copyPreset(p) end
   end
   for _, p in ipairs(cfg.presets) do p.r1, p.r2 = p.r1 or 1, p.r2 or DEF_R2 end
-  for _, dd in pairs(reg) do  -- entries from before rings were adjustable
+  for _, dd in pairs(reg) do  -- entries from before rings were adjustable (or with no range at all)
     dd.r1, dd.r2 = dd.r1 or 1, dd.r2 or DEF_R2
     dd.pR1, dd.pR2 = dd.pR1 or dd.r1, dd.pR2 or dd.r2
+    dd.pMin, dd.pMax = dd.pMin or dd.minY or P.newEntry.minY, dd.pMax or dd.maxY or P.newEntry.maxY
+    dd.minY, dd.maxY = dd.minY or dd.pMin, dd.maxY or dd.pMax
   end
   -- Oct 2026: rings are CHUNK rings now (miners work chunk by chunk: ring 0 = the dock's chunk).
   -- Saved block rings are converted once (50 blocks -> 3 chunk rings, "from ring 1" -> 0).

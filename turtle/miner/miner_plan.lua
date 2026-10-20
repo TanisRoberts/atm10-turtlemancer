@@ -80,6 +80,12 @@ end
 -- Mining plan
 ---------------------------------------------------------------------------
 -- Layer centres (absolute Y). Each pass covers centre-1 .. centre+1.
+-- Why there's nothing to mine (no range, or a range that isn't below my dock), or nil
+function noLayersWhy()
+  if not S.minY or not S.maxY then return ("No range from %s: pick one and press START"):format(MODE.boss) end
+  return ("Range Y %d..%d isn't below my dock (Y %d): pick a lower one"):format(S.minY, S.maxY, S.dockY)
+end
+
 function layerList()
   local out = {}
   if not S.minY or not S.maxY then return out end
@@ -163,9 +169,8 @@ function mineChunks()
   local layers = layerList()
   local chunks = chunkList()
   S.layerCount, S.chunkCount = #layers, #chunks
-  if #layers == 0 then
-    S.done = true; save()
-    setStatus("error", "Range must be below the dock")
+  if #layers == 0 then   -- runOnce checks this first; a range that changed on the way
+    setStatus("waiting", noLayersWhy())
     return
   end
   for ci = S.ci or 1, #chunks do
