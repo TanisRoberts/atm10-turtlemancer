@@ -87,7 +87,7 @@ An Advanced Peripherals chunk controller in his bag keeps the chunk he's in load
 - `chunk.restore(hint)`: at boot, puts the modem back on if a swap was cut short (the side is kept in `chunkswap.txt` during a swap; `hint` is a side the role remembered). True if it had to.
 - `chunk.ITEM` (the controller's item id) and `chunk.isModem(name)`, for roles that keep them out of their cargo.
 
-Farm turtles don't call it. The miner calls `ensure` after every move and while waiting.
+Farm turtles don't call it. The miner calls `ensure` after every move and while waiting, and `restore` at boot.
 
 ## Moving another turtle onto the core
 
@@ -98,4 +98,4 @@ Farm turtles don't call it. The miner calls `ensure` after every move and while 
 5. Keep the role's `FUEL_*` thresholds in its `.env` file.
 6. Delete the old copies, and add a scenario (see `tests/scenarios/turtle_core.lua`).
 
-Not fully on the core yet: the miner (chunk loading and the one-barrel dock's fallback use it; its own fuel and GPS go in #59's last stage), Weaver. Seagull keeps its own fuel-up before a scouting trip. Bowerbird never moves.
+The miner (Canary, Firecrest, Starling) is on the core: `fuel.refuelFromInventory` when low underground, `fuel.refuelFromDock` at a two-barrel dock or a one-barrel dock nobody serves, `fuel.burnSlot` for Firecrest's lava, `gps.locate` (a stale fix counts as none), `dock.maybeReport` when docked, and `chunk`. Not on the core yet: Weaver. Seagull keeps its own fuel-up before a scouting trip. Bowerbird never moves.

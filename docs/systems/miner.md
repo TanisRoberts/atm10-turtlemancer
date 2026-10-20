@@ -35,7 +35,20 @@ He keeps his dock's world position (`S.home`) and checks it against GPS at boot.
 
 ## Modules
 
-Miner (`turtle/miner/`, every file under ~30 KB, all in `manifest.lua`): `miner.lua` (start, main loop), and modules for movement and dig rules, inventory/junk/chests/shulker box, lava, the mining plan, the dock, setup/moved, and orders/radio. Fuel, the dock's world position, GPS and chunk loading come from the turtle core (`docs/systems/turtle.md`): `core.fuel`, `core.dock`, `core.gps`, `core.chunk`.
+Miner (`turtle/miner/`, all in `manifest.lua`): `miner.lua` is the header and a loader; the parts share one environment (like the Foreman engine), each under 12 KB:
+
+| Part | What |
+|---|---|
+| `miner_base.lua` | MODES (bird by dimension), junk lists, saved state, position (dock-relative, GPS), the dig rules (`isTurtle`, `isProtected`, `isLootable`), facing by a step |
+| `miner_move.lua` | `move` (never digs a turtle or cable; empties a chest first), turns, going round cables, `goToXZ`, `goY`, `goHome` |
+| `miner_inv.lua` | gear, junk, valuables, making room, chests, chunk loading (`core.chunk`), the shulker box |
+| `miner_lava.lua` | Firecrest's bucket, hunger, drinking pools |
+| `miner_plan.lua` | orders (`applyCtrl`, reboot, `checkpoint` before every block), the chunk-by-chunk plan |
+| `miner_dock.lua` | unloading, the one-barrel dock (`dock_req`), the two-barrel dock, the dock report |
+| `miner_setup.lua` | labels, setup, restarts, being carried (near or far) |
+| `miner_loop.lua` | main loop, radio (status out, `cmd` in), `start()` |
+
+Fuel, GPS, the dock report and chunk loading come from the turtle core (`docs/systems/turtle.md`): `core.fuel`, `core.gps`, `core.dock`, `core.chunk`. The miner has no fuel table, refuel loop or `gps.locate` of its own.
 
 Foremans share one engine in `shared/fm*.lua` (each a `return function(F) ... end` part on one table `F`, loaded like the turtle core): the registry (numbers, orders, presets), the barrel jobs (dock passes, stock and keep rules, output home, overflow, the factory, `dock_req`), the screens (overview, a miner's page, presets, rules, `/assign`), the miner radio and the remote link. A Foreman program is a profile (dimension, bird, protocol, config file, barrel jobs, presets) plus `dofile("fm.lua")(profile)`.
 

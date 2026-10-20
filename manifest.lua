@@ -185,7 +185,10 @@ local M = {
                      .. "Nether = Firecrest (Nether Foreman, one dock barrel, drinks lava with one empty bucket); "
                      .. "End = Starling (dump + fuel barrels). Pickaxe + ender modem.",
                    label = "auto",
-                   files = { "turtle/miner/miner.lua" }, once = { "turtle/miner/junk.txt" } },
+                   files = { "turtle/miner/miner.lua", "turtle/miner/miner_base.lua", "turtle/miner/miner_move.lua",
+                             "turtle/miner/miner_inv.lua", "turtle/miner/miner_lava.lua", "turtle/miner/miner_plan.lua",
+                             "turtle/miner/miner_dock.lua", "turtle/miner/miner_setup.lua", "turtle/miner/miner_loop.lua" },
+                   once = { "turtle/miner/junk.txt" } },
         weaver = { name = "Weaver", about = "Builder: follows a plan file", run = "weaver",
                    details = "Builds the island from a plan file, layer by layer, and fetches "
                      .. "materials from storage.",

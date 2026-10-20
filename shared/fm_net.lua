@@ -214,7 +214,6 @@ end
 
 function start()
   loadCfg()
-  if remoteStart then remoteStart() end
   draw()
   parallel.waitForAny(netLoop, inputLoop, workerLoop)
 end

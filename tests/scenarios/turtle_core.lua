@@ -269,3 +269,21 @@ T.test("turtle core: chunk.restore puts the modem back after a swap cut short", 
   T.eq(slotsOf(t, CHUNKY), 1)
   T.falsy(t:readFile("chunkswap.txt"))
 end)
+
+T.test("the miner runs on the core: no fuel table, refuel loop, gps.locate or chunk swap of its own; parts in the manifest", function()
+  local manifest = assert(load(io.open(cc.ROOT .. "/manifest.lua"):read("*a"), "@manifest.lua", "t", {}))()
+  local files = manifest.types.turtle.roles.canary.files
+  local n = 0
+  for _, f in ipairs(files) do
+    if f:find("^turtle/miner/") then
+      n = n + 1
+      local fh = io.open(cc.ROOT .. "/" .. f); local src = fh:read("*a"); fh:close()
+      T.truthy(#src < 30000, f .. " is over 30 KB")
+      T.falsy(src:find("turtle.refuel", 1, true), f .. " still calls turtle.refuel")
+      T.falsy(src:find("gps.locate", 1, true) and not src:find("core.gps.locate", 1, true), f .. " still calls gps.locate itself")
+      T.falsy(src:find("equipLeft", 1, true) or src:find("equipRight", 1, true), f .. " still swaps upgrades itself")
+      T.falsy(src:find("lava_bucket\", 1000", 1, true), f .. " still has a fuel table")
+    end
+  end
+  T.eq(n, 9, "miner.lua and its 8 parts")
+end)
