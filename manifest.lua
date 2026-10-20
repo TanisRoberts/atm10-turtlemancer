@@ -164,10 +164,10 @@ local M = {
         -- The role id stays "canary" so existing Canaries' device.cfg keeps working.
         canary = { name = "Miner", about = "Miner: named by his dimension", run = "miner",
                    alsoNames = { "canary", "firecrest", "starling" }, labelName = "Canary",
-                   details = "Digs a shaft at its dock and mines squares at the layers its Foreman picks. "
-                     .. "Named by dimension: Nether = Firecrest (Nether Foreman, one dock barrel, drinks lava "
-                     .. "with one empty bucket); End = Starling; anywhere else = Canary. "
-                     .. "Pickaxe + ender modem.",
+                   details = "Digs a shaft at its dock and mines chunk by chunk at the layers its Foreman picks. "
+                     .. "Named by dimension: Mining Dimension (or anywhere else) = Canary, one dock barrel; "
+                     .. "Nether = Firecrest (Nether Foreman, one dock barrel, drinks lava with one empty bucket); "
+                     .. "End = Starling (dump + fuel barrels). Pickaxe + ender modem.",
                    label = "auto",
                    files = { "turtle/miner/miner.lua" }, once = { "turtle/miner/junk.txt" } },
         weaver = { name = "Weaver", about = "Builder: follows a plan file", run = "weaver",

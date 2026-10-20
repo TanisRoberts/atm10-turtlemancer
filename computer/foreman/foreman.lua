@@ -169,7 +169,7 @@ local STATES = {
   waiting = { "WAITING", K.orange }, error = { "ERROR", K.red }, lost = { "LOST", K.red },
   retired = { "RETIRED", K.grey }, rebooting = { "REBOOTING", K.purple },
 }
-local DIMS = { overworld = "Overworld", the_nether = "Nether", the_end = "End" }
+local DIMS = { overworld = "Overworld", the_nether = "Nether", the_end = "End", ["allthemodium:mining"] = "Mining" }
 
 local function fmtNum(n)
   if type(n) ~= "number" then return tostring(n or "?") end
