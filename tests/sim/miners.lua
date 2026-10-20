@@ -66,6 +66,48 @@ function MS.foreman(w, o)
   return f
 end
 
+-- A stand-in miner (a computer, no body): registers as o.bird (Firecrest) on o.protocol (tanis-nether), sends a
+-- status every second (_G.state, _G.msg, _G.y; echoes the last cmd's seq like a real miner), keeps the last cmd in
+-- _G.lastCmd and dock_ready replies in _G.replies. Set _G.ask = { seq, bucket, fuel } to send a dock_req,
+-- _G.done = true to send dock_done. o.num: already numbered (no register).
+function MS.standIn(w, o)
+  o = o or {}
+  local c = w:computer{ id = o.id or 9, label = o.label }
+  c:attach("top", cc.wireless{ ender = true })
+  c:writeFile("standin.lua", ([[
+    rednet.open("top")
+    local P, BIRD, KIND, DIM = %q, %q, %q, %q
+    local me = os.getComputerID()
+    _G.replies = {}
+    _G.num = %s
+    while true do
+      rednet.broadcast({ type = "status", id = me, num = _G.num, label = os.getComputerLabel(), kind = KIND, bird = BIRD,
+        state = _G.state or "docked", msg = _G.msg or "Waiting for START", fuel = 5000, fuelLimit = 100000, slots = 0,
+        y = _G.y or 40, seq = _G.seq, want = _G.want, rebootDone = _G.rebootDone, dim = DIM,
+        pos = { x = 1, y = _G.y or 40, z = 2 }, minY = _G.minY, maxY = _G.maxY }, P)
+      if not _G.num then rednet.broadcast({ type = "register", id = me, name = BIRD }, P) end
+      if _G.ask then
+        rednet.broadcast({ type = "dock_req", id = me, seq = _G.ask.seq, bucket = _G.ask.bucket, fuel = _G.ask.fuel }, P)
+        _G.ask = nil
+      end
+      if _G.done then rednet.broadcast({ type = "dock_done", id = me }, P); _G.done = nil end
+      local t = os.clock() + 1
+      while os.clock() < t do
+        local from, m = rednet.receive(P, 0.2)
+        if type(m) == "table" and m.type == "assigned" and m.id == me then _G.num = m.num; os.setComputerLabel(m.label) end
+        if type(m) == "table" and m.type == "cmd" and m.to == me then
+          _G.lastCmd, _G.cmdFrom, _G.seq, _G.want = m, from, m.seq, m.want
+          if m.want == "run" then _G.minY, _G.maxY = m.minY, m.maxY end
+          _G.cmds = (_G.cmds or 0) + 1
+        end
+        if type(m) == "table" and m.type == "dock_ready" and m.id == me then _G.replies[#_G.replies + 1] = m end
+      end
+    end
+  ]]):format(o.protocol or "tanis-nether", o.bird or "Firecrest", o.kind or "firecrest", o.dim or "the_nether", tostring(o.num or "nil")))
+  c:run("standin")
+  return c
+end
+
 function MS.order(f, o)
   o = o or {}
   f.env._G.order = { want = o.want or "run", minY = o.minY or 60, maxY = o.maxY or 63, seq = o.seq or 1, c2 = o.c2 }
