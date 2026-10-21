@@ -3,6 +3,7 @@
 --
 -- Chat commands (start with $ to keep them out of public chat, e.g. "$island miner"):
 --   island status | scan | miner (every Canary) | storage | operator [reactor] on|off|auto|status | alerts | test | help
+--   island remove_ring [name]   takes a cursed ring out of your Curios slots (ring.lua)
 -- ($dump and $pocket are the butler's: see butler.lua)
 -- "island alerts" subscribes you to private alerts: storage filling up, the miner going quiet,
 -- getting lost, running out of fuel, finishing, or bringing home diamonds. Alerts you miss
@@ -15,6 +16,7 @@ local REFRESH      = 2           -- seconds between updates
 local SILENT_AFTER = 120         -- seconds without hearing from the miner before alerting
 local ALERTS_FILE  = "alerts.cfg"
 local opfmt = require("operator_fmt")
+local ring = require("ring")
 local tune = require("envfile").new("island.env", "Mainframe alert settings.", {
   { "OPERATOR_SILENT_AFTER", 60, "Seconds without the Operator's heartbeat before a 'reactor silent' alert." },
   { "URANIUM_LOW", 16, "Alert when Storage reports fewer uranium ingots than this." },
@@ -477,7 +479,7 @@ end
 ---------------------------------------------------------------------------
 -- Chat commands
 ---------------------------------------------------------------------------
-local HELP = "Commands: island status | scan | miner | storage | weaver | woodpecker | partridge | smelt | plastic | neural | operator | alerts | test."
+local HELP = "Commands: island status | scan | miner | storage | weaver | woodpecker | partridge | smelt | plastic | neural | operator | alerts | test | remove_ring."
   .. " Your inventory: $get [n] <item> | $dump | $pocket"
 
 local function chatLoop()
@@ -503,7 +505,7 @@ local function chatLoop()
       saveA()
     end
 
-    local cmd = tostring(msg):lower():gsub("^%$", ""):match("^%s*island%s*(%a*)")
+    local cmd = tostring(msg):lower():gsub("^%$", ""):match("^%s*island%s*([%a_]*)")
     if cmd then
       if (cmd == "" or cmd == "status") and state then
         say(summary(state), user)
@@ -619,6 +621,9 @@ local function chatLoop()
           say("Alerts on. I'll message you about storage and the miner, even when you're away from base.", user)
         end
         saveA()
+      elseif cmd == "remove_ring" then
+        local word = tostring(msg):lower():match("remove_ring%s+(%S+)")
+        say(ring.remove(find("inventory_manager", "inventoryManager"), user, word), user)
       elseif cmd == "test" then
         if A.subs[user] then notify("Test alert. This is what alerts look like.", user)
         else say("You're not subscribed. Say: island alerts", user) end
