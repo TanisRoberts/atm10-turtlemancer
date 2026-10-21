@@ -236,3 +236,23 @@ T.test("md foreman: a dock at Y 253 mining at Y -63..-61 never runs out of fuel"
   T.eq(e.b.out:count("minecraft:diamond"), 1)
   T.eq(e.b.out:count("minecraft:raw_iron"), 1)
 end)
+
+T.test("md foreman: barrels on two separate cables can't swap items, and the screen says why (not 'Output full')", function()
+  local w = cc.world()
+  local a, b = w:net("a"), w:net("b")
+  local dock = a:add("minecraft:barrel_0", MS.barrel())
+  b:add("minecraft:barrel_1", MS.barrel())                      -- the Output, on a second cable
+  dock:give("minecraft:diamond", 5)
+  local c = w:computer{ id = 3, label = "MD Foreman" }
+  c:attach("back", cc.wired(a)); c:attach("left", cc.wired(b))
+  c:attach("top", cc.wireless{ ender = true })
+  local mon = c:monitor("right", 57, 24)
+  c:installRole("mdforeman")
+  c:writeTable("mdforeman.cfg", { docks = { "minecraft:barrel_0" }, outputs = { "minecraft:barrel_1" }, imported = true })
+  c:run("mdforeman")
+  w:run(5)
+  T.running(c)
+  T.contains(mon, "barrel_0 can't reach barrel_1: are both on my cable?")
+  T.contains(mon, "0 canaries  CAN'T MOVE")
+  T.absent(mon, "OUTPUT FULL")
+end)

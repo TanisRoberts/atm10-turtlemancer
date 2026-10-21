@@ -11,6 +11,7 @@ function barrelLine()
   if #cfg.docks == 0 or #cfg.outputs == 0 then
     return "Barrels: tap Barrels (or /assign) to give them jobs", K.orange
   end
+  if barrel.moveErr then return barrel.moveErr, K.red end
   if barrel.outFull and #cfg.overflows > 0 then
     return ("Output full: haul waits in Overflow (%d/%d slots)"):format(barrel.overflow.used, barrel.overflow.size), K.orange
   end
@@ -42,10 +43,11 @@ function drawOverview(w, h)
   end
   local active, retiredN = 0, 0
   for _, id in ipairs(allIds()) do if entry(id).retired then retiredN = retiredN + 1 else active = active + 1 end end
-  local outTxt = not P.barrels and "" or #cfg.outputs == 0 and "no output" or barrel.outFull and "OUTPUT FULL"
+  local outTxt = not P.barrels and "" or #cfg.outputs == 0 and "no output" or barrel.moveErr and "CAN'T MOVE"
+    or barrel.outFull and "OUTPUT FULL"
     or ("out %d/%d free"):format(barrel.outFree, barrel.outSlots)
   header(w, ui.showRetired and (P.short .. "  retired") or P.title,
-    ("%d %s%s  %s"):format(active, P.unit or P.bird:lower(), active == 1 and "" or "s", outTxt))
+    ("%d %s  %s"):format(active, active == 1 and (P.unit or P.bird:lower()) or P.birds:lower(), outTxt))
   if not (ui.notice and os.clock() < ui.notice.untilT) then
     local line, col = barrelLine()
     at(2, 2, pad(line, w - 2), col)

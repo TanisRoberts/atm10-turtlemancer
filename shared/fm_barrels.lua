@@ -114,7 +114,14 @@ function pushInto(list, from, slot, item, count)
   for _, group in ipairs({ firstPass, second }) do
     for _, n in ipairs(group) do
       if moved >= count then return moved end
-      moved = moved + (call(from, "pushItems", n, slot, count - moved) or 0)
+      local m, err = call(from, "pushItems", n, slot, count - moved)
+      if not m and not barrel.moveErr then
+        -- Most likely the two aren't on ONE wired network (a second cable or modem, or a barrel
+        -- touching the computer instead of on the cable): the screen says so
+        barrel.moveErr = ("%s can't reach %s: are both on my cable? (%s)"):format((from:gsub("^.-:", "")),
+          (n:gsub("^.-:", "")), tostring(err))
+      end
+      moved = moved + (m or 0)
     end
   end
   return moved
@@ -297,7 +304,7 @@ end
 
 lastNote = nil
 function barrelPass()
-  barrel.outFull = false
+  barrel.outFull, barrel.moveErr = false, nil
   scanStock()
   while #requests > 0 do
     local r = table.remove(requests, 1)
