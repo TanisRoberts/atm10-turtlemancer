@@ -172,6 +172,71 @@ function recover()
   save()
 end
 
+-- Lost (unloaded mid-turn, say) while on my dock: turn until my dock barrel is in front of me. There's one
+-- barrel round the dock, so that gives my heading, with no GPS and no free side needed (the MD's docks have
+-- none). True if it worked.
+function faceByDock()
+  if not (atDock() and type(S.dockDir) == "number") then return false end
+  local hits, at = 0, nil
+  for turns = 0, 3 do
+    if isContainer(turtle.inspect()) then hits = hits + 1; at = at or turns end
+    turtle.turnRight()
+  end
+  if hits ~= 1 then return false end
+  for _ = 1, at do turtle.turnRight() end
+  S.h, S.lost, S.turning = S.dockDir, nil, nil
+  save()
+  face(0)
+  return true
+end
+
+-- Re-dock: set my dock up again right where I stand, keeping my number and label. For a miner carried onto a
+-- dock who didn't notice, or one that's lost on his dock. Ordered from his Foreman, or `miner redock` here.
+function redockHere()
+  setStatus("docked", "Re-docking here")
+  local x, y, z = locate()
+  if not x then setStatus("waiting", "Re-dock: no GPS here"); return false end
+  local c, _, stuck = compassByStep(false)
+  if stuck then setStatus("error", "Re-dock: stuck a block off my dock, put me back on it"); return false end
+  if not c and S.home and S.home.x == x and S.home.y == y and S.home.z == z and type(S.dockDir) == "number" and S.facing then
+    -- no free side, but this is my old dock: its barrel says which way I face
+    for _ = 0, 3 do
+      if isContainer(turtle.inspect()) then c = (S.facing + S.dockDir) % 4; break end
+      turtle.turnRight()
+    end
+  end
+  if not c then
+    setStatus("waiting", "Re-dock: say which way I face on my screen")
+    term.clear(); term.setCursorPos(1, 1)
+    title("RE-DOCKING HERE")
+    c = askFacing()
+  end
+  S.home, S.facing, S.dockY = { x = x, y = y, z = z }, c, y
+  S.x, S.y, S.z, S.h = 0, 0, 0, 0
+  S.lost, S.far, S.farPos, S.offPath, S.heldSeq, S.farDeclined, S.pending, S.turning = nil, nil, nil, nil, nil, nil, nil, nil
+  S.ci, S.cl, S.step, S.done, S.regionChanged, S.want = 1, 1, 1, nil, nil, "dock"
+  local found = barrelsAround()
+  face(0)
+  if #found ~= 1 then
+    S.dockDir = nil
+    save()
+    setStatus("error", ("Re-dock: %d barrels here, I need one"):format(#found))
+    return false
+  end
+  S.dockDir = found[1]
+  save()
+  setStatus("docked", "Re-docked here. Waiting for START")
+  return true
+end
+
+-- A re-dock from my Foreman (ctrl.redock: a fresh token per press, done once)
+function maybeRedock()
+  if not (ctrl and ctrl.redock and ctrl.redock ~= S.redockDone) then return end
+  S.redockDone = ctrl.redock
+  save()
+  redockHere()
+end
+
 function lostFlow()
   setStatus("lost", "Carry me back to the dock")
   print("I lost track of which way I'm facing (unloaded mid-turn).")
@@ -244,7 +309,7 @@ function checkPosition()
   end
   if moved then
     setFromAbs(x, y, z)
-    S.lost, S.offPath, S.heldSeq = true, true, S.seq
+    S.lost, S.offPath, S.heldSeq = true, (not atDock()) or nil, S.seq   -- put back on his own dock: not off his path
   end
   S.far, S.farPos = nil, nil
   if S.lost then

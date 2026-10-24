@@ -374,15 +374,19 @@ function drawControls(id, x, y, w, maxY)
   end)
   y = y + bh + 1
   if y <= maxY then
-    -- Reboot | Retire share the last row
-    local rw = math.floor((w - 1) / 2)
+    -- Reboot | Re-dock | Retire share the last row
+    local rw = math.floor((w - 2) / 3)
     local pending = dd.reboot ~= nil
-    button(x, y, rw, 1, pending and "Rebooting..." or "Reboot", pending and K.grey or K.purple, function()
+    button(x, y, rw, 1, pending and "Reboot.." or "Reboot", pending and K.grey or K.purple, function()
       requestReboot(id); say(dd.label .. ": reboot sent. It finishes its block first.", K.purple)
     end, K.white)
-    local rx, rw2 = x + rw + 1, w - rw - 1
+    local docking = dd.redock ~= nil
+    button(x + rw + 1, y, rw, 1, docking and "Dock.." or "Re-dock", docking and K.grey or K.lightBlue, function()
+      requestRedock(id); say(dd.label .. ": re-dock sent. He sets his dock up where he stands.", K.lightBlue)
+    end)
+    local rx, rw2 = x + 2 * (rw + 1), w - 2 * (rw + 1)
     if ui.confirmRetire == id then
-      button(rx, y, rw2, 1, "Tap to retire", K.orange, function()
+      button(rx, y, rw2, 1, "Sure?", K.orange, function()
         retire(id); ui.confirmRetire = nil; ui.page = "overview"
         say(dd.label .. " retired. Number " .. dd.num .. " won't be used again.", K.orange)
       end)

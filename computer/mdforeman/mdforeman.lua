@@ -29,7 +29,7 @@ dofile("fm.lua")({
   dim = "allthemodium:mining", defR2 = 2, yMin = -63, yMax = 250, newEntry = { minY = -59, maxY = -54 },
   fuelTarget = true, barrels = true, neverHome = { ["minecraft:bucket"] = true, ["minecraft:lava_bucket"] = true },
   jobs = { "dock", "output", "overflow", "stock", "factory_in", "factory_out", "input", "ignore" },
-  help = "/rules /keep <item> <n> /assign /presets /new /edit /delete /reboot /home",
+  help = "/rules /keep <item> <n> /assign /presets /new /edit /delete /reboot /redock /home",
   -- First-run presets (absolute Y): the MD's ores sit where the Overworld's do. The docks are at Y 253, so a
   -- shaft to the bottom is ~316 blocks: wider areas make each trip down worth more.
   presets = {

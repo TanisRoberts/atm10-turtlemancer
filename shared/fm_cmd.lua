@@ -3,7 +3,7 @@
 ---------------------------------------------------------------------------
 -- Commands typed on the computer (bottom row): /presets, /new, /edit, /delete, /home, /help
 ---------------------------------------------------------------------------
-HELP = P.help or "/rules /keep <item> <n> /junk /unjunk <item> /assign /presets /new /edit /delete /reboot /home"
+HELP = P.help or "/rules /keep <item> <n> /junk /unjunk <item> /assign /presets /new /edit /delete /reboot /redock /home"
 
 function runCommand(line)
   local cmd, arg = line:match("^/?(%S*)%s*(.-)%s*$")
@@ -54,6 +54,19 @@ function runCommand(line)
     for _, id in ipairs(hits) do requestReboot(id) end
     say(#hits == 1 and ((entry(hits[1]).label or ONE) .. ": reboot sent.") or
       ("Reboot sent to %d %s."):format(#hits, P.birds), K.purple)
+  elseif cmd == "redock" then
+    local a = arg:lower()
+    if a == "" then say(("/redock <%s number or name> or /redock all"):format(ONE:lower()), K.red); return end
+    local n = 0
+    for _, id in ipairs(allIds()) do
+      local dd = entry(id)
+      local lbl = (dd.label or nameOf(dd.num)):lower()
+      if not dd.retired and (a == "all" or lbl == a or tonumber(a) == dd.num or lbl:find(a, 1, true)) then
+        requestRedock(id); n = n + 1
+      end
+    end
+    say(n == 0 and ("No %s matches %s"):format(ONE, arg) or ("Re-dock sent to %d: each sets his dock up where he stands."):format(n),
+      n == 0 and K.red or K.lightBlue)
   elseif cmd == "edit" or cmd == "delete" or cmd == "remove" or cmd == "del" then
     local idx = findPreset(arg)
     if not idx then say(arg == "" and ("/" .. cmd .. " <preset name>") or ("No preset called " .. arg), K.red); return end

@@ -119,3 +119,51 @@ T.test("miner moved: a saved state with no dock barrel sets up again at boot, ke
   T.eq(st.dockDir, 1); T.eq(st.num, 3); T.eq(st.dim, "allthemodium:mining")
   T.contains(t:output(), "I'm still")
 end)
+
+-- A Canary on an MD-style dock: barrel east, walls on the other three sides (no free side to step into)
+local function boxedIn()
+  local w = cc.world()
+  w.gpsOn = true
+  w:fill(-20, 40, -20, 20, 63, 20, "minecraft:stone")
+  local dock = MS.barrel()
+  dock:give("minecraft:coal", 16)
+  w:setBlock(1, 64, 0, "minecraft:barrel", dock)
+  local t = MS.turtle(w)
+  local f = MS.foreman(w)
+  MS.setup(w, t)
+  w:run(30)
+  w:setBlock(0, 64, -1, "minecraft:stone"); w:setBlock(-1, 64, 0, "minecraft:stone"); w:setBlock(0, 64, 1, "minecraft:stone")
+  return w, t, f
+end
+
+T.test("miner: unloaded mid-turn on a dock with no free side, he finds his heading by his dock barrel", function()
+  local w, t, f = boxedIn()
+  local st = t:readTable("miner.state")
+  st.turning, st.h = true, 2                         -- unloaded mid-turn: his heading is unknown
+  t:writeTable("miner.state", st)
+  t.body.facing = 2                                   -- facing south, not north as he thinks
+  t:reboot(); w:run(15)
+  T.running(t)
+  local s = t:readTable("miner.state")
+  T.falsy(s.lost, "not lost")
+  T.eq(s.h, 0); T.eq(t.body.facing, 0, "faces the way he faced at setup")
+  T.absent(f.env._G.lastStatus.msg, "Can't tell")
+  MS.order(f)
+  T.waitFor(w, MS.finished(f), 1200, "never mined after finding himself")
+end)
+
+T.test("miner: a re-dock from his Foreman sets his dock up where he stands, keeping his number", function()
+  local w, t, f = boxedIn()
+  -- carried to a new dock 3 blocks east (same chunk, same height: he thinks he's been moved by hand)
+  w:setBlock(4, 64, -1, "minecraft:barrel", MS.barrel())
+  t.body.x, t.body.y, t.body.z = 3, 64, -1
+  t:reboot(); w:run(10)
+  T.contains(f.env._G.lastStatus.msg, "Moved by hand")
+  f.env._G.redock = 1
+  f.env._G.order = { want = "dock", seq = 9 }
+  w:run(15)
+  local s = t:readTable("miner.state")
+  T.eq(s.home.x, 3); T.eq(s.home.z, -1); T.eq(s.dockDir, 1); T.eq(s.num, 1)
+  T.contains(t:output(), "Re-docked here")
+  T.eq(f.env._G.lastStatus.redockDone, 1)
+end)

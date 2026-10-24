@@ -157,6 +157,15 @@ function requestReboot(id)
   changed(id)
 end
 
+-- Ask a miner to set his dock up again where he stands (a miner carried onto a dock, or lost on his dock).
+-- One fresh token per press; he does it once, when he isn't mining.
+function requestRedock(id)
+  local d = reg[id]
+  if not d then return end
+  d.redock = os.epoch("utc")
+  changed(id)
+end
+
 -- Who's who. The Overworld Foreman (fm_remote.lua) adds the miners it mirrors from the dimension Foremans.
 function entry(id) return reg[id] end
 function allIds()

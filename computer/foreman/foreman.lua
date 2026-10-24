@@ -25,7 +25,7 @@ dofile("fm.lua")({
   bird = "Starling", birds = "miners", one = "miner", unit = "miner", birdNames = { Canary = true, Starling = true },
   protocol = "tanis-miner", config = "foreman.cfg", regKey = "canaries", oldKey = "diggers", oldPrefix = "Digger",
   dim = "overworld", defR2 = 3, yMin = -63, yMax = 319, newEntry = { minY = -59, maxY = -58 },
-  help = "/presets /new /edit /delete <name>  /reboot <miner|all>  /home",
+  help = "/presets /new /edit /delete <name>  /reboot /redock <miner|all>  /home",
   emptyText = {
     "No miners yet.",
     "Canaries come from the MD Foreman, Firecrests from the Nether",

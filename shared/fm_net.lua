@@ -15,7 +15,7 @@ function sendOrder(id)
   rednet.send(id, {
     type = "cmd", to = id, kind = kindOf(id), want = dd.retired and "dock" or dd.want, minY = dd.minY, maxY = dd.maxY,
     c1 = dd.r1 or 0, c2 = dd.r2 or DEF_R2, r1 = math.max(1, (dd.r1 or 0) * 16), r2 = (dd.r2 or DEF_R2) * 16 + 8,
-    seq = dd.seq, reboot = dd.reboot, retired = dd.retired == true, capped = list,
+    seq = dd.seq, reboot = dd.reboot, redock = dd.redock, retired = dd.retired == true, capped = list,
     junk = P.junk and cfg.junk or nil, hungryAt = cfg.hungryAt, fullAt = cfg.fullAt,
   }, PROTOCOL)
 end
@@ -41,6 +41,12 @@ function ownStatus(from, msg)
       say((dd.label or P.bird) .. " is back up and carrying on.", K.lime)
       if remoteChanged then remoteChanged() end
     end
+  end
+  if dd and dd.redock and msg.redockDone == dd.redock then
+    dd.redock = nil
+    saveCfg()
+    say(("%s: %s"):format(dd.label or P.bird, msg.msg or "re-docked"), K.lime)
+    if remoteChanged then remoteChanged() end
   end
   if not dd and tonumber(msg.num) and not numTaken(tonumber(msg.num), from) and adoptOK() then
     adopt(from, msg)

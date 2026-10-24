@@ -50,7 +50,7 @@
 -- rednet ...) show through it. Fuel, GPS, the dock's report and chunk loading come from the turtle core.
 local PARTS = { "miner_base.lua", "miner_move.lua", "miner_inv.lua", "miner_lava.lua", "miner_plan.lua",
   "miner_dock.lua", "miner_setup.lua", "miner_loop.lua" }
-local M = setmetatable({ core = dofile("turtlecore.lua") }, { __index = _ENV })
+local M = setmetatable({ core = dofile("turtlecore.lua"), args = { ... } }, { __index = _ENV })
 for _, name in ipairs(PARTS) do
   local f = fs.open(name, "r")
   if not f then error("Missing " .. name .. ": reboot to update", 0) end

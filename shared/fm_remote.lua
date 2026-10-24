@@ -43,7 +43,7 @@ if P.remote == "dimension" then
     end
   end
 
-  local OPS = { order = true, pick = true, reboot = true, retire = true, presets = true }
+  local OPS = { order = true, pick = true, reboot = true, redock = true, retire = true, presets = true }
   local function carryOut(m)
     local d = m.id and reg[m.id]
     if m.op == "presets" then
@@ -64,6 +64,9 @@ if P.remote == "dimension" then
     elseif m.op == "reboot" then
       requestReboot(m.id)
       say(("%s: reboot from the Overworld Foreman."):format(d.label or P.bird), K.purple)
+    elseif m.op == "redock" then
+      requestRedock(m.id)
+      say(("%s: re-dock from the Overworld Foreman."):format(d.label or P.bird), K.lightBlue)
     elseif m.op == "retire" then
       retire(m.id)
       say(("%s retired from the Overworld Foreman."):format(d.label or P.bird), K.orange)
@@ -215,7 +218,14 @@ if P.remote == "hub" then
     return true
   end
 
-  local baseOrder, basePick, baseReboot, baseRetire = order, pick, requestReboot, retire
+  local baseOrder, basePick, baseReboot, baseRetire, baseRedock = order, pick, requestReboot, retire, requestRedock
+  function requestRedock(id)
+    if reg[id] then return baseRedock(id) end
+    local d = mirrorOf(id)
+    if not d then return end
+    d.redock = d.redock or os.epoch("utc")
+    send(id, "redock", {}, d.label)
+  end
   function order(id, want)
     if reg[id] then return baseOrder(id, want) end
     local d = mirrorOf(id)

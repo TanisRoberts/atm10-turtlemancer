@@ -156,7 +156,7 @@ T.test("remote: reboot and retire from the remote go through the miner's Foreman
   e.w:run(5)
   T.truthy(e.firecrest.env._G.lastCmd.reboot, "reboot token from the Nether Foreman")
   tapOn(e.w, e.hubMon, "Retire", true)
-  tapOn(e.w, e.hubMon, "Tap to retire", true)
+  tapOn(e.w, e.hubMon, "Sure?", true)
   e.w:run(5)
   T.eq(e.nether:readTable("nether.cfg").firecrests[9].retired, true)
   T.eq(e.firecrest.env._G.lastCmd.retired, true)
@@ -210,4 +210,13 @@ T.test("remote: storage's junk caps reach the Canaries through the Overworld and
   e.w:run(25)
   local capped = e.canary.env._G.lastCmd.capped
   T.eq(capped[1], "minecraft:cobblestone")
+end)
+
+T.test("remote: Re-dock on the Overworld Foreman reaches a Canary through the MD Foreman", function()
+  local e = world()
+  tapOn(e.w, e.hubMon, "Canary-01")
+  tapOn(e.w, e.hubMon, "Re-dock", true)
+  e.w:run(5)
+  T.truthy(e.canary.env._G.lastCmd.redock, "re-dock token from the MD Foreman")
+  T.eq(e.canary.env._G.cmdFrom, 3)
 end)

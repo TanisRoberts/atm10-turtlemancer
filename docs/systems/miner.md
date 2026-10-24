@@ -32,6 +32,8 @@ He keeps his dock's world position (`S.home`) and checks it against GPS at boot.
 
 - **Far** (outside his chunk area, or above his dock: another dock or another dimension, since MD pads keep X/Z) **with a barrel next to him:** his screen offers to set up here. Yes: dimension, position, facing and dock barrel are learned again; number, label and totals are kept. No (or no barrel): status "Carry me back to my dock", and he never tunnels there.
 - **Near** (inside his area): as before, he waits for START/DOCK, then digs down, tunnels to his shaft and comes up it.
+- **Lost on his dock** (unloaded mid-turn, so his heading is unknown): he turns until his dock barrel is in front of him; that gives his heading with no GPS and no free side to step into (the MD's docks have none).
+- **Re-dock:** the Re-dock button on a miner's page (or `/redock <name|all>`, on his own Foreman or the Overworld Foreman) sends `cmd.redock` (a fresh token per press). When he isn't mining he sets his dock up again right where he stands: GPS position, heading (a step, his old barrel, or asked on his screen), the one barrel next to him. Number, label and totals are kept; status `redockDone` echoes the token. On the turtle itself: Ctrl+T, then `miner redock`.
 
 ## Modules
 

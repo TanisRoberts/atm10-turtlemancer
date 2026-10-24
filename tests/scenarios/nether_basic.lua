@@ -189,7 +189,7 @@ T.test("nether: retire takes two taps and the number is never handed out again",
   local e = base()
   tap(e, "Firecrest-01")
   tap(e, "Retire")
-  tap(e, "Tap to retire")
+  tap(e, "Sure?")
   T.contains(e.mon, "Firecrest-01 retired. Number 1 won't be used again.")
   local cfg = e.c:readTable("nether.cfg")
   T.eq(cfg.firecrests[9].retired, true)

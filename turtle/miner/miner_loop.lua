@@ -58,12 +58,14 @@ function mainLoop()
   while true do
     applyCtrl()
     maybeReboot()
+    maybeRedock()
+    if S.lost and atDock() then faceByDock() end
     if S.far then
       movedFlow()
     elseif S.lost and gpsSeen then
       checkPosition()
       if S.lost then
-        setStatus("lost", "Can't tell which way I face: no free side to step into")
+        setStatus("lost", "Can't tell which way I face. Re-dock me on my Foreman")
         waitCtrl(30)
       end
     elseif S.lost then
@@ -116,7 +118,7 @@ function statusMsg()
     cbc = true, chunk = S.ci, chunks = S.chunkCount, chunksDone = S.chunksDone, cell = S.step,
     chunky = S.chunky == true, chunkyNote = S.chunkyNote, swaps = S.swaps,
     box = boxSlot() and (S.boxFull and "full" or "ok") or "none", boxStacks = S.boxStacks,
-    minY = S.minY, maxY = S.maxY, want = S.want, rebootDone = S.rebootDone, done = S.done, ores = S.ores, haul = haul,
+    minY = S.minY, maxY = S.maxY, want = S.want, rebootDone = S.rebootDone, redockDone = S.redockDone, done = S.done, ores = S.ores, haul = haul,
   }
   m.dockNote = S.dockNote
   if MODE.nether then
@@ -194,6 +196,7 @@ function start()
     setupDock(S)
   else recover() end
   setMode()
+  if args[1] == "redock" and S.dockY then redockHere() end
   -- Chunk by chunk since Oct 2026: progress from the old ring miner means nothing now. Start the
   -- Foreman's order afresh (forgetting its seq makes the next order count as new).
   if not S.cbc then

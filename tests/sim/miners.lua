@@ -54,7 +54,7 @@ function MS.foreman(w, o)
       if _G.order then
         for id in pairs(seen) do
           rednet.send(id, { type = "cmd", to = id, kind = _G.kind, want = _G.order.want, minY = _G.order.minY, maxY = _G.order.maxY,
-                            c1 = 0, c2 = _G.order.c2 or 0, r1 = 1, r2 = 8, seq = _G.order.seq, capped = {} }, P)
+                            c1 = 0, c2 = _G.order.c2 or 0, r1 = 1, r2 = 8, seq = _G.order.seq, redock = _G.redock, capped = {} }, P)
         end
       end
     end
