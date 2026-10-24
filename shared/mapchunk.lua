@@ -8,12 +8,23 @@
 --   1 + (y + 64) * 4 + kind = the top block is at height y, of this kind:
 --     0 LAND, 1 FOLIAGE (leaves, logs), 2 SHALLOW water (floor within SHALLOW blocks), 3 DEEP water
 -- Plain printable characters only, so the strings survive files, rednet and textutils untouched.
+--
+-- In memory and on rednet a chunk stays that 512-character string. In a map file (save / load) it is
+-- run-length coded (M.encode / M.decode): the 256 values in order, each run of equal values written as
+--   the value (2 chars)                     a single column
+--   the value twice                         a run of 2
+--   the value, ".", the length (2 chars)    a run of 3 or more
+-- so an all-ocean chunk is 5 characters. Open ocean carries no detail: a DEEP column is saved at
+-- OCEAN_Y whatever its height, so it joins the run. A file starts with "#mapv2"; a file without that
+-- line (the old format, 512 characters per chunk) still loads, and is rewritten small on the next save.
 
 local M = {}
 
 M.LAND, M.FOLIAGE, M.SHALLOW, M.DEEP = 0, 1, 2, 3
 M.SIZE = 512
 M.EMPTY = ("AA"):rep(256)
+M.OCEAN_Y = 62
+M.HEADER = "#mapv2"
 
 local ALPHA = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
 local CH, VAL = {}, {}
@@ -90,12 +101,60 @@ function M.merge(old, new)
   return M.fromArray(a)
 end
 
+local function pair(v) return CH[math.floor(v / 64) % 64] .. CH[v % 64] end
+
+-- 512-character chunk string -> run-length coded string
+function M.encode(data)
+  local arr = M.toArray(data)
+  for n = 1, 256 do
+    local y, kind = M.unpack(arr[n])
+    if y and kind == M.DEEP then arr[n] = M.pack(M.OCEAN_Y, M.DEEP) end
+  end
+  local out, n = {}, 1
+  while n <= 256 do
+    local v, m = arr[n], n
+    while m < 256 and arr[m + 1] == v do m = m + 1 end
+    local run = m - n + 1
+    local p = pair(v)
+    out[#out + 1] = run == 1 and p or run == 2 and p .. p or p .. "." .. pair(run)
+    n = m + 1
+  end
+  return table.concat(out)
+end
+
+-- run-length coded string -> 512-character chunk string, or nil when it is not a whole chunk
+function M.decode(s)
+  if type(s) ~= "string" then return nil end
+  local parts, count, i = {}, 0, 1
+  while i <= #s do
+    local p = s:sub(i, i + 1)
+    local a, b = VAL[s:byte(i)], VAL[s:byte(i + 1) or 0]
+    if not a or not b then return nil end
+    local run = 1
+    if s:sub(i + 2, i + 2) == "." then
+      local c, d = VAL[s:byte(i + 3) or 0], VAL[s:byte(i + 4) or 0]
+      if not c or not d then return nil end
+      run = c * 64 + d
+      i = i + 5
+    else
+      i = i + 2
+    end
+    if run < 1 then return nil end
+    count = count + run
+    if count > 256 then return nil end
+    parts[#parts + 1] = p:rep(run)
+  end
+  if count ~= 256 then return nil end
+  return table.concat(parts)
+end
+
 -- Save / load a whole map ({ [key] = { rev = epoch ms, data = string } }) as one plain file
 function M.save(path, chunks)
   local f = fs.open(path .. ".new", "w")
   if not f then return false end
+  f.writeLine(M.HEADER)
   for k, c in pairs(chunks) do
-    if M.valid(c.data) then f.writeLine(k .. " " .. tostring(math.floor(c.rev or 0)) .. " " .. c.data) end
+    if M.valid(c.data) then f.writeLine(k .. " " .. tostring(math.floor(c.rev or 0)) .. " " .. M.encode(c.data)) end
   end
   f.close()
   if fs.exists(path) then fs.delete(path) end
@@ -112,7 +171,8 @@ function M.load(path)
     local line = f.readLine()
     if not line then break end
     local k, rev, data = line:match("^(%-?%d+,%-?%d+) (%d+) (%S+)$")
-    if k and M.valid(data) then chunks[k] = { rev = tonumber(rev), data = data } end
+    if k and not M.valid(data) then data = M.decode(data) end
+    if k and data then chunks[k] = { rev = tonumber(rev), data = data } end
   end
   f.close()
   return chunks
