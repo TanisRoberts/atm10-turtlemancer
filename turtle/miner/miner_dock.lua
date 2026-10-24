@@ -140,7 +140,8 @@ function dockServiceOne(needStart)
   if not MODE.nether then loadJunk() end   -- pick up any edits to junk.txt
   valuableCache = {}
   drinkHeld()
-  if MODE.nether then dumpJunk(true) end   -- junk picked up on the way home goes down the shaft, not into the dock
+  -- junk picked up on the way home goes down the shaft, not into the dock (a Canary: what he never brings home)
+  dumpJunk(MODE.nether == true)
   S.ores = 0
   if not (unloadAll() and unpackBox(unloadAll)) then face(0); save(); return false end
   S.loot = nil     -- the loot's with the Foreman now

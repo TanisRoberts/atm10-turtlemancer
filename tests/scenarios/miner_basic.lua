@@ -157,3 +157,25 @@ T.test("miner: an order with no range, or one above his dock, says why instead o
   MS.order(f, { seq = 7 })                                       -- a good one: he goes
   T.waitFor(w, MS.finished(f), 1200, "never mined the good range")
 end)
+
+T.test("miner: netherrack and end stone are dumped underground, never brought home (an old junk.txt gets them too)", function()
+  local w = cc.world()
+  w.gpsOn = true
+  w:fill(-20, 40, -20, 20, 63, 20, "minecraft:netherrack")
+  w:fill(0, 60, 0, 15, 61, 15, "minecraft:end_stone")
+  w:setBlock(5, 61, 7, "minecraft:diamond_ore")
+  local dock = MS.barrel()
+  dock:give("minecraft:coal", 64)
+  w:setBlock(1, 64, 0, "minecraft:barrel", dock)
+  local t = MS.turtle(w)
+  t:writeFile("junk.txt", "cobblestone\nnetherrack\n")          -- made before the dump lines existed
+  local f = MS.foreman(w)
+  MS.setup(w, t)
+  w:run(10)
+  T.contains(t:readFile("junk.txt"), "dump end_stone")
+  MS.order(f)
+  T.waitFor(w, MS.finished(f), 1500, "never finished the range")
+  T.eq(dock:count("minecraft:diamond"), 1)
+  T.eq(dock:count("minecraft:netherrack"), 0, "no netherrack came home")
+  T.eq(dock:count("minecraft:end_stone"), 0, "no end stone came home")
+end)

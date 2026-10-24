@@ -22,13 +22,13 @@ function dropAway()
   return turtle.drop()
 end
 
--- Dump junk that storage already has plenty of (or all junk, if `all`)
+-- Dump junk that storage already has plenty of, and "dump" junk (or all junk, if `all`)
 function dumpJunk(all)
-  local capped = S.capped or {}
-  if not all and not next(capped) then return end
+  local capped, dump = S.capped or {}, DUMP or {}
+  if not all and not next(capped) and not next(dump) then return end
   for s = 1, 16 do
     local d = turtle.getItemDetail(s)
-    if d and JUNK[d.name] and (all or capped[d.name]) and not (S.loot and S.loot[d.name]) then
+    if d and JUNK[d.name] and (all or capped[d.name] or dump[d.name]) and not (S.loot and S.loot[d.name]) then
       turtle.select(s); dropAway()
     end
   end
@@ -69,7 +69,7 @@ function makeRoom()
   local wanted = {}
   for s = 1, 16 do
     local d = turtle.getItemDetail(s)
-    if d and JUNK[d.name] and not capped[d.name] then wanted[#wanted + 1] = { s = s, n = d.count } end
+    if d and JUNK[d.name] and not capped[d.name] and not (DUMP and DUMP[d.name]) then wanted[#wanted + 1] = { s = s, n = d.count } end
   end
   table.sort(wanted, function(a, b) return a.n > b.n end)
   for i = 1, math.min(KEEP_JUNK_SLOTS, #wanted) do keep[wanted[i].s] = true end

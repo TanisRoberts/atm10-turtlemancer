@@ -4,6 +4,8 @@
 # Ores, raw metals and gems always come home. Anything else (flint, dripstone...)
 # gets thrown out when his bag is full, unless you add a "keep" line, e.g.:
 #   keep flint
+# A "dump" line is junk that never comes home, whatever storage has, e.g.:
+#   dump netherrack
 cobblestone
 cobbled_deepslate
 stone
@@ -23,3 +25,6 @@ basalt
 blackstone
 mud
 clay
+# The Mining Dimension is full of these: never brought home
+dump netherrack
+dump end_stone

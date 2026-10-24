@@ -26,6 +26,10 @@ Miners are one program (`turtle/miner/`) named by the dimension they are set up 
 - A **Starling** (the End, no Foreman serving docks there) doesn't ask: he takes fuel from his barrel and leaves his haul in it, both by hand. A save from the old two-barrel dock has no dock barrel, so he sets up again at boot (keeping his number).
 - Fuel target: he tops up to `fullAt` % of his tank (75 % by default, set by his Foreman). A Firecrest also drinks lava underground below `hungryAt` %. A Canary heads out only with `fuelToStart()` (shaft down and back + a chunk + 500) and turns back when fuel < distance home + reserve (150), so a dock at Y 253 mining at Y -63 (about 630 fuel for the shaft each round trip) never runs dry.
 
+## Junk
+
+A Canary's junk list is `junk.txt` on the turtle (Firecrest's comes from the Nether Foreman). A plain line is junk: thrown away underground, but up to 4 slots still come home while storage is under its cap. A `keep` line is never thrown away. A `dump` line is junk that never comes home (netherrack and end stone, which the Mining Dimension is full of); it's also dropped down the shaft before he unloads. Lines added to the default list later are appended once to an older `junk.txt` (deleting them afterwards sticks).
+
 ## A moved miner
 
 He keeps his dock's world position (`S.home`) and checks it against GPS at boot. GPS disagreeing means he was carried:

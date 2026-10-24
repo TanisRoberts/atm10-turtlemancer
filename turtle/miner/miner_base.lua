@@ -47,6 +47,8 @@ DEFAULT_JUNK = [[
 # Ores, raw metals and gems always come home. Anything else (flint, dripstone...)
 # gets thrown out when his bag is full, unless you add a "keep" line, e.g.:
 #   keep flint
+# A "dump" line is junk that never comes home, whatever storage has, e.g.:
+#   dump netherrack
 cobblestone
 cobbled_deepslate
 stone
@@ -66,28 +68,42 @@ basalt
 blackstone
 mud
 clay
+# The Mining Dimension is full of these: never brought home
+dump netherrack
+dump end_stone
 ]]
+-- Added to a junk.txt made before them (once: delete the line and it stays deleted)
+JUNK_ADDED = {
+  { mark = "# The Mining Dimension is full of these", lines = { "dump netherrack", "dump end_stone" } },
+}
 DEFAULT_NETHER_JUNK = { "netherrack", "blackstone", "basalt", "smooth_basalt", "soul_sand", "soul_soil",
   "magma_block", "gravel", "crimson_nylium", "warped_nylium", "nether_wart_block", "warped_wart_block",
   "cobblestone", "cobbled_deepslate", "polished_blackstone_bricks" }
-JUNK, KEEP = {}, {}
+JUNK, KEEP, DUMP = {}, {}, {}
 function loadJunk()
   if not fs.exists(JUNK_FILE) then
     local f = fs.open(JUNK_FILE, "w"); f.write(DEFAULT_JUNK); f.close()
   end
   local f = fs.open(JUNK_FILE, "r")
   local text = f.readAll(); f.close()
-  local junk, keep = {}, {}
-  for line in text:gmatch("[^\r\n]+") do
-    local item = line:gsub("#.*", ""):match("^%s*(.-)%s*$")
-    local isKeep = false
-    if item:lower():sub(1, 5) == "keep " then isKeep = true; item = item:sub(6):match("^%s*(.-)%s*$") end
-    if item ~= "" then
-      if not item:find(":") then item = "minecraft:" .. item end
-      if isKeep then keep[item] = true else junk[item] = true end
+  for _, a in ipairs(JUNK_ADDED) do
+    if not text:find(a.mark, 1, true) then
+      text = text:gsub("\n?$", "\n") .. a.mark .. ": never brought home\n" .. table.concat(a.lines, "\n") .. "\n"
+      local w = fs.open(JUNK_FILE, "w"); w.write(text); w.close()
     end
   end
-  JUNK, KEEP = junk, keep
+  local junk, keep, dump = {}, {}, {}
+  for line in text:gmatch("[^\r\n]+") do
+    local item = line:gsub("#.*", ""):match("^%s*(.-)%s*$")
+    local kind = item:lower():match("^(%a+)%s") or ""
+    if kind == "keep" or kind == "dump" then item = item:sub(#kind + 2):match("^%s*(.-)%s*$") else kind = "" end
+    if item ~= "" then
+      if not item:find(":") then item = "minecraft:" .. item end
+      if kind == "keep" then keep[item] = true else junk[item] = true end
+      if kind == "dump" then dump[item] = true end
+    end
+  end
+  JUNK, KEEP, DUMP = junk, keep, dump
 end
 -- Firecrest: the list from the Nether Foreman
 function setJunk(list)

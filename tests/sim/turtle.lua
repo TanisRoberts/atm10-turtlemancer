@@ -211,11 +211,10 @@ function Turtle.api(world, c)
         local put = inv:insert(s.name, n)
         if put == 0 then return false, "No space for items" end
         s.count = s.count - put
-      elseif blockAt(dir) == nil then
-        s.count = s.count - n                      -- on the ground
-        b.dropped = (b.dropped or 0) + n
       else
-        return false, "No space for items"
+        -- like CC: no inventory there (air or a solid block) and the stack is thrown into the world
+        s.count = s.count - n
+        b.dropped = (b.dropped or 0) + n
       end
       if s.count <= 0 then b.slots[b.sel] = nil end
       return true
