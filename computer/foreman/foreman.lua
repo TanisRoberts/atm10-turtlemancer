@@ -23,7 +23,7 @@
 dofile("fm.lua")({
   title = "FOREMAN", short = "FOREMAN", name = "the Foreman", place = "the Overworld",
   bird = "Starling", birds = "miners", one = "miner", unit = "miner", birdNames = { Canary = true, Starling = true },
-  protocol = "tanis-miner", config = "foreman.cfg", regKey = "canaries", oldKey = "diggers", oldPrefix = "Digger",
+  protocol = "tanis-miner", config = "foreman.cfg", regKey = "canaries", oldKey = "diggers", oldPrefix = "Digger", oldBird = "Canary",
   dim = "overworld", defR2 = 3, yMin = -63, yMax = 319, newEntry = { minY = -59, maxY = -58 },
   help = "/presets /new /edit /delete <name>  /reboot /redock <miner|all>  /home",
   emptyText = {

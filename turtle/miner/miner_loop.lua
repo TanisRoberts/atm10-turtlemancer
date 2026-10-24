@@ -70,6 +70,10 @@ function mainLoop()
       end
     elseif S.lost then
       lostFlow()
+    elseif deaf then
+      if not atDock() then setStatus("returning", "No ender modem: going home"); safeHome() end
+      setStatus("waiting", "No ender modem: I can't hear my Foreman. Put one on me")
+      waitCtrl(10)
     elseif S.offPath and S.seq == S.heldSeq then
       setStatus("waiting", "Moved by hand. START or DOCK on the Foreman to send me home")
       waitCtrl(10)
@@ -135,17 +139,35 @@ function cmdForMe(msg)
   return MODE_KEY ~= "canary"
 end
 
+function wirelessModem() return peripheral.find("modem", function(_, m) return m.isWireless() end) end
+
+-- No ender modem on me (the chunk controller fitted in its place, say): I can't hear my Foreman, so I mustn't
+-- mine on with an old order. `deaf` sends me home to wait (main loop); I keep looking for a modem.
+deaf = false
+local function openRadio()
+  local modem = wirelessModem()
+  if not modem then core.chunk.restore(); modem = wirelessModem() end   -- a modem left in my bag after a swap
+  if modem then rednet.open(peripheral.getName(modem)) end
+  return modem ~= nil
+end
+
 function netLoop()
-  local modem = peripheral.find("modem", function(_, m) return m.isWireless() end)
-  if not modem then
-    print(("No ender/wireless modem: no %s, no orders."):format((MODE.boss:gsub("^the ", ""))))
-    return os.pullEvent("never")
+  local misses = 0
+  if not openRadio() then
+    print(("No ender modem: I can't hear %s. Put one on me."):format(MODE.boss))
   end
-  rednet.open(peripheral.getName(modem))
   local me = os.getComputerID()
   local lastSend = -100
   while true do
-    local _, msg = rednet.receive(PROTOCOL, 1)
+    -- (a chunk swap takes the modem off for a moment: only a few misses in a row count)
+    if rednet.isOpen() or openRadio() then misses, deaf, listening = 0, false, true
+    else
+      misses = misses + 1
+      if misses >= 5 then deaf, listening = true, false end
+      os.sleep(1)
+    end
+    local _, msg = nil, nil
+    if rednet.isOpen() then _, msg = rednet.receive(PROTOCOL, 1) end
     if type(msg) == "table" and msg.type == "assigned" and msg.id == me and not S.num and tonumber(msg.num) then
       S.num = tonumber(msg.num)
       -- An older Foreman only knows Canary-NN: my name comes from my dimension either way
@@ -169,7 +191,7 @@ function netLoop()
         S.capped = set
       end
     end
-    if os.clock() - lastSend >= STATUS_EVERY then
+    if os.clock() - lastSend >= STATUS_EVERY and rednet.isOpen() then
       if not S.num then
         -- No number yet: ask the Foreman (a label like Canary-04 is offered back, e.g. after a reset)
         rednet.broadcast({ type = "register", id = me, want = labelNum(), label = os.getComputerLabel(),
@@ -214,6 +236,7 @@ function start()
   fixLabel()
   print(("I'm a %s (%s)."):format(MODE.name, tostring(S.dim or "overworld")))
   setStatus("docked", "Starting")
+  listening = wirelessModem() ~= nil
   parallel.waitForAny(mainLoop, netLoop)
 end
 

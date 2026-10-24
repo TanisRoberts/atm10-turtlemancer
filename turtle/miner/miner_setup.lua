@@ -35,6 +35,26 @@ function title(text)
   term.setTextColour(colours.white)
 end
 
+-- Ask on my screen, but give way to my Foreman: a new order, reboot or re-dock ends the question (it returns
+-- nil) so the main loop can carry it out. A question nobody answers must never make me deaf. (Before the radio
+-- is up, at first setup, it just asks.)
+listening = false   -- netLoop sets it once it hears orders
+function askOr(fn, ...)
+  if not listening then return fn(...) end
+  local snap = ctrl and { reboot = ctrl.reboot, redock = ctrl.redock, seq = ctrl.seq } or {}
+  local args, out = table.pack(...), nil
+  parallel.waitForAny(
+    function() out = table.pack(fn(table.unpack(args, 1, args.n))) end,
+    function()
+      while not (ctrl and (ctrl.reboot ~= snap.reboot or ctrl.redock ~= snap.redock or ctrl.seq ~= snap.seq)) do
+        os.sleep(0.5)
+      end
+    end)
+  if out then return table.unpack(out, 1, out.n) end
+  print("(an order from my Foreman came in)")
+  return nil
+end
+
 function askNumber(prompt)
   while true do
     write(prompt)
@@ -209,7 +229,8 @@ function redockHere()
     setStatus("waiting", "Re-dock: say which way I face on my screen")
     term.clear(); term.setCursorPos(1, 1)
     title("RE-DOCKING HERE")
-    c = askFacing()
+    c = askOr(askFacing)
+    if not c then setStatus("waiting", "Re-dock stopped: an order came in"); return false end
   end
   S.home, S.facing, S.dockY = { x = x, y = y, z = z }, c, y
   S.x, S.y, S.z, S.h = 0, 0, 0, 0
@@ -238,11 +259,11 @@ function maybeRedock()
 end
 
 function lostFlow()
-  setStatus("lost", "Carry me back to the dock")
+  setStatus("lost", "Lost: put me on my dock, then Re-dock (or Enter on my screen)")
   print("I lost track of which way I'm facing (unloaded mid-turn).")
   print(("Put me back on the dock with the barrel %s,"):format(sideName(S.dockDir)))
-  print("then press Enter here.")
-  read()
+  print("then press Enter here, or Re-dock on my Foreman.")
+  if askOr(read) == nil then return end
   S.x, S.y, S.z, S.h, S.lost = 0, 0, 0, 0, nil
   S.step = 1   -- redo this level of this chunk from its start
   save()
@@ -345,7 +366,9 @@ function movedFlow()
     print(("I'm at %d %d %d, next to a barrel."):format(x, y, z))
     print("Set up here as my new dock?")
     print(("I stay %s."):format(os.getComputerLabel() or MODE.name))
-    if askChoice("> ", { "Yes, set up here", "No, I'll carry you back" }) == 1 then
+    local a = askOr(askChoice, "> ", { "Yes, set up here", "No, I'll carry you back" })
+    if a == nil then return end
+    if a == 1 then
       setupDock(S)
       fixLabel()
       setStatus("docked", "Set up at my new dock. Waiting for START")

@@ -166,10 +166,14 @@ if P.remote == "hub" then
   function sortKey(id) return (KIND_RANK[kindOfEntry(id) or ""] or 9) * 10000 + (entry(id).num or 0) end
 
   -- Mine: Starlings, and the Canaries until the MD Foreman has taken them over
+  local dropStray   -- (below, with the hand-over)
   local function mine(kind) return kind == "starling" or (kind == "canary" and not cfg.handedOver) end
   function ownsStatus(s) return mine(s and s.kind) end
   function numbers(bird) return bird == "Starling" or (bird ~= nil and bird ~= "Firecrest" and not cfg.handedOver) end
-  function otherStatus(from, msg) if mirrorOf(from) then live[from] = { s = msg, seen = os.clock() } end end
+  function otherStatus(from, msg)
+    if reg[from] and msg.kind == "canary" then dropStray(from, "the MD Foreman") end
+    if mirrorOf(from) then live[from] = { s = msg, seen = os.clock() } end
+  end
 
   function ownerLine(id)
     if reg[id] then return "me (no End base)" end
@@ -297,6 +301,25 @@ if P.remote == "hub" then
     rednet.send(from, { type = "registry", kind = "canary", miners = miners, retiredNums = cfg.retiredNums,
       nextNum = cfg.nextNum, presets = cfg.presets }, REMOTE)
   end
+  -- One brain per miner: once the Canaries are handed over I never order one, whatever my list says (an
+  -- entry the hand-over missed is dropped as soon as the MD Foreman shows him, or he says he's a Canary)
+  local baseSend = sendOrder
+  function sendOrder(id)
+    local l = live[id]
+    local kind = l and l.s.kind
+    if kind and kind ~= "starling" and cfg.handedOver then return end
+    if not kind and cfg.handedOver and not (reg[id].label or ""):find("^Starling%-") then return end
+    return baseSend(id)
+  end
+  dropStray = function(id, why)
+    if not (cfg.handedOver and reg[id]) then return end
+    cfg.handed = cfg.handed or {}
+    cfg.handed[id] = reg[id]
+    reg[id] = nil
+    saveCfg()
+    say(("%s is %s's, not mine: dropped from my list."):format(cfg.handed[id].label or "A miner", why), K.orange)
+  end
+
   local function handedOver()
     if cfg.handedOver then return end
     cfg.handed = canaryList()
@@ -315,6 +338,7 @@ if P.remote == "hub" then
     if m.type == "fleet" and type(m.miners) == "table" and m.kind then
       local was = fleets[m.kind]
       fleets[m.kind] = { m = m, from = from, seen = os.clock() }
+      for id in pairs(m.miners) do if reg[id] then dropStray(id, m.title or m.kind) end end
       -- a miner I mirror that I also still own (the hand-over is in flight): the dimension Foreman wins
       if m.kind == "canary" and m.imported and not cfg.handedOver then handedOver() end
       if not was then say(("Heard %s."):format(m.title or m.kind), K.lime) end

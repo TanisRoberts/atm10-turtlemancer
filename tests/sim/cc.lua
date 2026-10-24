@@ -265,6 +265,7 @@ end
 function Computer:detach(side)
   local dev = self.sides[side]
   self.sides[side] = nil
+  if self.openModems then self.openModems[side] = nil end   -- like CC: a removed modem isn't open any more
   if dev and dev.isModem and dev.wired then
     for i, m in ipairs(dev.net.modems) do if m == dev then table.remove(dev.net.modems, i); break end end
   end

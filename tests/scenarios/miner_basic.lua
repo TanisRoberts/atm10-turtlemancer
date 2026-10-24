@@ -179,3 +179,17 @@ T.test("miner: netherrack and end stone are dumped underground, never brought ho
   T.eq(dock:count("minecraft:netherrack"), 0, "no netherrack came home")
   T.eq(dock:count("minecraft:end_stone"), 0, "no end stone came home")
 end)
+
+T.test("miner: losing his ender modem mid-run he stops mining and goes home, instead of mining on deaf", function()
+  local w, t, dock, _, f = mineWorld()
+  MS.order(f, { minY = 50, maxY = 63 })
+  w:run(120)
+  T.eq(f.env._G.lastStatus.state, "mining")
+  t.body:equip("right", nil)                                -- the modem is gone (a chunk controller in its place, say)
+  T.waitFor(w, function() return t.body.x == 0 and t.body.y == 64 and t.body.z == 0 end, 600, "never came home")
+  w:run(20)
+  T.eq(t.body.y, 64, "stays home")
+  T.contains(t:output(), "No ender modem")
+  t.body:equip("right", "computercraft:wireless_modem_advanced")   -- put back: he hears his Foreman again
+  T.waitFor(w, function() return f.env._G.lastStatus.state == "mining" end, 60, "never went back to mining")
+end)

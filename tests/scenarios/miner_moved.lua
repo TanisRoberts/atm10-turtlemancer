@@ -167,3 +167,20 @@ T.test("miner: a re-dock from his Foreman sets his dock up where he stands, keep
   T.contains(t:output(), "Re-docked here")
   T.eq(f.env._G.lastStatus.redockDone, 1)
 end)
+
+T.test("miner: lost with no GPS he still takes a reboot or a re-dock from his Foreman", function()
+  local w, t, f = boxedIn()
+  w.gpsOn = false
+  local st = t:readTable("miner.state")
+  st.turning = true
+  st.x, st.z = 5, 5                                   -- lost out in his area, no GPS to find himself
+  t:writeTable("miner.state", st)
+  t:reboot(); w:run(10)
+  T.contains(f.env._G.lastStatus.msg, "Lost")
+  f.env._G.redock = 2
+  f.env._G.order = { want = "dock", seq = 7 }
+  w:run(10)
+  T.contains(t:output(), "an order from my Foreman came in")
+  T.eq(f.env._G.lastStatus.redockDone, 2, "the re-dock got through")
+  T.running(t)
+end)

@@ -37,7 +37,8 @@ function loadCfg()
       cfg.retiredNums = type(t.retiredNums) == "table" and t.retiredNums or {}
       -- Labels from before the rename (Pigger-04 -> Firecrest-04)
       if P.oldPrefix then
-        local function rename(l) return type(l) == "string" and (l:gsub("^" .. P.oldPrefix .. "%-", P.bird .. "-")) or l end
+        local to = P.oldBird or P.bird
+        local function rename(l) return type(l) == "string" and (l:gsub("^" .. P.oldPrefix .. "%-", to .. "-")) or l end
         for _, dd in pairs(reg) do dd.label = rename(dd.label) end
         for n, l in pairs(cfg.retiredNums) do cfg.retiredNums[n] = rename(l) end
       end

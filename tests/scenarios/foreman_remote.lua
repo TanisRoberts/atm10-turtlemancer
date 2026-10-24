@@ -220,3 +220,20 @@ T.test("remote: Re-dock on the Overworld Foreman reaches a Canary through the MD
   T.truthy(e.canary.env._G.lastCmd.redock, "re-dock token from the MD Foreman")
   T.eq(e.canary.env._G.cmdFrom, 3)
 end)
+
+T.test("remote: an old 'Digger' Canary the hand-over missed is never ordered by the Overworld Foreman", function()
+  local w = cc.world()
+  local hub = w:computer{ id = 1, label = "Foreman" }
+  hub:attach("top", cc.wireless{ ender = true })
+  hub:installRole("foreman")
+  -- handed over already, but Canary-05 is still on the list under his pre-rename label
+  hub:writeTable("foreman.cfg", { nextNum = 6, chunkRings = true, handedOver = true, retiredNums = {}, canaries = {
+    [15] = { num = 5, label = "Digger-05", want = "run", minY = -59, maxY = -58, pMin = -59, pMax = -58, r1 = 0, r2 = 0, pR1 = 0, pR2 = 0, seq = 1 },
+  } })
+  hub:run("foreman")
+  local c5 = MS.standIn(w, { id = 15, num = 5, label = "Canary-05", protocol = "tanis-miner", bird = "Canary",
+    kind = "canary", dim = "allthemodium:mining" })
+  w:run(15)
+  T.eq(c5.env._G.lastCmd, nil, "the Overworld Foreman sent him an order")
+  T.eq(hub:readTable("foreman.cfg").canaries[15], nil, "dropped from its list")
+end)
