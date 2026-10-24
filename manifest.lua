@@ -183,7 +183,7 @@ local M = {
                    details = "Digs a shaft at its dock and mines chunk by chunk at the layers its Foreman picks. "
                      .. "Named by dimension: Mining Dimension (or anywhere else) = Canary, one dock barrel; "
                      .. "Nether = Firecrest (Nether Foreman, one dock barrel, drinks lava with one empty bucket); "
-                     .. "End = Starling (dump + fuel barrels). Pickaxe + ender modem.",
+                     .. "End = Starling. One dock barrel each. Pickaxe + ender modem.",
                    label = "auto",
                    files = { "turtle/miner/miner.lua", "turtle/miner/miner_base.lua", "turtle/miner/miner_move.lua",
                              "turtle/miner/miner_inv.lua", "turtle/miner/miner_lava.lua", "turtle/miner/miner_plan.lua",

@@ -99,16 +99,15 @@ function setupDock(keep)
   term.clear(); term.setCursorPos(1, 1)
   title(("I'M A %s HERE"):format(MODE.name:upper()))
   print("I'm sitting on top of my future shaft.")
-  if MODE.oneDock then
-    print("I need ONE barrel next to me (a side")
+  print("I need ONE barrel next to me (a side")
+  if MODE.selfServe then
+    print("or above): my dock. Put fuel in it;")
+    print("take my haul out of it.")
+  else
     print("or above): my dock, a Dock on")
     print(("%s's cable."):format(MODE.boss))
-    if MODE.nether then print("And one empty bucket in my inventory, for lava.") end
-  else
-    print("I need two barrels next to me (sides or above):")
-    print(" - DUMP barrel (empty)")
-    print(" - FUEL barrel (with some coal in it)")
   end
+  if MODE.nether then print("And one empty bucket in my inventory, for lava.") end
   print()
   local x, y, z = locate()
   if x then
@@ -131,37 +130,14 @@ function setupDock(keep)
   save()
   while true do
     local found = barrelsAround()
-    if MODE.oneDock then
-      face(0)
-      if #found == 1 then
-        S.dockDir = found[1]
-        print(("Dock barrel: %s."):format(sideName(S.dockDir)))
-        break
-      end
-      printError(#found == 0 and "No barrel next to me." or ("%d barrels here: I need just one."):format(#found))
-      print("Fix that, then press Enter.")
-    else
-      local fuelDir, others = nil, {}
-      turtle.select(1)
-      for _, dir in ipairs(found) do
-        if suckFrom(dir) then
-          local d = turtle.getItemDetail()
-          local isFuel = d and core.fuel.isFuel(d.name)
-          dropTo(dir)
-          if isFuel and not fuelDir then fuelDir = dir else others[#others + 1] = dir end
-        else
-          others[#others + 1] = dir
-        end
-      end
-      face(0)
-      if fuelDir and #others >= 1 then
-        S.fuelDir, S.dumpDir = fuelDir, others[1]
-        print(("Fuel barrel: %s. Dump barrel: %s."):format(sideName(S.fuelDir), sideName(S.dumpDir)))
-        break
-      end
-      printError(("Found %d barrel(s); fuel %s."):format(#found, fuelDir and "found" or "not found"))
-      print("Put coal in the FUEL barrel, keep the DUMP barrel empty, then press Enter.")
+    face(0)
+    if #found == 1 then
+      S.dockDir = found[1]
+      print(("Dock barrel: %s."):format(sideName(S.dockDir)))
+      break
     end
+    printError(#found == 0 and "No barrel next to me." or ("%d barrels here: I need just one."):format(#found))
+    print("Fix that, then press Enter.")
     read()
   end
   if MODE.nether and bucketState() == "none" then
@@ -199,11 +175,7 @@ end
 function lostFlow()
   setStatus("lost", "Carry me back to the dock")
   print("I lost track of which way I'm facing (unloaded mid-turn).")
-  if S.dockDir then
-    print(("Put me back on the dock with the barrel %s,"):format(sideName(S.dockDir)))
-  else
-    print(("Put me back on the dock with the dump barrel %s,"):format(sideName(S.dumpDir)))
-  end
+  print(("Put me back on the dock with the barrel %s,"):format(sideName(S.dockDir)))
   print("then press Enter here.")
   read()
   S.x, S.y, S.z, S.h, S.lost = 0, 0, 0, 0, nil

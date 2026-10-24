@@ -9,8 +9,8 @@
 --     ONE empty bucket he never lets go of: under 25% fuel he scoops and drinks every lava source he
 --     sees (1,000 each), whole pools at a time, until he's over 75% (both set on the Nether Foreman).
 --     Junk (netherrack, basalt ...) is thrown away underground; the Nether Foreman sends the list.
---   The End: a STARLING (Starling-05). Orders from the Foreman. Dock: the DUMP barrel on one side and
---     the FUEL barrel on another (or above), both filled/emptied by hand (storage can't reach the End).
+--   The End: a STARLING (Starling-05). Orders from the Foreman. ONE dock barrel too, filled with fuel and
+--     emptied by hand (no Foreman serves the End).
 -- Carried to another dock or dimension, he offers to set up there (keeping his number); he never
 -- tunnels to a dock far away (docs/systems/miner.md).
 -- Needs: a mining turtle (diamond pickaxe) with an ender modem on its other side. Below the dock must

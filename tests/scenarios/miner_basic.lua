@@ -1,27 +1,20 @@
 -- Miner: first-run setup at the dock, a number from the Foreman, then one order to mine.
--- Canary: one dock barrel (Mining Dimension). Starling: DUMP + FUEL barrels (the End).
+-- Every miner has one dock barrel. Canary (Mining Dimension); Starling (the End) fuels himself from it.
 -- A tiny stand-in Foreman answers on the radio (tests/sim/miners.lua); the real ones have their own scenarios.
 local cc = require("sim.cc")
 local T = require("sim.test")
 local MS = require("sim.miners")
 
--- Dock at 0,64,0 facing north, stone below (Y 40..63). Canary: one dock barrel east with coal in it.
--- Starling (two = true): dump barrel east, fuel barrel west.
-local function base(two)
+-- Dock at 0,64,0 facing north, stone below (Y 40..63), one dock barrel east with coal in it.
+local function base()
   local w = cc.world()
   w.gpsOn = true
   w:fill(-20, 40, -20, 20, 63, 20, "minecraft:stone")
-  local dock, fuel = MS.barrel(), nil
+  local dock = MS.barrel()
   w:setBlock(1, 64, 0, "minecraft:barrel", dock)
-  if two then
-    fuel = MS.barrel()
-    fuel:give("minecraft:coal", 64)
-    w:setBlock(-1, 64, 0, "minecraft:barrel", fuel)
-  else
-    dock:give("minecraft:coal", 64)
-  end
+  dock:give("minecraft:coal", 64)
   local t = MS.turtle(w)
-  return w, t, dock, fuel
+  return w, t, dock
 end
 
 T.test("miner: first-run setup in the Mining Dimension finds its one dock barrel", function()
@@ -42,15 +35,24 @@ T.test("miner: first-run setup in the Mining Dimension finds its one dock barrel
   T.eq(t.body.x, 0, "back on the dock"); T.eq(t.body.y, 64); T.eq(t.body.z, 0)
 end)
 
-T.test("miner: a Starling in the End finds its dump and fuel barrels", function()
-  local w, t = base(true)
+T.test("miner: a Starling in the End has one dock barrel too, and an old two-barrel save sets up again", function()
+  local w, t = base()
   MS.setup(w, t, "4")
   w:run(20)
   T.running(t)
-  T.contains(t:output(), "Fuel barrel: on my left. Dump barrel: on my right")
+  T.contains(t:output(), "Dock barrel: on my right")
   T.contains(t:output(), "I'm a Starling (the_end)")
   local st = t:readTable("miner.state")
-  T.eq(st.dumpDir, 1); T.eq(st.fuelDir, 3); T.eq(st.dockDir, nil)
+  T.eq(st.dockDir, 1)
+  -- a save from the old DUMP + FUEL dock: no dock barrel, so setup again at boot
+  st.dockDir, st.dumpDir, st.fuelDir, st.num = nil, 1, 3, 5
+  t:writeTable("miner.state", st)
+  t:reboot(); w:run(2)
+  T.contains(t:output(), "I don't know my dock barrel")
+  t:type("4"); t:key(257)
+  w:run(20)
+  T.eq(t:readTable("miner.state").dockDir, 1)
+  T.eq(t:readTable("miner.state").num, 5)
 end)
 
 T.test("miner: the Foreman names it and it writes startup.lua for auto-resume", function()
@@ -64,15 +66,15 @@ T.test("miner: the Foreman names it and it writes startup.lua for auto-resume", 
 end)
 
 -- A dock chunk with three ores in it and the Foreman's order to mine Y 60..63.
-local function mineWorld(two, dim)
-  local w, t, dock, fuel = base(two)
-  local f = MS.foreman(w, { kind = two and "starling" or "canary" })
+local function mineWorld(dim)
+  local w, t, dock = base()
+  local f = MS.foreman(w, { kind = dim == "4" and "starling" or "canary" })
   w:setBlock(3, 62, 3, "minecraft:iron_ore")
   w:setBlock(5, 61, 7, "minecraft:diamond_ore")
   w:setBlock(9, 62, 12, "minecraft:coal_ore")
   MS.setup(w, t, dim)
   w:run(10)
-  return w, t, dock, fuel, f
+  return w, t, dock, nil, f
 end
 
 T.test("miner: a Canary mines its chunk, brings the ore home and leaves the barrel alone", function()
@@ -90,16 +92,16 @@ T.test("miner: a Canary mines its chunk, brings the ore home and leaves the barr
   for _, s in pairs(t.body.slots) do T.falsy(s.name == "minecraft:diamond", "nothing valuable left in the bag") end
 end)
 
-T.test("miner: a Starling mines with its two barrels", function()
-  local w, t, dump, fuel, f = mineWorld(true, "4")
+T.test("miner: a Starling mines and fuels himself from his one dock barrel (no Foreman serves the End)", function()
+  local w, t, dock, _, f = mineWorld("4")
   MS.order(f)
   T.waitFor(w, MS.finished(f), 1200, "never finished the range")
   T.running(t)
-  T.eq(dump:count("minecraft:diamond"), 1)
-  T.eq(dump:count("minecraft:raw_iron"), 1)
-  T.eq(dump:count("minecraft:coal"), 1)
-  T.truthy(w:getBlock(1, 64, 0) and w:getBlock(-1, 64, 0), "dock barrels still standing")
-  T.truthy(t.body.fuel > 400, "refuelled from the fuel barrel")
+  T.eq(dock:count("minecraft:diamond"), 1)
+  T.eq(dock:count("minecraft:raw_iron"), 1)
+  T.truthy(w:getBlock(1, 64, 0), "dock barrel still standing")
+  T.truthy(t.body.fuel > 400, "took fuel from his dock")
+  T.eq(f.env._G.requests, 0, "never asked a Foreman for fuel")
 end)
 
 T.test("miner: a reboot in the middle of a run resumes where it was", function()

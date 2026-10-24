@@ -22,9 +22,9 @@ Miners are one program (`turtle/miner/`) named by the dimension they are set up 
 
 ## Docks
 
-- **One dock barrel** (Canary, Firecrest). He empties everything into it except his gear (chunk controller, modem, shulker box) and, for a Firecrest, his one bucket. Before heading out he asks for what he needs: `dock_req { id, seq, bucket, fuel }` on his protocol; his Foreman empties the dock, puts in fuel (and a bucket) and answers `dock_ready { id, seq, got, missing, note }`. He burns the fuel up to his target, hands back what's left (empty buckets, spare coal) and says `dock_done`. Nobody answering in 10 s: he takes whatever fuel is in the barrel himself (so a dock can be fed by hand).
-- **Two barrels** (Starling only: DUMP + FUEL, filled and emptied by hand; storage can't reach the End).
-- Fuel target: he tops up to `fullAt` % of his tank (75 % by default, set by his Foreman). A Firecrest also drinks lava underground below `hungryAt` %. A Canary heads out only with `fuelToStart()` (shaft down and back + a chunk + 500) and turns back when fuel < distance home + reserve (200), so a dock at Y 253 mining at Y -63 (about 630 fuel for the shaft each round trip) never runs dry.
+- **One dock barrel, every miner.** He empties everything into it except his gear (chunk controller, modem, shulker box) and, for a Firecrest, his one bucket. Before heading out he asks for what he needs: `dock_req { id, seq, bucket, fuel }` on his protocol; his Foreman empties the dock, puts in fuel (and a bucket) and answers `dock_ready { id, seq, got, missing, note }`. He burns the fuel up to his target, hands back what's left (empty buckets, spare coal) and says `dock_done`. Nobody answering in 10 s: he takes whatever fuel is in the barrel himself (so a dock can be fed by hand).
+- A **Starling** (the End, no Foreman serving docks there) doesn't ask: he takes fuel from his barrel and leaves his haul in it, both by hand. A save from the old two-barrel dock has no dock barrel, so he sets up again at boot (keeping his number).
+- Fuel target: he tops up to `fullAt` % of his tank (75 % by default, set by his Foreman). A Firecrest also drinks lava underground below `hungryAt` %. A Canary heads out only with `fuelToStart()` (shaft down and back + a chunk + 500) and turns back when fuel < distance home + reserve (150), so a dock at Y 253 mining at Y -63 (about 630 fuel for the shaft each round trip) never runs dry.
 
 ## A moved miner
 

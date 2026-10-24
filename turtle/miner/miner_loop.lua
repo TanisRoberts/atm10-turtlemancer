@@ -20,8 +20,8 @@ function runOnce()
   if atDock() then
     local need = fuelToStart()
     if not dockService(need) then
-      setStatus("waiting", S.dockDir and ("Dock barrel full. Is %s running?"):format(MODE.boss)
-        or "Dump barrel full: empty it")
+      setStatus("waiting", MODE.selfServe and "Dock barrel full: empty it"
+        or ("Dock barrel full. Is %s running?"):format(MODE.boss))
       waitCtrl(15)
       return
     end
@@ -32,7 +32,7 @@ function runOnce()
     end
     if fuel() < need then
       setStatus("waiting", ("Need %d fuel, have %d%s"):format(need, fuel(),
-        MODE.nether and ": lava buckets in a stock barrel" or S.dockDir and ": lava buckets in my dock" or ""))
+        MODE.nether and ": lava buckets in a stock barrel" or ": lava buckets in my dock"))
       waitCtrl(15)
       return
     end
@@ -118,7 +118,7 @@ function statusMsg()
     box = boxSlot() and (S.boxFull and "full" or "ok") or "none", boxStacks = S.boxStacks,
     minY = S.minY, maxY = S.maxY, want = S.want, rebootDone = S.rebootDone, done = S.done, ores = S.ores, haul = haul,
   }
-  m.dockNote, m.oneDock = S.dockNote, S.dockDir ~= nil
+  m.dockNote = S.dockNote
   if MODE.nether then
     m.hungry, m.hungryAt, m.fullAt = S.hungry == true, S.hungryAt or HUNGRY_AT, S.fullAt or FULL_AT
     m.bucket, m.lavaFuel, m.lavaScoops = bucketState(), S.lavaFuel or 0, S.lavaScoops or 0

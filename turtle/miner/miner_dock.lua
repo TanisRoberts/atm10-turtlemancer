@@ -1,5 +1,5 @@
--- miner_dock.lua  --  his dock: unloading, the shulker box, fuel. One dock barrel (Canary, Firecrest) or two
--- (Starling). A part of miner.lua (one shared environment: see there).
+-- miner_dock.lua  --  his dock: unloading, the shulker box, fuel. One dock barrel for every miner.
+-- A part of miner.lua (one shared environment: see there).
 ---------------------------------------------------------------------------
 -- Dock: unload, refuel
 ---------------------------------------------------------------------------
@@ -54,59 +54,10 @@ function unpackBox(unload)
   return true
 end
 
--- Two barrels (Starling): DUMP barrel and FUEL barrel
-function dockServiceTwo()
-  setStatus("docked", "Unloading")
-  gpsFixHome()
-  loadJunk()            -- pick up any edits to junk.txt
-  valuableCache = {}
-  local haul = {}
-  local function unload()
-    for s = 1, 16 do
-      local d = turtle.getItemDetail(s)
-      if d and not isKept(d.name) then
-        turtle.select(s)
-        if not JUNK[d.name] then haul[d.name] = (haul[d.name] or 0) + d.count end
-        local tries = 0
-        while turtle.getItemCount(s) > 0 do
-          if not dropTo(S.dumpDir) then
-            tries = tries + 1
-            setStatus("waiting", "Dump barrel full, waiting")
-            os.sleep(3)
-            if tries > 10 then return false end -- give up for now; the main loop waits at the dock
-          end
-        end
-      end
-    end
-    return true
-  end
-  local ok = unload() and unpackBox(unload)
-  if next(haul) then
-    S.lastHaul = haul
-    S.totals = S.totals or {}
-    for n, c in pairs(haul) do S.totals[n] = (S.totals[n] or 0) + c end
-  end
-  S.ores = 0
-  if not ok or cargoLeft() then face(0); save(); return false end -- couldn't unload everything
-  S.loot = nil          -- the loot's in the dump barrel now
-
-  -- Refuel from the fuel barrel up to my top-up (core.fuel: best fuel first; empty buckets go back in)
-  local limit = fuelLimit()
-  if limit ~= math.huge then
-    setStatus("docked", "Refuelling")
-    face(S.fuelDir)
-    core.fuel.refuelFromDock(S.fuelDir, math.floor(limit * (S.fullAt or FULL_AT) / 100))
-  end
-  turtle.select(1)
-  face(0)
-  save()
-  return not cargoLeft() -- false if the dump barrel wouldn't take everything
-end
-
 ---------------------------------------------------------------------------
--- One dock barrel (Canary, Firecrest). He empties everything into it (except his gear, and Firecrest's
--- bucket); his Foreman takes it away. If he needs fuel (or Firecrest a bucket) he asks, the Foreman puts
--- it in the barrel, he takes it. Nobody answering: he takes whatever fuel is in the barrel himself.
+-- One dock barrel, every miner. He empties everything into it (except his gear, and Firecrest's bucket); his
+-- Foreman takes it away. If he needs fuel (or Firecrest a bucket) he asks, the Foreman puts it in the barrel,
+-- he takes it. Nobody answering (or a Starling: no Foreman serves the End) he takes whatever fuel is in it.
 ---------------------------------------------------------------------------
 dockReply = nil   -- latest dock_ready for me (set by the network loop)
 ASK_FOR = 10      -- seconds to wait for the Foreman's dock_ready
@@ -209,12 +160,12 @@ function dockServiceOne(needStart)
   end
   if needStart and (needBucket or wantFuel > 0) then
     setStatus("docked", needBucket and "Asking the dock for a bucket" or "Asking the dock for fuel")
-    local r = askDock(needBucket, wantFuel)
+    local r = not MODE.selfServe and askDock(needBucket, wantFuel) or nil
     if r then
       takeSupplies()
       S.dockNote = r.note
     else
-      S.dockNote = ("%s didn't answer"):format((MODE.boss:gsub("^t", "T")))
+      S.dockNote = not MODE.selfServe and ("%s didn't answer"):format((MODE.boss:gsub("^t", "T"))) or nil
       if wantFuel > 0 then
         -- Fuel put in by hand: take it myself (empty buckets go back in)
         setStatus("docked", "Taking fuel from my dock")
@@ -237,10 +188,9 @@ function reportDock()
   core.dock.maybeReport({ role = "miner", tries = 1, timeout = 1 })
 end
 
--- needStart: fuel needed to head out (one dock: asks for it; two barrels: just refuels)
+-- needStart: fuel needed to head out (asked for, or taken from the dock)
 function dockService(needStart)
   S.chunky = haveChunky() or nil   -- picked one up (or lost it) since last time?
-  if S.dockDir then return dockServiceOne(needStart) end
-  return dockServiceTwo()
+  return dockServiceOne(needStart)
 end
 

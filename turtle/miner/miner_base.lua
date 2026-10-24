@@ -9,11 +9,11 @@ STATUS_EVERY = 3      -- seconds between status broadcasts
 -- the dock's chunk, ring 3 = 7x7 chunks), reserve = spare fuel kept on top of the trip home,
 -- floor = lowest Y a level may reach.
 MODES = {
-  canary    = { name = "Canary",    protocol = "tanis-miner",  boss = "the MD Foreman", oneDock = true,
+  canary    = { name = "Canary",    protocol = "tanis-miner",  boss = "the MD Foreman",
                 r2 = 3, reserve = 150, floor = -64 },
-  firecrest = { name = "Firecrest", protocol = "tanis-nether", boss = "the Nether Foreman", nether = true, oneDock = true,
+  firecrest = { name = "Firecrest", protocol = "tanis-nether", boss = "the Nether Foreman", nether = true,
                 r2 = 1, reserve = 200, floor = 5 },
-  starling  = { name = "Starling",  protocol = "tanis-miner",  boss = "the Foreman", isEnd = true,
+  starling  = { name = "Starling",  protocol = "tanis-miner",  boss = "the Foreman", isEnd = true, selfServe = true,
                 r2 = 3, reserve = 60,  floor = 0 },   -- the End: void under Y 0
 }
 RING_CAP = 16   -- furthest chunk ring (33x33 chunks)
@@ -120,8 +120,8 @@ function loadState()
   -- A dimension typed by hand ("Mining Dimension") is the Mining Dimension
   if type(S.dim) == "string" and not S.dim:find(":") and S.dim:lower():find("mining") then S.dim = "allthemodium:mining" end
 end
--- Does he know his dock barrel(s)? (one barrel, or a Starling's dump + fuel)
-function knowsDock() return S.dockDir ~= nil or (S.dumpDir ~= nil and S.fuelDir ~= nil) end
+-- Does he know his dock barrel? (A save from the old two-barrel dock doesn't count: he sets up again.)
+function knowsDock() return S.dockDir ~= nil end
 
 -- Pick Canary / Firecrest / Starling from the dimension, and load the right junk list
 function setMode()
