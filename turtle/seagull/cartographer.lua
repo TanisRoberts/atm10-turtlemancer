@@ -20,6 +20,7 @@
 -- Map: seagull.map (his own copy). The art controller keeps its own and catches up from his.
 
 local mc = dofile("mapchunk.lua")
+local core = dofile("turtlecore.lua")   -- fuel, dock and GPS shared by every turtle (docs/systems/turtle.md)
 
 local PROTO      = "tanis-carto"
 local BASE       = "tanis-base"
@@ -266,8 +267,8 @@ end
 ---------------------------------------------------------------------------
 local gpsOk = false
 local function locate(timeout)
-  local ok, x, y, z = pcall(gps.locate, timeout or 2)
-  if ok and x then
+  local ok, x, y, z, stale = core.gps.locate(timeout or 2)
+  if ok and not stale then
     gpsOk = true
     return math.floor(x + 0.5), math.floor(y + 0.5), math.floor(z + 0.5)
   end
@@ -577,9 +578,6 @@ end
 ---------------------------------------------------------------------------
 -- Dock: find it, refuel
 ---------------------------------------------------------------------------
-local FUELS = { ["minecraft:coal_block"] = true, ["minecraft:coal"] = true, ["minecraft:charcoal"] = true,
-  ["minecraft:blaze_rod"] = true, ["minecraft:lava_bucket"] = true }
-
 local function isContainer(ok, d)
   if not ok or type(d) ~= "table" then return false end
   local n = tostring(d.name)
@@ -608,38 +606,27 @@ local function dropDock()
   turnTo(d); return turtle.drop()
 end
 
-local function burnSlots()
-  for s = 1, 16 do
-    if turtle.getFuelLevel() >= math.min(E.FUEL_FULL, turtle.getFuelLimit()) then break end
-    local d = turtle.getItemDetail(s)
-    if d and FUELS[d.name] then turtle.select(s); turtle.refuel() end
-  end
-  turtle.select(1)
+local function fuelTarget()
+  local limit = turtle.getFuelLimit()
+  return math.min(E.FUEL_FULL, limit == "unlimited" and E.FUEL_FULL or limit)
 end
 
--- Hand back anything that isn't fuel (and empty buckets), so his slots stay free
-local function emptySlots()
-  for s = 1, 16 do
-    if turtle.getItemCount(s) > 0 then
-      local d = turtle.getItemDetail(s)
-      if not (d and FUELS[d.name]) then turtle.select(s); dropDock() end
-    end
-  end
-  turtle.select(1)
-end
-
+-- Take fuel from the dock up to FUEL_FULL (lava first); the core hands back anything else, and the empty buckets.
 local function refuel()
-  local target = math.min(E.FUEL_FULL, turtle.getFuelLimit())
-  burnSlots()
-  local tries = 0
-  while turtle.getFuelLevel() < target and tries < 16 do
-    tries = tries + 1
-    turtle.select(1)
-    if not suckDock(64) then break end
-    burnSlots()
-    emptySlots()
-  end
-  emptySlots()
+  local d = S.dock
+  if d ~= "up" and d ~= "down" then turnTo(d) end
+  core.fuel.refuelFromInventory(fuelTarget())
+  core.fuel.refuelFromDock(d, fuelTarget())
+end
+
+-- Tell Storage where the dock is (core.dock.report), now and then
+local function reportDock()
+  local d = S.dock
+  if not (S.home and d) then return end
+  local x, y, z = S.home.x, S.home.y, S.home.z
+  if d == "up" then y = y + 1 elseif d == "down" then y = y - 1 else x, z = x + DX[d], z + DZ[d] end
+  core.dock.set({ x = x, y = y, z = z }, d)
+  core.dock.maybeReport({ role = "cartographer" })
 end
 
 ---------------------------------------------------------------------------
@@ -719,6 +706,7 @@ local function dockAndRefuel(why)
   if not ok then setStatus("error", "Can't get home: " .. tostring(err)); return false end
   setStatus("docked", why or "Refuelling")
   refuel()
+  reportDock()
   return true
 end
 
@@ -784,6 +772,7 @@ local function mapLoop()
       if atHome() then
         if status ~= "done" and status ~= "error" then setStatus("docked", "Ready. MAP on the art wall (or M here)") end
         if turtle.getFuelLevel() < math.min(E.FUEL_FULL, turtle.getFuelLimit()) then refuel() end
+        reportDock()
       elseif status ~= "error" then
         dockAndRefuel("Docked")
       end
@@ -797,22 +786,12 @@ end
 -- barrel touching him (whichever way he's facing), burning only fuel and handing the rest back.
 local function bootFuel()
   if turtle.getFuelLevel() >= 200 then return end
-  local function fromHere(suck, drop)
-    for _ = 1, 8 do
-      if turtle.getFuelLevel() >= 2000 then break end
-      turtle.select(1)
-      if not suck(64) then break end
-      local d = turtle.getItemDetail(1)
-      if d and FUELS[d.name] then turtle.refuel() end
-      if turtle.getItemCount(1) > 0 then drop() end
-    end
-    turtle.select(1)
-  end
-  if isContainer(turtle.inspectUp()) then fromHere(turtle.suckUp, turtle.dropUp) end
-  if isContainer(turtle.inspectDown()) then fromHere(turtle.suckDown, turtle.dropDown) end
+  local function from(dir) if turtle.getFuelLevel() < 2000 then core.fuel.refuelFromDock(dir, 2000) end end
+  if isContainer(turtle.inspectUp()) then from("up") end
+  if isContainer(turtle.inspectDown()) then from("down") end
   for _ = 1, 4 do
     if turtle.getFuelLevel() >= 200 then break end
-    if isContainer(turtle.inspect()) then fromHere(turtle.suck, turtle.drop) end
+    if isContainer(turtle.inspect()) then from("front") end
     turtle.turnRight()
   end
 end
@@ -850,6 +829,8 @@ local function boot()
   end
   if S.mapping then
     setStatus("mapping", "Carrying on where I left off")
+  elseif atHome() then
+    reportDock()
   end
 end
 

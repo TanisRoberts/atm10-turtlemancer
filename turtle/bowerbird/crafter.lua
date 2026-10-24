@@ -16,6 +16,7 @@
 -- whatever he didn't use). The neural lab gets them from storage as usual.
 -- Screen: what he's doing. Keys: P = pause / run.  Settings: bowerbird.env (edit live).
 
+local core     = dofile("turtlecore.lua")   -- the dock report to Storage (docs/systems/turtle.md)
 local BASE     = "tanis-base"
 local ENV_FILE = "bowerbird.env"
 local CFG_FILE = "bowerbird.cfg"
@@ -40,6 +41,7 @@ local DEFAULTS = {
   { "BATCH", 4, "Crafts per go (16 matrices each, at most 4 = one stack)." },
   { "TICK", 5, "Seconds between checks." },
   { "DOCK", "", "Where the dock barrel is: front, top or bottom. Blank = find it." },
+  { "FACING", "", "Which way he faces (north, east, south, west). Only needed to tell Storage where a FRONT dock is." },
 }
 
 ---------------------------------------------------------------------------
@@ -319,6 +321,24 @@ end
 ---------------------------------------------------------------------------
 -- Work
 ---------------------------------------------------------------------------
+-- Tell Storage where the dock is (core.dock.report), now and then, so /assign can link it to him.
+-- The dock's world position comes from GPS; a barrel in front also needs FACING.
+local DX = { north = 0, east = 1, south = 0, west = -1 }
+local DZ = { north = -1, east = 0, south = 1, west = 0 }
+local function reportDock()
+  if not (netOn and dockSide) then return end
+  local ok, x, y, z = core.gps.locate(2, 1)
+  if not ok then return end
+  x, y, z = math.floor(x + 0.5), math.floor(y + 0.5), math.floor(z + 0.5)
+  local facing = tostring(E.FACING or ""):lower()
+  if dockSide == "top" then y = y + 1
+  elseif dockSide == "bottom" then y = y - 1
+  elseif DX[facing] then x, z = x + DX[facing], z + DZ[facing]
+  else return end
+  core.dock.set({ x = x, y = y, z = z }, dockSide)
+  core.dock.maybeReport({ role = "crafter" })
+end
+
 local function storageHas(id) return countsFresh() and (counts[id] or 0) > 0 end
 
 local function workPass()
@@ -326,6 +346,7 @@ local function workPass()
   if not findDock() then
     return say("NO DOCK", "No barrel in front, above or below me")
   end
+  reportDock()
   if not turtle.craft and not peripheral.find("workbench") then
     return say("NO TABLE", "I need a crafting table upgrade")
   end
