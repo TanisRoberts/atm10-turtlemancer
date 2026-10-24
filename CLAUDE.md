@@ -12,7 +12,7 @@ CC:Tweaked scripts for Tanis's island base in All the Mods 10. Computers, turtle
 
 ## How work flows
 
-Work is tracked in GitHub Issues. Read `docs/workflow.md` once per session. Roles (PM, design, engineering) start from the prompts in `docs/team/prompts/`. One issue per session; hand over in issue comments, not in chat.
+Work is tracked in GitHub Issues. Read `docs/workflow.md` once per session. Roles (PM, design, engineering, lead engineer for projects) start from the prompts in `docs/team/prompts/`. One issue per session (a project's lead engineer starts a fresh engineer session per sub-issue); hand over in issue comments, not in chat.
 
 ## Reading the code cheaply
 

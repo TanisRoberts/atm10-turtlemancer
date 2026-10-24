@@ -31,9 +31,22 @@ Every open issue has exactly one `status:` label, and every issue past Backlog h
 ## Rules
 
 - **Backlog → Todo is the PM's call.** An issue reaches Todo only with a "Done when" section and one priority. Tanis can bump anything.
-- **One issue per session.** Start a fresh session for the next one; long sessions are what burns tokens.
+- **One issue per session.** Start a fresh session for the next one; long sessions are what burns tokens. Projects keep this: the lead starts a fresh engineer session per sub-issue (see Projects).
 - **Big features get split** into issues one session can finish.
 - Don't edit shared docs just to log progress. The issue is the log.
+
+## Projects
+
+A bigger piece of work runs as a **project**, so it can run for a while without Tanis.
+
+- **Parent issue:** labelled `project` (plus `feature` and its areas), title "Project: <name>", body with the goal, "Done when", and the sub-issues in build order. Its `status:`, `for:` and `priority:` labels work like any issue's; it goes to `for: engineering` when it's ready to run.
+- **Sub-issues:** ordinary issues attached as GitHub sub-issues, each one-session-sized with its own "Done when" and "Blocked by" lines. Design sub-issues stay in the project.
+- **The PM** creates the parent and sub-issues and decides the order.
+- **The lead engineer** (one session, on Opus, `docs/team/prompts/lead-start.md`) runs the project: makes the big decisions, does the design sub-issues with Tanis, and starts a fresh engineer session (on Sonnet) for each sub-issue that's ready. Engineers follow `engineering-start.md` for their one sub-issue and report back to the lead.
+- **Tanis** is only needed for design choices and in-game tests. In-game steps collect into one checklist on the parent; the run doesn't stop for them unless a later sub-issue depends on the result.
+- **Done:** the parent closes when every sub-issue is closed.
+
+GitHub Projects (boards) need GraphQL, which cloud sessions can't use, so projects are parent issues.
 
 ## gh notes
 

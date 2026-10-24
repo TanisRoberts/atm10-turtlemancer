@@ -1,6 +1,6 @@
 # Prompt: start an engineering session
 
-Paste into a new Claude Code session on `TanisRoberts/atm10-turtlemancer`. To work on a particular issue, add "Work on issue #N" at the end.
+Paste into a new Claude Code session on `TanisRoberts/atm10-turtlemancer`. To work on a particular issue, add "Work on issue #N" at the end. In a project, the lead engineer starts you this way for one sub-issue and tells you how to report back.
 
 ---
 
