@@ -151,7 +151,9 @@ end
 -- Screens: the computer's own screen, plus a monitor if one touches it. Each view keeps its own page and tab.
 ---------------------------------------------------------------------------
 local ui = require("ui")
+local commandList = {}   -- filled once summary() exists (below)
 local screens = require("farmhand_screens")({
+  commands = commandList,
   cfg = cfg, live = live, maps = maps, SETTINGS = SETTINGS, STALE = STALE,
   order = order, requestReboot = requestReboot, changeSetting = changeSetting, settingValue = settingValue,
   forget = forget, nameOf = nameOf, ids = ids, problems = problems, radioOK = function() return radioOK end,
@@ -201,6 +203,15 @@ local function summary()
              or ("%d turtle%s, %s"):format(n, n == 1 and "" or "s", working > 0 and (working .. " working") or "all docked")) }
 end
 
+-- Typed commands on the computer's own screen (docs/systems/ui.md)
+local slash = require("slash")
+local cmds = slash.new()
+cmds:add({ name = "status", help = "turtles, what is working, who needs you", max = 0,
+           run = function()
+             local sum = summary()
+             return true, sum.note, sum.problems > 0 and "warn" or "good"
+           end })
+for _, c in ipairs(cmds:commands()) do commandList[#commandList + 1] = c end
 
 local function netLoop()
   local opened = 0

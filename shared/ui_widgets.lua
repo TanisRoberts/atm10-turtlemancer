@@ -163,11 +163,11 @@ end
 -- A stripe in the state colour runs down the left edge (gold on the highlighted tile, grey when stale).
 -- grow = true: use the spare height: only as many rows of tiles as the items need, each tile taller than 5 rows
 -- (the extra rows go to fields.extra), and no more columns than items. input = true leaves the row above the
--- footer free for a search bar. Whole tile is the tap target. Arrows move the highlight, Enter opens, Esc clears.
+-- footer free for a search bar (a number leaves that many rows). Whole tile is the tap target. Arrows move the highlight, Enter opens, Esc clears.
 function View:tiles(items, o)
   local r = self:rect(o.input)
   local avail = r.y2 - r.y1 + 1
-  local cols, tw, th, rows = ui.layout.tiles(self.W, self.H - (o.input and 1 or 0), #items)
+  local cols, tw, th, rows = ui.layout.tiles(self.W, self.H - (o.input == true and 1 or tonumber(o.input) or 0), #items)
   if o.grow then
     cols = max(1, min(cols, #items))
     tw = floor((self.W - 2 - (cols - 1)) / cols)

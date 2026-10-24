@@ -75,9 +75,9 @@ function ui.layout.classes(W, H)
   return wc, hc
 end
 -- The area content may draw in: one column margin each side, below the 2 header rows, above the footer
--- (and above an input row when the screen has one).
+-- (and above an input row when the screen has one; a number reserves that many rows).
 function ui.layout.content(W, H, inputRow)
-  return { x1 = 2, y1 = 3, x2 = W - 1, y2 = H - 1 - (inputRow and 1 or 0) }
+  return { x1 = 2, y1 = 3, x2 = W - 1, y2 = H - 1 - (inputRow == true and 1 or tonumber(inputRow) or 0) }
 end
 
 ui.hit = {}

@@ -167,6 +167,7 @@ return function(F)
     if F.radioOK() == false and not (ui.notice and ui.notice.tone == "bad") then
       ui.say("No wireless/ender modem on me: the turtles can't hear me", "bad")
     end
+    local typed = not v.side and F.commands   -- only the computer's own screen has a keyboard
     local nProb = F.problems()
     v:header("Farmhand", { state = nProb > 0 and (nProb .. " need" .. (nProb == 1 and "s" or "") .. " you") or "all fine",
                            color = nProb > 0 and "warn" or "good",
@@ -177,11 +178,11 @@ return function(F)
                       "it shows up here as soon as it's on the air." }
       for i, l in ipairs(lines) do v:put(2, 3 + i, fit(l, v.W - 2), i == 1 and "fg" or "dim", "bg") end
     else
-      v:tiles(list, { grow = true, input = true,
+      v:tiles(list, { grow = true, input = typed and 2 or true,
         on = function(id) openTurtle(v, st, id) end,
         render = function(id) st.visible[#st.visible + 1] = id; return tileFields(v, st, id) end })
       local short = v.wc == "narrow"
-      v:buttons(2, v.H - 1, {
+      v:buttons(2, v.H - (typed and 2 or 1), {
         { label = "Rounds all", short = "Rounds", style = "primary", fn = function()
           for _, id in ipairs(F.ids()) do F.order(id, "rounds") end
           say("Every farm turtle is off on its rounds.", "good")
@@ -195,6 +196,10 @@ return function(F)
           say("Reboot sent: each finishes what it's doing, then restarts.", "busy")
         end },
       })
+    end
+    if typed then
+      st.field = st.field or ui.field({ hint = "search" })
+      v:search(st.field, { hint = "/ = commands (/status, /help)", commands = F.commands })
     end
     v:footer({})
   end

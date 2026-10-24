@@ -54,7 +54,34 @@ Loaded by `ui.lua` last; every role that uses the kit lists it. Design: `docs/de
 - Tiles and the header put a glyph two cells before the state word (a tile whose name would be cut to make room leaves the glyph out). A `busy` button keeps its label and puts the rebooting glyph before it.
 - A view that drew something moving sets `v.animated` and `v.animRate`; `ui.run` then wakes for the next beat, and sleeps again when nothing moves. A beat writes one `blit` per changed row.
 
+## Typed commands (#70): `shared/slash.lua`
+
+One module for "/" commands; a screen only lists its own. List `shared/slash.lua` in the role's manifest entry.
+
+```lua
+local slash = require("slash")
+local cmds = slash.new()                       -- built-in /help; slash.new({ say = fn }) to send results elsewhere
+cmds:add({ name = "goto", args = "x z", min = 2, max = 2, help = "send the turtle to x z",
+           run = function(a)
+             local x, z = a:xz(1)              -- "10 -5" or "10,-5"
+             if not x then return false, z end -- z is the message: shown with the usage line under it
+             go(x, z); return true, "On my way"
+           end })
+-- on the computer terminal, in the screen's draw (after the list, before the footer):
+v:search(st.field, { commands = cmds:commands() })
+-- or for any typed line (a prompt, a test): cmds:exec("/goto 10 -5")
+```
+
+- A line may or may not start with `/`; names are case-insensitive; `"double quotes"` keep spaces in a word.
+- `run(a, ctx)` gets `a.words`, `a.raw`, `a.n` and the readers `a:int(i)`, `a:num(i)`, `a:xz(i)` (returns x, z, next index) and `a:is(i, "clear")`. A reader that fails returns `nil, message`. Return `true, text, tone` (tone defaults to `"good"`), `false, text` (error plus the usage line) or `false` (usage line only). `min`/`max` word counts are checked before `run`. A crash in `run` is shown, never thrown.
+- Unknown command: "Unknown command /x." and the list of usage lines. `/help` lists them; `/help goto` gives one. A screen can replace `/help` by adding its own.
+- Results go to `ui.say` (one line, so keep them short) unless `slash.new{ say = }` says otherwise. `cmds:run(line)` returns `ok, text, tone` and shows nothing.
+- `cmds:commands()` is the list the kit's command bar takes (`v:search`): typing `/` shows it, Tab completes, Enter runs. The kit's bar needs the computer's own screen: a monitor has no keyboard, so draw `v:search` only when `not v.side`. `v:tiles` takes `input = 2` to leave room for a search row below a button row.
+- Storage and the smelter keep their own parsers until their UI-kit rebuilds (#21, #20). The Farmhand is the demo: `/status`, `/help`.
+
 ## Tests
+
+`tests/scenarios/ui_slash.lua` (parsing, arguments, usage errors, help, the Farmhand terminal).
 
 `tests/scenarios/ui_core.lua` with the demo screen `tests/demo/ui_demo.lua`, and `tests/scenarios/ui_more.lua` with `tests/demo/ui_demo2.lua` (tabs: tiles, list, map, form): layout and tap targets at 57x24, 51x19, 39x13 and 26x20, confirm timer, notices, colourless fallback, monitors, resize.
 
