@@ -183,7 +183,7 @@ local TYPES = {
   { key = "output",    label = "Output",         short = "Output",  tag = "OUTPUT", col = colours.cyan,
     about = "Where items you take from the screens go. Only one." },
   { key = "dock",      label = "Dock",           short = "Dock",    tag = "DOCK",   col = colours.yellow,
-    about = "Turtle/machine dock: ~32 coal kept in it (plus its keep list), everything else taken." },
+    about = "Turtle/machine dock: a few lava buckets kept in it (coal if there is no lava, plus its keep list), everything else taken." },
   { key = "fuel",      label = "Canary fuel",    short = "Fuel",    tag = "FUEL",   col = colours.orange,
     about = "Kept at one Canary refill (lava, coal blocks, coal...). One per Canary." },
   { key = "weaver",    label = "Weaver supply",  short = "Weaver",  tag = "WEAVER", col = colours.purple,
@@ -221,6 +221,7 @@ local function unassign(n)
   for _, field in pairs(SINGLES) do if cfg[field] == n then cfg[field] = nil end end
   for _, field in pairs(LISTS) do if cfg[field] then listRemove(cfg[field], n) end end
   if cfg.dockKeep then cfg.dockKeep[n] = nil end
+  if cfg.dockLink then cfg.dockLink[n] = nil end
   for _, b in pairs(cfg.canaryBarrels or {}) do
     if b.fuel == n then b.fuel = nil end
     if b.dump == n then b.dump = nil end
@@ -1047,9 +1048,8 @@ local function rebalanceDrawers(progress)
   return res
 end
 
--- Turtle docks: storage takes everything except fuel, which stays for the turtle
-local DOCK_FUELS = { ["minecraft:coal"] = 80, ["minecraft:charcoal"] = 80, ["minecraft:coal_block"] = 800 }
-local DOCK_FUEL_UNITS = 2560  -- about 32 coal
+-- Turtle docks: storage takes everything except fuel, which stays for the turtle (storage_docks.lua, set up below)
+local DOCKS
 
 local inputStuck = false -- items in an input that storage had no room for
 local function deposit()
@@ -1071,7 +1071,7 @@ local function deposit()
     -- Its Keeps (the neural lab's matrices, Woodpecker's saplings...) stay up to their count;
     -- anything over that is taken like the rest, so a turtle unloading spares can't fill the dock.
     local keep = cfg.dockKeep and cfg.dockKeep[d]
-    local m, left = depositFrom(d, DOCK_FUELS, keep)
+    local m, left = depositFrom(d, DOCKS.KEEP, keep)
     moved = moved + m
     if left > 0 then stuck = true end
   end
@@ -1124,22 +1124,19 @@ end
 
 -- Emptiest Canary fuel barrel, in fuel units (see topUpFuel)
 local fuelUnits = 0
--- Keep each turtle dock stocked with ~32 coal worth of fuel (charcoal first, then coal)
+DOCKS = dofile("storage_docks.lua")({
+  cfg = function() return cfg end, byName = function() return byName end, call = call, retrieve = retrieve,
+  saveCfg = saveCfg, env = require("envfile"),
+})
+
+-- Keep each turtle dock stocked with lava buckets (coal only when there is no lava), best fuel in slot 1
 local function topUpDocks()
   local changed = false
   for _, d in ipairs(cfg.docks or {}) do
-    local have = 0
     local list = call(d, "list")
     if list then
-      for _, it in pairs(list) do have = have + (DOCK_FUELS[it.name] or 0) * it.count end
-      local deficit = DOCK_FUEL_UNITS - have
-      for _, name in ipairs({ "minecraft:charcoal", "minecraft:coal" }) do
-        local n = math.floor(deficit / 80)
-        if n > 0 and (byName[name] or 0) > 0 then
-          local moved = retrieve(name, math.min(n, byName[name]), d)
-          if moved > 0 then deficit = deficit - moved * 80; changed = true; byName[name] = byName[name] - moved end
-        end
-      end
+      if DOCKS.stock(d, list) then changed = true; list = call(d, "list") or list end
+      if DOCKS.order(d, list) then changed = true end
       -- Keep list (/dock): top each item up to its amount
       for name, want in pairs((cfg.dockKeep or {})[d] or {}) do
         local here = 0
@@ -1895,6 +1892,8 @@ local function netLoop()
           refreshStorageList()
           os.queueEvent("storage_work")
         end
+      elseif proto == BASE and msg.type == "dock_report" and msg.id == from then
+        rednet.send(from, DOCKS.report(msg), BASE)
       elseif proto == BASE and msg.type == "smelt_ops" and type(msg.ops) == "table" then
         jobs[#jobs + 1] = { from = from, id = msg.id, ops = msg.ops }
         os.queueEvent("storage_work")
@@ -2113,18 +2112,25 @@ local function assignScreen()
       init = function(n)
         local keep = {}
         for k, v in pairs((cfg.dockKeep or {})[n] or {}) do keep[k] = v end
-        return keep
+        local link = cfg.dockLink and cfg.dockLink[n]
+        return { keep = keep, link = link and { label = link.label, x = link.x, y = link.y, z = link.z } or nil }
       end,
-      show = function(keep)
+      show = function(st)
         local parts = {}
-        for name, c in pairs(keep) do parts[#parts + 1] = c .. " " .. name:gsub("^[^:]+:", "") end
+        for name, c in pairs(st.keep) do parts[#parts + 1] = c .. " " .. name:gsub("^[^:]+:", "") end
         table.sort(parts)
-        return "Keeps", "~32 coal" .. (#parts > 0 and (", " .. table.concat(parts, ", ")) or "")
+        return "Dock", (st.link and st.link.label or "no turtle") .. (#parts > 0 and (", keeps " .. table.concat(parts, ", ")) or "")
       end,
-      click = function(n, keep) print("Dock " .. n); editDockKeep(keep) end,
-      save = function(n, keep)
+      click = function(n, st)
+        print("Dock " .. n)
+        st.link = DOCKS.pick(n, st.link)
+        editDockKeep(st.keep)
+      end,
+      save = function(n, st)
         cfg.dockKeep = cfg.dockKeep or {}
-        cfg.dockKeep[n] = next(keep) and keep or nil
+        cfg.dockKeep[n] = next(st.keep) and st.keep or nil
+        cfg.dockLink = cfg.dockLink or {}
+        cfg.dockLink[n] = st.link
       end,
     },
     hold = function() picking = true; while workerBusy do os.sleep(0.2) end end,
@@ -2243,6 +2249,7 @@ function runCommand(cmd)
         print(("%s: %d fuel (%d%%)"):format(b, have, math.floor(have / target * 100)))
         print("  " .. (#txt > 0 and table.concat(txt, ", ") or "empty"))
       end
+      DOCKS.info(print)
       print("In storage (best first):")
       for _, fv in ipairs(FUEL_VALUES) do
         local c = byName[fv[1]] or 0

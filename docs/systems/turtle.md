@@ -33,7 +33,7 @@ One table, best first. Only these are ever burned: never logs, planks or sapling
 - `fuel.refuelFromDock(dir, target, want)`: takes fuel from the dock up to `target`, plus `want(name, have)` more of anything he restocks from it (saplings). Puts empty buckets back. Returns `{ [name] = taken }`.
 - `fuel.returnEmpties(drop)`: every `minecraft:bucket` he carries goes into the dock.
 
-`suck()` always hands over the barrel's first stack, so the order of the dock's slots decides which fuel he takes first. Priority applies fully to what he carries. Storage can put the best fuel in the lowest slot (#41).
+`suck()` always hands over the barrel's first stack, so the order of the dock's slots decides which fuel he takes first. Priority applies fully to what he carries. Storage keeps the best fuel in the dock's first slot (see Storage's side).
 
 Don't refuel to full out of habit: fuel is time. Each role keeps its own thresholds in its `.env` file (`FUEL_TARGET`: top up to, `FUEL_LOW`: won't start a round below).
 
@@ -66,7 +66,16 @@ Storage answers the sender with:
 -- assigned: the barrel /assign has as that turtle's dock at this position; nil lists it as "unassigned dock"
 ```
 
-The turtle works fine without an answer (Storage not updated yet, out of range). `/assign` is unchanged: Tanis can still assign docks by hand. Storage's side of this message is #41.
+The turtle works fine without an answer (Storage not updated yet, out of range). `/assign` still assigns docks by hand.
+
+## Storage's side of the docks (`computer/storage/storage_docks.lua`)
+
+- **Stocking.** Every barrel assigned as a Dock is kept at `DOCK_LAVA` lava buckets (`storage.env`, default 4, at most 27) while storage has lava. Only when the dock holds no lava and storage has none does it get coal and charcoal instead (charcoal first, about 32 coal worth). The best fuel (lava, then coal block, charcoal, coal) is moved to slot 1, because a turtle can only suck the first stack.
+- **Empties.** An empty `minecraft:bucket` in a dock is taken into storage like any other item; fuel (lava, coal, charcoal, coal blocks) stays. The dock's Keeps (`/assign` > Dock) are unchanged.
+- **Fuel units.** A lava bucket counts 1,000 (coal block 800, coal and charcoal 80). `/fuelinfo` lists each dock's fuel units and lava buckets.
+- **Report handshake.** Storage answers every `dock_report` with a `dock_ack` and remembers the label and position (`dockReports` in `storage.cfg`). In `/assign`, a Dock's "Dock" line opens a list of the turtles that have reported: pick one and the barrel is linked to that label and position (`dockLink`). From then on `assigned` in the ack is that barrel. If the turtle reports a different position (the dock was moved) the link no longer matches: `assigned` is nil until the barrel is linked again.
+- **Miners are skipped** (`role = "miner"`): a Canary's or Firecrest's dock is on its Foreman's cable and the Foreman fills it (`dock_req`, see `miner.md`), not Storage. Storage neither lists nor stocks those docks.
+- A Dock that isn't a turtle's (the neural lab's, say) is stocked the same way; give it a Keep list if it needs more.
 
 ## GPS: `core.gps`
 
