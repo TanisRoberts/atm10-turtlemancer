@@ -280,3 +280,166 @@ Mockup legend: every block is exactly the width in its `w=` tag. A space is a bl
 ```
 
 - Commands that print information open a report page: key/value rows, Back to return. Same layout for `/drawers`.
+
+
+## Depot rules (#74)
+
+Signed off by Tanis (#76): option B (rule form) with C's "Something like this" as a shortcut, plus a priority field.
+
+A depot holds a **rule** instead of one item. Storage keeps each depot filled with what its rule matches, and inputs are always emptied: a new item that a depot wins goes straight to that depot; if the depot is full it goes to normal storage and comes over later as the depot empties.
+
+### Rules
+
+- A rule has up to four conditions, all of which must match: **Item** (an item id, every variant of it), **Tag** (one item tag, e.g. `c:enchantables`), **Mod** (the id's namespace, `apotheosis` in `apotheosis:gem`), **Enchanted** (Any / Yes / No). At least one must be set.
+- Tags and enchantments come from `getItemDetail` (`tags`, `enchantments`), read once per variant key and cached with the rest of `info`. Enchanted books count as enchanted (check that CC's `enchantments` includes stored enchantments; if not, treat a non-empty stored list the same).
+- **Priority**: a number 0 to 9999, default 0. Higher wins a tie.
+- Saved in `cfg.depots[container]` as `{ item=, tag=, mod=, enchanted=true|false|nil, priority=0, added=N }` (`added` counts up, for the last tie-break). An old string value (`"minecraft:enchanted_book"`) still loads as `{ item = that }`. `""` is still "not chosen yet".
+
+### Which depot gets an item
+
+Each item variant goes to at most one depot, the winner:
+
+1. Most specific rule: score Item 8 + Tag 4 + Mod 2 + Enchanted set 1. So an exact item beats any tag rule, and tag + enchanted beats tag alone.
+2. Then the higher priority.
+3. Then the depot added first.
+
+If the winner is full or missing, the item stays in storage. It never goes to the next depot down. Items already in a depot that no longer match are left alone, as today.
+
+Example: `library_books` (Item enchanted book) and `disenchant` (Tag c:enchantables + Enchanted Yes). Books go to the library, enchanted swords to the disenchanter, plain swords to neither.
+
+### Step 2: the rule form (replaces the item list)
+
+```text w=57
+░ADD░DEPOT░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░step░2░of░3░ 
+ What goes in library_in? Set any of these.              
+                                                         
+ Item       ░any░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 
+ Tag        ░c:enchantables░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 
+ Mod        ░any░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 
+ Enchanted  ░Any░ ▒Yes▒ ░No░                             
+                                                         
+ Matches now: 58 kinds, 149 items                        
+   Enchanted book                                    41  
+ ░Enchanted░diamond░sword░░░░░░░░░░░░░░░░░░░░░░░░░░░░2░  
+   Enchanted iron pickaxe                             4  
+ ░Enchanted░bow░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░1░  
+   Enchanted netherite boots                          1  
+ ... 53 more                                             
+                                                         
+                                                         
+                                                         
+                                                         
+                                                         
+                                                         
+                                                         
+ ▒Next▒ ░Something░like░this░ ░Back░                     
+                                                         
+```
+
+- Tap **Item**, **Tag** or **Mod** to open the pick list for it; tap a set row's value and pick **Any** to clear it. Enchanted is three toggle buttons (cyan = current).
+- **Matches now** is live: kinds and items in storage that this depot would win, top 5 by count. A rule that would lose items to another depot still lists them here, but the summary says where they go (Overlaps).
+- **Next** is disabled (grey) until at least one condition is set.
+- **Something like this** opens the example page.
+
+### Pick list (Item, Tag or Mod)
+
+```text w=57
+░DEPOT░TAG░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░pick░one░
+ Tags on items in storage. Type to narrow it down.       
+ c:enchantables                            63 kinds  212 
+░c:tools░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░40░kinds░░░88░
+ c:tools/melee_weapon                      18 kinds   31 
+░c:armors░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░24░kinds░░░40░
+ minecraft:enchantable/durability          71 kinds  230 
+░minecraft:bookshelf_books░░░░░░░░░░░░░░░░░░4░kinds░░░96░
+                                                         
+                                                         
+                                                         
+                                                         
+                                                         
+                                                         
+                                                         
+                                                         
+                                                         
+                                                         
+                                                         
+                                                         
+                                                         
+                                                         
+ ░Any░ ░Back░                                  page 1/9  
+░Search:░c:_░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 
+```
+
+- Same list as today's item step: search at the bottom, pager, tap a row to pick it and go back to the form. Item lists item ids (variants merged), Tag lists every tag on items in storage with kinds and items, Mod lists namespaces.
+- **Any** clears the condition.
+
+### Something like this
+
+```text w=57
+░SOMETHING░LIKE░THIS░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 
+ Drop one example into library_in, then tick what counts.
+ Example: Enchanted book (Mending)                       
+                                                         
+ ▒x▒ This item, any variant   Enchanted book          41 
+ ░ ░ Enchanted                yes                    149 
+ ░ ░ Tag                      c:enchantables         212 
+ ░ ░ Tag                      minecraft:bookshelf_b   96 
+ ░ ░ Mod                      minecraft             9.1k 
+                                                         
+ Ticked lines fill in the form. Only one tag can be      
+ ticked (the form has one Tag row).                      
+                                                         
+ Matches now: 1 kind, 41 items                           
+                                                         
+                                                         
+                                                         
+                                                         
+                                                         
+                                                         
+                                                         
+                                                         
+ ▒Use▒these▒ ░Other░example░ ░Back░                      
+                                                         
+```
+
+- Uses the existing "drop one item in" watch on the depot itself (storage stops moving items while it watches, 30 s). The dropped item stays in the depot.
+- Lists everything true about the example: the item, Enchanted (yes or no), each of its tags, its mod, with how much storage has of each. Tap to tick. Only one Tag line can be ticked; ticking another moves the tick.
+- **Use these** fills the form's rows from the ticks (replacing them) and goes back. **Other example** watches again.
+
+### Step 3: summary
+
+```text w=57
+░ADD░DEPOT░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░step░3░of░3░ 
+ Check it, then Save.                                    
+ Name      minecraft:barrel_14                           
+ Nickname  ░library_in░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 
+ Holds     Tag c:enchantables, enchanted                 
+ Priority  ░0░░░░    higher wins a tie, 0 to 9999        
+                                                         
+ Matches   58 kinds, 149 items in storage now            
+ Overlaps  Enchanted book: goes to library_books (more   
+           specific)                                     
+                                                         
+ New matches go here first; when it's full they wait     
+ in storage and come over as it empties.                 
+                                                         
+                                                         
+                                                         
+                                                         
+                                                         
+                                                         
+                                                         
+                                                         
+                                                         
+ ▒Save▒ ░Back░                                           
+                                                         
+```
+
+- **Holds** sums up the rule in words; tap it to go back to the form.
+- **Priority** is a text field: digits only, up to 4, empty saves as 0.
+- **Overlaps** lists other depots that win some of what this rule matches (up to 2 lines, "+N more").
+- The edit page for an existing depot shows the same Holds and Priority rows; Holds opens the form.
+
+### Smaller screens
+
+- 51x19 computer: same pages; the form's preview shows 2 rows, the pick list 13 rows per page.
