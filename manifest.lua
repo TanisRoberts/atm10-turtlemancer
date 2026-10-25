@@ -216,10 +216,10 @@ local M = {
                      .. "Hoe + wireless or ender modem; GPS makes it unlosable. Run from the Farmhand.",
                    files = { "turtle/partridge/farmer.lua", "shared/farmbot.lua" } },
         seagull = { name = "Seagull", about = "Maps the world for the Cartographer", run = "seagull",
-                   details = "Zig-zags over the island with a Geo Scanner and sends the world map to "
-                     .. "the Cartographer computer. Geo Scanner + ender modem, no pickaxe. Needs GPS and a fuel dock "
+                   details = "Maps the world one region (16 x 16 chunks) at a time, chunk by chunk, keeping each chunk loaded with a chunk controller, and hands each finished region to "
+                     .. "the Cartographer computer. Geo Scanner + ender modem + chunk controller in his bag, no pickaxe. Needs GPS and a fuel dock "
                      .. "with open sky above it.",
-                   files = { "turtle/seagull/seagull.lua", "shared/mapchunk.lua" } },
+                   files = { "turtle/seagull/seagull.lua", "shared/mapchunk.lua", "shared/regionplan.lua" } },
         bowerbird = { name = "Bowerbird", about = "Crafts matrices for the neural lab", run = "crafter",
                    details = "Keeps storage stocked with prediction matrices (iron, gold, glass panes, "
                      .. "clay). Crafty turtle + wireless or ender modem, parked at a dock barrel that "

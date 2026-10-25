@@ -150,19 +150,20 @@ bottom-right corner** to switch screens:
 whole world map (the World map used to live on the art wall) and draws it with pan and zoom; its own screen has Seagull's
 panel, the next region, storage and the MAP / DOCK buttons. Read `docs/systems/cartographer.md`.
 
-**Seagull (map-making turtle):** a turtle with a **Geo Scanner** on one side and an **ender modem** on the other. No pickaxe:
-he never digs, he flies over things. Needs the GPS towers.
+**Seagull (map-making turtle):** a turtle with a **Geo Scanner** on one side, an **ender modem** on the other and an Advanced
+Peripherals **chunk controller** in his bag. No pickaxe: he never digs, he flies over things. Needs the GPS towers.
 
 - **Dock:** a barrel touching him that storage keeps fuelled. On storage: `/assign` the barrel as a Dock, Keeps e.g. `coal 128`
   in it (fewer trips home than the default ~32). **Open sky above his dock spot**: he leaves and lands straight up and down.
 - First start: put him on his dock spot and start him. He finds the barrel, steps once to learn which way he faces, and waits.
-- Press **MAP** on the Cartographer (or **M** on his screen). He covers the area in strips 16 blocks apart, `CLEARANCE` (3) blocks
-  above the ground, scanning every 8 blocks, and the Cartographer draws each scan as it arrives. A full 328 x 243 pass is about an
-  hour and ~6,500 fuel (80-ish coal). He goes home for fuel when he needs to, and docks when done. **D** on his screen = dock.
-- Area: centred on his dock, 328 x 243 (fills an 8x6 wall at 1 block per pixel). Change `CENTRE_X`, `CENTRE_Z`, `WIDTH`,
-  `DEPTH` in `seagull.env`; he starts the pass again if you change the area mid-way.
-- **Chunks:** he only works where chunks are loaded (near a player, or force-loaded). Spots outside are skipped, not fatal:
-  run another pass later with someone over there. Restarted or reloaded mid-pass? He asks GPS where he is and carries on.
+- Press **MAP** on the Cartographer (or **M** on his screen). He maps **one region** (16 x 16 chunks) chunk by chunk, `CLEARANCE`
+  (3) blocks above the ground: one radius-8 scan from each chunk's middle covers the whole chunk, plus a second scan only where a
+  cliff or pit left columns unseen. In every chunk he swaps the chunk controller onto his modem's side for a moment, so the chunk
+  stays loaded and nothing is skipped. The region shows up on the Cartographer in one go when it is whole; he then forgets his copy
+  and docks. **MAP again = the next region**: the one tapped on the Cartographer, else the next one in a spiral out from home.
+  He goes home for fuel when he needs to and carries on with the same region. **D** on his screen = dock.
+- Restarted mid-region? He asks GPS where he is and carries on from his last checkpoint (at most 8 chunks are scanned again).
+- The old fixed area (`CENTRE_X`, `CENTRE_Z`, `WIDTH`, `DEPTH`, `STEP`, `STRIP`) is gone; leftover lines in `seagull.env` do nothing.
 - The Cartographer keeps the map (`regions/` on its disk and floppies) and catches up from Seagull's (`seagull.map`)
   whenever it starts. On the mainframe's board the Cartographer has one row (Seagull's state, regions held, fuel).
 

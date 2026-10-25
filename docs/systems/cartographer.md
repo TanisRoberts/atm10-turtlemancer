@@ -24,13 +24,23 @@ An advanced computer, an ender modem and a big advanced monitor laid flat as a *
 
 ## Radio (`tanis-carto`)
 
-Kept from the old art-controller protocol, plus what the Seagull region work (#68) needs:
+Kept from the old art-controller protocol, plus what Seagull's region work (#68) uses:
 
 - Cartographer -> Seagull `have {revs}` (rev of every chunk it holds); Seagull answers `chunks {chunks, more}` in batches of 24; while `more` the next `have` follows at once. Seagull also pushes fresh chunks unasked.
 - Cartographer -> Seagull `cmd {want = "map" | "dock", next = {rx, rz} | false, seq}`, repeated every 2 s until Seagull's status `seq` echoes it (30 s at most). `next` names the region to map next; `false` clears it.
 - Seagull `status` may carry `done_region = {rx, rz}`. Once the Cartographer holds all 256 chunks of it **and has saved the region to a disk**, it sends `{type = "region_ok", to = <seagull>, region = {rx, rz}}` (again on each status that still names it). If the region cannot be saved (storage full) it does not answer and shows an error.
 - `scan_region = {rx, rz}`, `scan_started` (epoch seconds or ms) and `scan_secs` give the scan percentage; without them the outline says "scanning" with no %. Without `scan_region` the region under Seagull's position is used.
 - Mainframe: every 5 s `{type = "cartographer", regions, chunks, seagull = {...}}` on `tanis-base`. The board shows one Cartographer row (Seagull's state, regions, chunks, fuel) and hides Seagull's own `carto` row while a Cartographer is on the air.
+
+## Seagull's side (`turtle/seagull/seagull.lua`, `shared/regionplan.lua`)
+
+- **One region per MAP.** The region is `cmd.next` if the Cartographer sent one (tap), else the first region not on his `done` list in rings round the region holding his home (the same order the Cartographer shows as "spiral"). `cmd.next = false` clears the tap. `REGION_CHUNKS` in `seagull.env` (16) is the region side; leave it.
+- **Chunk by chunk.** He flies a snake over the region's 256 chunks to each chunk's middle (`plan.centre`), keeps it loaded with `core.chunk.ensure` (a chunk controller in his bag swapped onto his modem's side for a moment, see `turtle.md`), and scans with radius 8: that covers the whole chunk. Quarters of a chunk with unseen columns (a pit or cliff beyond the scan's height) get a second scan from their middle (`plan.extras`). A chunk that cannot be entered ("chunk not loaded") is retried 3 times, then skipped and counted in `skipped`; the Cartographer then never gets all 256 chunks and keeps waiting.
+- **Held back until whole.** While he scans a region its chunks are not sent (not pushed, not in `have` answers), so the region appears at once. Ground seen outside the region (on the way) is kept in memory only, for flying.
+- **Hand-over.** The last chunk done, he sets `done_region`, queues the region's chunks, flies home and waits for `region_ok` (queuing them again every minute). Then he deletes the region's chunks from `seagull.map`, adds it to his `done` list and idles. MAP while he waits does nothing.
+- **Status** (`tanis-carto`): `scan_region`, `scan_started` (epoch ms, set when the first chunk is reached), `scan_secs` (the whole region's expected time: elapsed over chunks done, so the Cartographer's % is the real progress; the last region's time before chunk 5), `done_region`, `next_region`, plus `wp`/`wps` = chunk number / 256 for the mainframe board.
+- **Reboot.** The state file keeps region, chunk number and a checkpoint every 8 chunks (the map is saved then); on boot he returns to the checkpoint and carries on. Fuel: he goes home when the trip to the next chunk and back is not covered, refuels and returns to the same chunk.
+- He stays on the radio while scanning (the modem is off for 0.15 s per swap), so DOCK and tap orders arrive mid-region.
 
 ## Floor
 
@@ -62,7 +72,7 @@ Keys (command bar empty): arrows pan, `-` / `+` zoom, `f` fits.
 ## Known limits
 
 - The `have` message lists every chunk the Cartographer holds, so it grows with the map (a big map makes a big message every few minutes).
-- Seagull itself is unchanged here (renamed `cartographer.lua` -> `seagull.lua`): `done_region`, `scan_*` and `next` come with #68.
+- Seagull forgets a region only after `region_ok`; until then (the Cartographer off, its storage full) he waits at his dock with the whole region.
 
 ## Tests
 

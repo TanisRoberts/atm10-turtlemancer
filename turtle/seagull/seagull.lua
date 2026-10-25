@@ -1,25 +1,31 @@
 -- seagull.lua  --  Seagull, the map-painting turtle (CC:Tweaked + Advanced Peripherals, ATM10)
 --
--- Seagull zig-zags over the island a few blocks above the ground, scanning as he goes, and builds a
--- height map of everything: land, trees, shallow and deep water. The art controller's World view
--- paints it on the wall as he flies.
+-- Seagull maps the world one REGION (16 x 16 chunks) at a time. He flies a few blocks above the ground to the
+-- middle of each chunk of the region, one chunk after another, and scans it (one radius-8 scan from a chunk's
+-- middle covers the whole chunk; a second scan only where a cliff or deep water left columns unseen). That builds
+-- a height map: land, trees, shallow and deep water. He keeps the chunk he is scanning loaded himself with a chunk
+-- controller (swapped onto his modem's side for a moment, see docs/systems/turtle.md), so nothing is skipped.
+-- A finished region goes to the Cartographer computer in one piece; once it answers region_ok he forgets it and is
+-- ready for the next. Protocol and fields: docs/systems/cartographer.md.
 --
--- Needs: a turtle with a GEO SCANNER on one side and an ENDER (or wireless) MODEM on the other.
---        No pickaxe: he never digs, he flies over things. GPS towers (he won't fly without GPS).
+-- Needs: a turtle with a GEO SCANNER on one side and an ENDER (or wireless) MODEM on the other, and an Advanced
+--        Peripherals CHUNK CONTROLLER in his bag. No pickaxe: he never digs, he flies over things. GPS towers.
 -- Dock:  a barrel or chest touching him (any side, above or below) that storage keeps fuelled:
 --        run /dock on the storage computer and pick it, or use the coal marker in /setup.
 --        Open sky above the dock: he leaves and comes home straight up and down.
 --
 -- First start: put him next to his dock and start him. He finds the barrel, works out which way
 -- he faces from GPS (he steps one block and back), remembers home, and waits.
--- Then press MAP on the art wall's World view (or M on his own screen). He flies the whole area in
--- strips, scanning every STEP blocks, comes home for fuel when he needs it, and docks when done.
--- Restarts and chunk reloads: he asks GPS where he is and carries on.
+-- Then press MAP on the Cartographer (or M on his own screen). He maps the next region (the one tapped on the
+-- Cartographer, else the next one in a spiral out from home), comes home for fuel when he needs it, hands the
+-- region over and docks. MAP again: the next region. Restarts: he asks GPS where he is and carries on with the
+-- same region.
 --
 -- Settings: seagull.env (made on first run; same rules as the other .env files: edit live).
--- Map: seagull.map (his own copy). The art controller keeps its own and catches up from his.
+-- Map: seagull.map (his copy of the region he is on; the Cartographer keeps the whole map).
 
 local mc = dofile("mapchunk.lua")
+local plan = dofile("regionplan.lua")
 local core = dofile("turtlecore.lua")   -- fuel, dock and GPS shared by every turtle (docs/systems/turtle.md)
 
 local PROTO      = "tanis-carto"
@@ -30,14 +36,9 @@ local MAP_FILE   = "seagull.map"
 local ROLE       = "seagull"
 
 local DEFAULTS = {
-  { "CENTRE_X", "", "Middle of the area to map (X). Blank = his dock." },
-  { "CENTRE_Z", "", "Middle of the area to map (Z). Blank = his dock." },
-  { "WIDTH", 328, "Area size east-west in blocks. 328 x 243 fills an 8x6 monitor wall at 1 block per pixel." },
-  { "DEPTH", 243, "Area size north-south in blocks." },
+  { "REGION_CHUNKS", 16, "Chunks along one side of a region. Leave at 16: the Cartographer expects 16 x 16." },
   { "CLEARANCE", 3, "How high above the ground (or trees, water) he flies." },
-  { "RADIUS", 8, "Scan radius. 8 is free; up to 16 costs fuel per scan." },
-  { "STEP", 8, "Blocks between scans along a strip." },
-  { "STRIP", 16, "Blocks between strips. Keep at most 2 x RADIUS so nothing is missed." },
+  { "RADIUS", 8, "Scan radius. 8 is free and covers a whole chunk from its middle; up to 16 costs fuel per scan." },
   { "SHALLOW", 4, "Water this deep or less counts as shallow (lighter blue)." },
   { "FUEL_FULL", 8000, "Fuel he tops up to at the dock." },
   { "FUEL_RESERVE", 200, "Spare fuel kept on top of the trip home." },
@@ -82,9 +83,8 @@ local function readEnv()
     local v = vals[d[1]]
     if type(d[2]) == "number" then E[d[1]] = tonumber(v) or d[2] else E[d[1]] = v end
   end
-  E.RADIUS = math.max(2, math.min(16, math.floor(E.RADIUS)))
-  E.STEP = math.max(1, math.floor(E.STEP))
-  E.STRIP = math.max(1, math.floor(E.STRIP))
+  E.RADIUS = math.max(8, math.min(16, math.floor(E.RADIUS)))
+  E.REGION_CHUNKS = math.max(1, math.floor(E.REGION_CHUNKS))
   envStamp = stampOf(ENV_FILE)
 end
 local function refreshEnv()
@@ -147,7 +147,9 @@ end
 -- The map
 ---------------------------------------------------------------------------
 local chunks = mc.load(MAP_FILE)    -- [key] = { rev, data }
+local nav = {}                      -- ground seen outside the region he is on: only for flying, never sent or saved
 local dirtyKeys = {}                -- chunks changed since the last broadcast
+local inRegion                      -- (key, region) -> bool, defined with the plan below
 local mapDirty, mapSavedAt = false, 0
 
 local function now() return os.epoch("utc") end
@@ -161,7 +163,8 @@ end
 -- Height of the known top block at (x, z), or nil
 local function topAt(x, z)
   local cx, cz, lx, lz = mc.locate(x, z)
-  local c = chunks[mc.key(cx, cz)]
+  local k = mc.key(cx, cz)
+  local c = chunks[k] or nav[k]
   if not c then return nil end
   return (mc.unpack(mc.get(c.data, lx, lz)))
 end
@@ -218,8 +221,10 @@ local function absorb(blocks, ox, oy, oz, R)
     local key = mc.key(cx, cz)
     local t = touched[key]
     if not t then
-      local c = chunks[key]
-      t = { arr = mc.toArray(c and c.data), changed = false }
+      -- Only the region he is mapping goes into the map; ground seen on the way is kept for flying only
+      local mine = S.region ~= nil and inRegion(key, S.region)
+      local c = (mine and chunks or nav)[key]
+      t = { arr = mc.toArray(c and c.data), changed = false, mine = mine }
       touched[key] = t
     end
     local i = lz * 16 + lx + 1
@@ -255,11 +260,18 @@ local function absorb(blocks, ox, oy, oz, R)
   local t = now()
   for key, tt in pairs(touched) do
     if tt.changed then
-      chunks[key] = { rev = t, data = mc.fromArray(tt.arr) }
-      dirtyKeys[key] = true
-      mapDirty = true
+      if tt.mine then
+        chunks[key] = { rev = t, data = mc.fromArray(tt.arr) }
+        dirtyKeys[key] = true
+        mapDirty = true
+      else
+        nav[key] = { rev = t, data = mc.fromArray(tt.arr) }
+      end
     end
   end
+  local n = 0
+  for _ in pairs(nav) do n = n + 1 end
+  if n > 600 then nav = {} end
 end
 
 ---------------------------------------------------------------------------
@@ -464,52 +476,61 @@ local function scanIfUnknown()
 end
 
 ---------------------------------------------------------------------------
--- The plan: strips across the area, a scan every STEP blocks
+-- The plan: a region, chunk by chunk
 ---------------------------------------------------------------------------
-local function area()
-  local cx = tonumber(E.CENTRE_X) or (S.home and S.home.x) or 0
-  local cz = tonumber(E.CENTRE_Z) or (S.home and S.home.z) or 0
-  local w, d = math.max(1, math.floor(E.WIDTH)), math.max(1, math.floor(E.DEPTH))
-  local x0, z0 = cx - math.floor(w / 2), cz - math.floor(d / 2)
-  return { x0 = x0, z0 = z0, x1 = x0 + w - 1, z1 = z0 + d - 1 }
+local function regionKey(r) return r and plan.key(r[1], r[2]) end
+
+-- Chunks of the region he is on, in scanning order (rebuilt on demand; 256 small tables)
+local chunkList, chunkListFor = nil, nil
+local function regionChunks()
+  local k = regionKey(S.region) .. ":" .. E.REGION_CHUNKS
+  if chunkListFor ~= k then
+    chunkList, chunkListFor = plan.chunks(S.region[1], S.region[2], E.REGION_CHUNKS), k
+  end
+  return chunkList
 end
 
-local function waypoints(a)
-  local pts = {}
-  local R = E.RADIUS
-  local row = 0
-  local z = a.z0 + math.min(R, math.floor((a.z1 - a.z0) / 2))
-  while true do
-    local xs = {}
-    local x = a.x0 + math.min(R, math.floor((a.x1 - a.x0) / 2))
-    while true do
-      xs[#xs + 1] = x
-      if x + R >= a.x1 then break end
-      x = math.min(x + E.STEP, a.x1 - R)
-    end
-    if row % 2 == 1 then
-      for i = #xs, 1, -1 do pts[#pts + 1] = { x = xs[i], z = z } end
-    else
-      for i = 1, #xs do pts[#pts + 1] = { x = xs[i], z = z } end
-    end
-    row = row + 1
-    if z + R >= a.z1 then break end
-    z = math.min(z + E.STRIP, a.z1 - R)
-  end
-  return pts
+inRegion = function(key, r)
+  local cx, cz = mc.parseKey(key)
+  if not cx then return false end
+  local rx, rz = plan.regionOf(cx, cz, E.REGION_CHUNKS)
+  return rx == r[1] and rz == r[2]
+end
+
+-- The region being scanned is withheld from the Cartographer until it is whole: it appears in one go
+local function withheld(key)
+  return S.region ~= nil and S.doneRegion == nil and inRegion(key, S.region)
+end
+
+-- Which region he maps next: the one tapped on the Cartographer, else the next unmapped one in the spiral from home
+local function pickRegion()
+  local nx = S.nextReg
+  if type(nx) == "table" and tonumber(nx[1]) and tonumber(nx[2]) then return { nx[1], nx[2] }, true end
+  local home = S.home or { x = 0, z = 0 }
+  local hx, hz = plan.regionOf(math.floor(home.x / 16), math.floor(home.z / 16), E.REGION_CHUNKS)
+  local rx, rz = plan.spiral(hx, hz, S.done or {})
+  return rx and { rx, rz } or nil, false
 end
 
 ---------------------------------------------------------------------------
 -- Network: status, map pieces, orders
 ---------------------------------------------------------------------------
 local function statusMsg()
-  local a = area()
+  local scanSecs
+  if S.region and S.rstart then
+    local elapsed = (now() - S.rstart) / 1000
+    local n = #regionChunks()
+    if (S.ci or 1) > 4 then scanSecs = elapsed * n / ((S.ci or 1) - 1)
+    elseif S.lastSecs then scanSecs = S.lastSecs end
+  end
   return {
     type = "status", role = ROLE, id = os.getComputerID(), label = os.getComputerLabel(),
     state = status, msg = note, seq = S.seq, pos = pos and { x = pos.x, y = pos.y, z = pos.z } or nil,
     home = S.home, gps = gpsOk, fuel = turtle.getFuelLevel(), fuelLimit = turtle.getFuelLimit(),
-    wp = S.wp, wps = S.wps, pass = S.pass or 0, mapping = S.mapping, area = a, chunks = chunkCount(),
-    scan = lastScanAt, skipped = S.skipped,
+    wp = S.region and (S.ci or 1) or nil, wps = S.region and #regionChunks() or nil, pass = S.pass or 0,
+    mapping = S.mapping, chunks = chunkCount(), scan = lastScanAt, skipped = S.skipped,
+    scan_region = S.mapping and S.region or nil, scan_started = S.mapping and S.rstart or nil, scan_secs = scanSecs,
+    done_region = S.doneRegion, next_region = S.nextReg or nil,
   }
 end
 
@@ -517,12 +538,14 @@ local function sendChunks(keys, to, more)
   local out, n = {}, 0
   for _, k in ipairs(keys) do
     local c = chunks[k]
-    if c then out[k] = c; n = n + 1 end
+    if c and not withheld(k) then out[k] = c; n = n + 1 end
   end
   if n == 0 then return end
   local msg = { type = "chunks", from = os.getComputerID(), chunks = out, more = more }
   if to then rednet.send(to, msg, PROTO) else rednet.broadcast(msg, PROTO) end
 end
+
+local okRegion = nil   -- "rx,rz" the Cartographer last confirmed (region_ok)
 
 local function netLoop()
   modem = peripheral.find("modem", function(_, m) return m.isWireless() end)
@@ -534,16 +557,20 @@ local function netLoop()
   local me = os.getComputerID()
   local lastStatus = -100
   while true do
-    local from, msg = rednet.receive(PROTO, 1)
+    local from, msg
+    if core.chunk.busy then os.sleep(0.2)   -- mid chunk swap: the modem is off for a moment
+    else from, msg = rednet.receive(PROTO, 1) end
     if type(msg) == "table" then
       if msg.type == "cmd" and msg.to == me then
         ctrl = msg
+      elseif msg.type == "region_ok" and msg.to == me and type(msg.region) == "table" then
+        okRegion = regionKey({ tonumber(msg.region[1]), tonumber(msg.region[2]) })
       elseif msg.type == "have" and msg.to == me and type(msg.revs) == "table" then
         -- The art controller tells us what it has; send what it's missing (a batch at a time)
         local want = {}
         for k, c in pairs(chunks) do
           local r = tonumber(msg.revs[k])
-          if not r or r < (c.rev or 0) then want[#want + 1] = k end
+          if not withheld(k) and (not r or r < (c.rev or 0)) then want[#want + 1] = k end
         end
         table.sort(want)
         local batch = {}
@@ -552,18 +579,19 @@ local function netLoop()
         else rednet.send(from, { type = "chunks", from = me, chunks = {}, more = false }, PROTO) end
       end
     end
-    -- Fresh map pieces go out straight away
+    -- Fresh map pieces go out straight away (not the region he is still scanning)
     local keys = {}
-    for k in pairs(dirtyKeys) do keys[#keys + 1] = k end
+    for k in pairs(dirtyKeys) do
+      if not withheld(k) then keys[#keys + 1] = k; dirtyKeys[k] = nil end
+    end
     if #keys > 0 then
-      dirtyKeys = {}
       for i = 1, #keys, 12 do
         local part = {}
         for j = i, math.min(#keys, i + 11) do part[#part + 1] = keys[j] end
         sendChunks(part, nil, false)
       end
     end
-    if os.clock() - lastStatus >= 3 then
+    if os.clock() - lastStatus >= 3 and not core.chunk.busy then
       local st = statusMsg()
       rednet.broadcast(st, PROTO)
       local copy = {}
@@ -671,6 +699,11 @@ local function takeOrder()
   local c = ctrl
   if c and c.seq ~= S.seq then
     S.seq = c.seq
+    if type(c.next) == "table" and tonumber(c.next[1]) and tonumber(c.next[2]) then
+      S.nextReg = { math.floor(c.next[1]), math.floor(c.next[2]) }
+    elseif c.next == false then
+      S.nextReg = nil
+    end
     save()
     return c.want
   end
@@ -693,14 +726,6 @@ end
 ---------------------------------------------------------------------------
 -- Main
 ---------------------------------------------------------------------------
-local function startPass()
-  local a = area()
-  local pts = waypoints(a)
-  S.mapping, S.wp, S.wps, S.skipped = true, 1, #pts, 0
-  S.areaKey = ("%d,%d,%d,%d,%d,%d"):format(a.x0, a.z0, a.x1, a.z1, E.STEP, E.STRIP)
-  save()
-end
-
 local function dockAndRefuel(why)
   local ok, err = goHome()
   if not ok then setStatus("error", "Can't get home: " .. tostring(err)); return false end
@@ -710,6 +735,125 @@ local function dockAndRefuel(why)
   return true
 end
 
+-- Keep the chunk he is in loaded (chunk controller swap, only in a new chunk or every 45 s)
+local function loadHere(force)
+  if not S.chunky or not pos then return end
+  core.chunk.ensure(math.floor(pos.x / 16) .. "," .. math.floor(pos.z / 16), force)
+end
+
+-- Save the map, then the place he got to: a reboot carries on from here
+local function checkpoint()
+  saveMap(true)
+  S.cp = S.ci
+  save()
+end
+
+local function startRegion()
+  local r, tapped = pickRegion()
+  if not r then setStatus("error", "No region left to map"); return end
+  S.region, S.ci, S.cp, S.mapping, S.skipped, S.retry = r, 1, 1, true, 0, nil
+  S.rstart, S.doneRegion = nil, nil
+  if tapped then S.nextReg = nil end
+  S.chunky = core.chunk.have()
+  save()
+end
+
+-- The region is whole: name it to the Cartographer and wait for region_ok, then forget it
+local function finishRegion()
+  local r = S.region
+  local rk = regionKey(r)
+  S.mapping = false
+  S.doneRegion = r
+  saveMap(true); save()
+  for k in pairs(chunks) do
+    if inRegion(k, r) then dirtyKeys[k] = true end
+  end
+  if not atHome() then dockAndRefuel("Region done") end
+end
+
+local function forgetRegion()
+  local r = S.doneRegion
+  local rk = regionKey(r)
+  for k in pairs(chunks) do
+    if inRegion(k, r) then chunks[k] = nil; dirtyKeys[k] = nil end
+  end
+  S.done = S.done or {}
+  S.done[rk] = true
+  if S.rstart then S.lastSecs = (now() - S.rstart) / 1000 end
+  S.region, S.doneRegion, S.rstart, S.ci, S.cp, S.retry = nil, nil, nil, nil, nil, nil
+  S.pass = (S.pass or 0) + 1
+  mapDirty = true
+  saveMap(true); save()
+  okRegion = nil
+  setStatus("done", ("Region %s done and handed over: %d regions mapped"):format(rk, S.pass))
+end
+
+-- Scan the chunk he is over, and again from the middle of any quarter the first scan left unseen
+local function scanChunk(cx, cz)
+  local ok, err = scanAndSettle()
+  if not ok then return false, err end
+  local c = chunks[mc.key(cx, cz)]
+  local extras = plan.extras(cx, cz, mc.toArray(c and c.data))
+  for _, p in ipairs(extras) do
+    if flyTo(p.x, p.z, loadHere) then
+      local sok, serr = scanAndSettle()
+      if not sok then return false, serr end
+    end
+  end
+  return true
+end
+
+-- One chunk of the region: fly to its middle, keep it loaded, scan it
+local function mapOneChunk()
+  local list = regionChunks()
+  local ch = list[S.ci]
+  local tx, tz = plan.centre(ch.cx, ch.cz)
+  if not enoughFuelFor(tx, tz) then
+    if dockAndRefuel("Refuelling") then
+      if not enoughFuelFor(tx, tz) then
+        setStatus("waiting", "Waiting for fuel in my dock")
+        waitOrder(30)
+      end
+    else
+      waitOrder(30)
+    end
+    return
+  end
+  setStatus("mapping", ("Region %s, chunk %d/%d"):format(regionKey(S.region), S.ci, #list))
+  loadHere(true)
+  local ok, why = flyTo(tx, tz, loadHere)
+  if ok then
+    loadHere(true)
+    if not S.rstart then S.rstart = now() end
+    local sok, serr = scanChunk(ch.cx, ch.cz)
+    if not sok then
+      setStatus("error", serr)
+      waitOrder(20)
+      return
+    end
+    S.ci = S.ci + 1
+    if S.ci % 8 == 0 then checkpoint() else save() end
+  elseif why == "fuel" then
+    setStatus("error", "Out of fuel")
+    S.mapping = false
+    save()
+  elseif why == "unloaded" and (S.retry or 0) < 3 then
+    S.retry = (S.retry or 0) + 1   -- a neighbouring chunk that is not loaded yet: wait, load mine again, retry
+    os.sleep(1)
+    loadHere(true)
+  else
+    S.skipped = (S.skipped or 0) + 1
+    log(("Skipped chunk %d,%d (%s)"):format(ch.cx, ch.cz, why == "unloaded" and "chunk not loaded" or tostring(why)))
+    S.retry = nil
+    S.ci = S.ci + 1
+    save()
+  end
+  if ok then S.retry = nil end
+  saveMap(false)
+end
+
+local pushedAt = -100   -- last time the finished region was queued for sending again
+
 local function mapLoop()
   while true do
     refreshEnv()
@@ -718,59 +862,32 @@ local function mapLoop()
       S.mapping = false; save()
       if not atHome() then dockAndRefuel("Docked (told to)") end
     elseif order == "map" then
-      startPass()
+      if S.doneRegion then
+        setStatus("waiting", "Waiting for the Cartographer to take " .. regionKey(S.doneRegion))
+      elseif not S.region then startRegion()
+      else S.mapping = true; save() end   -- DOCK mid-region: MAP carries on with it
     end
 
-    if S.mapping then
-      local a = area()
-      local key = ("%d,%d,%d,%d,%d,%d"):format(a.x0, a.z0, a.x1, a.z1, E.STEP, E.STRIP)
-      if key ~= S.areaKey then startPass() end   -- area or spacing edited: start this pass over
-      local pts = waypoints(a)
-      S.wps = #pts
-      local wp = pts[S.wp]
-      if not wp then
-        S.mapping = false
-        S.pass = (S.pass or 0) + 1
-        save()
-        saveMap(true)
-        if dockAndRefuel("Map finished") then
-          setStatus("done", ("Pass %d done: %d chunks mapped"):format(S.pass, chunkCount()))
-        end
-      elseif not enoughFuelFor(wp.x, wp.z) then
-        if dockAndRefuel("Refuelling") then
-          if not enoughFuelFor(wp.x, wp.z) then
-            setStatus("waiting", "Waiting for fuel in my dock")
-            waitOrder(30)
-          end
-        else
-          waitOrder(30)
-        end
+    if S.doneRegion then
+      -- Handed over, or about to be: wait for region_ok (and say it again now and then)
+      if okRegion == regionKey(S.doneRegion) then forgetRegion()
       else
-        setStatus("mapping", ("Strip point %d/%d"):format(S.wp, #pts))
-        scanIfDue()
-        local ok, why = flyTo(wp.x, wp.z, scanIfDue)
-        if ok then
-          local sok, serr = scanAndSettle()
-          if not sok then
-            setStatus("error", serr)
-            waitOrder(20)
-          else
-            S.wp = S.wp + 1
-          end
-        elseif why == "fuel" then
-          setStatus("error", "Out of fuel")
-          S.mapping = false
-        else
-          S.skipped = (S.skipped or 0) + 1
-          log(("Skipped point %d (%s)"):format(S.wp, why == "unloaded" and "chunk not loaded" or why))
-          S.wp = S.wp + 1
+        if not atHome() then dockAndRefuel("Region done") end
+        if status ~= "waiting" then setStatus("waiting", "Waiting for the Cartographer to take " .. regionKey(S.doneRegion)) end
+        if os.clock() - pushedAt > 60 then
+          pushedAt = os.clock()
+          for k in pairs(chunks) do if inRegion(k, S.doneRegion) then dirtyKeys[k] = true end end
         end
-        save()
-        saveMap(false)
+        if atHome() and turtle.getFuelLevel() < math.min(E.FUEL_FULL, turtle.getFuelLimit()) then refuel() end
+        reportDock()
+        waitOrder(5)
       end
+    elseif S.mapping and S.region then
+      if S.ci > #regionChunks() then finishRegion()
+      else mapOneChunk() end
     else
       if atHome() then
-        if status ~= "done" and status ~= "error" then setStatus("docked", "Ready. MAP on the art wall (or M here)") end
+        if status ~= "done" and status ~= "error" then setStatus("docked", "Ready. MAP on the Cartographer (or M here)") end
         if turtle.getFuelLevel() < math.min(E.FUEL_FULL, turtle.getFuelLimit()) then refuel() end
         reportDock()
       elseif status ~= "error" then
@@ -806,6 +923,7 @@ local function boot()
     setStatus("error", "No Geo Scanner: equip one on a side")
   end
   bootFuel()
+  if core.chunk.restore() then log("Put my modem back on (a chunk swap was cut short).") end
   setStatus("starting", "Asking GPS where I am")
   while not findHeading() do
     setStatus("error", not gpsOk and "No GPS: I need the GPS towers"
@@ -826,6 +944,10 @@ local function boot()
     S.seq = S.seq or 0
     save()
     log(("Home set at %d %d %d, dock %s"):format(pos.x, pos.y, pos.z, type(d) == "number" and COMPASS[d] or d))
+  end
+  if S.region and not S.doneRegion then
+    S.ci = S.cp or 1   -- the map was saved at the checkpoint: carry on from there
+    S.chunky = core.chunk.have()
   end
   if S.mapping then
     setStatus("mapping", "Carrying on where I left off")
