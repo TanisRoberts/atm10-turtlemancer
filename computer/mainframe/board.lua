@@ -74,8 +74,16 @@ local function rows()
       or r.phase == "ext" and ("edge wall %s/%s"):format(tostring(r.ext), tostring(r.extTotal)) or tostring(r.phase or "idle")
     out[#out + 1] = { r.label or "Weaver", r.state, where .. ((r.msg and r.msg ~= "") and (". " .. r.msg) or ""), _G.WEAVER_SEEN }
   end
+  local cg = _G.CARTOGRAPHER
   local z = _G.CARTO
-  if z then
+  if cg then
+    -- One row for the map room: Seagull's state, and how much of the world the Cartographer holds
+    local sg = cg.seagull or {}
+    local pct = (sg.mapping and tonumber(sg.wps) and sg.wps > 0) and (" %d%%,"):format(math.floor(((sg.wp or 1) - 1) / sg.wps * 100)) or ""
+    out[#out + 1] = { cg.label or "Cartographer", sg.state or "no Seagull",
+      ("%s %d regions, %d chunks, fuel %s%s"):format(pct, tonumber(cg.regions) or 0, tonumber(cg.chunks) or 0,
+        tostring(sg.fuel or "?"), (sg.msg and sg.msg ~= "") and (". " .. sg.msg) or ""), _G.CARTOGRAPHER_SEEN }
+  elseif z then
     local pct = (z.mapping and tonumber(z.wps) and z.wps > 0) and (" %d%%,"):format(math.floor(((z.wp or 1) - 1) / z.wps * 100)) or ""
     out[#out + 1] = { z.label or "Seagull", z.state, ("%s %d chunks, fuel %s%s"):format(pct, tonumber(z.chunks) or 0,
       tostring(z.fuel), (z.msg and z.msg ~= "") and (". " .. z.msg) or ""), _G.CARTO_SEEN }

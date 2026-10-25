@@ -5,7 +5,8 @@
 --   _G.SMELTER / SMELTER_SEEN / SMELT_STATUS            (chat, status board)
 --   _G.FACTORY / FACTORY_SEEN                           (plastic factory: chat, alerts, status board)
 --   _G.NEURAL / NEURAL_SEEN                             (neural lab: chat, alerts, status board)
---   _G.CARTO / CARTO_SEEN                               (Seagull the cartographer: status board)
+--   _G.CARTO / CARTO_SEEN                               (Seagull's own report: status board, until a Cartographer exists)
+--   _G.CARTOGRAPHER / CARTOGRAPHER_SEEN                 (the Cartographer computer: regions held and Seagull's state)
 -- and passes smelting orders from chat (_G.SMELT_CMD) on to the smelter until it confirms.
 
 local BASE = "tanis-base"
@@ -30,6 +31,8 @@ while true do
       _G.NEURAL, _G.NEURAL_SEEN = msg, os.clock()
     elseif msg.type == "carto" then
       _G.CARTO, _G.CARTO_SEEN = msg, os.clock()
+    elseif msg.type == "cartographer" then
+      _G.CARTOGRAPHER, _G.CARTOGRAPHER_SEEN = msg, os.clock()
     end
   end
   -- Keep repeating a smelting order from chat until the smelter says it has it

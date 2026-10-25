@@ -1,4 +1,4 @@
--- cartographer.lua  --  Seagull, the map-painting turtle (CC:Tweaked + Advanced Peripherals, ATM10)
+-- seagull.lua  --  Seagull, the map-painting turtle (CC:Tweaked + Advanced Peripherals, ATM10)
 --
 -- Seagull zig-zags over the island a few blocks above the ground, scanning as he goes, and builds a
 -- height map of everything: land, trees, shallow and deep water. The art controller's World view
@@ -835,7 +835,7 @@ local function boot()
 end
 
 if not fs.exists("startup.lua") then
-  local f = fs.open("startup.lua", "w"); f.write('shell.run("cartographer")\n'); f.close()
+  local f = fs.open("startup.lua", "w"); f.write('shell.run("seagull")\n'); f.close()
 end
 
 local function main()

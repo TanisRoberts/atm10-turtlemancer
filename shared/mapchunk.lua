@@ -1,5 +1,5 @@
--- mapchunk.lua  --  the world map's storage format, shared by Seagull (the cartographer turtle) and the
--- art controller. Both get this same file, so they always agree.
+-- mapchunk.lua  --  the world map's storage format, shared by Seagull (the map-making turtle) and the
+-- Cartographer computer. Both get this same file, so they always agree.
 --
 -- The map is a set of 16x16 chunks (same grid as Minecraft's chunks), keyed "cx,cz".
 -- Each chunk is a 512-character string: 2 characters per column, columns in rows of x, z = 0..15.

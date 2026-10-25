@@ -158,8 +158,25 @@ function Env.build(world, c)
   function fs.getName(p) return norm(p):match("[^/]*$") end
   function fs.getDir(p) return norm(p):match("^(.*)/[^/]*$") or "" end
   function fs.getDrive() return "hdd" end
-  function fs.getFreeSpace() return 1e9 end
-  function fs.getCapacity() return 1e9 end
+  -- c.mounts = { disk = capacity bytes, ... } are floppies (a folder of their own with a size limit); anything else is the
+  -- computer's own 1,000,000 bytes (or c.hddCapacity)
+  local function mountOf(p)
+    p = norm(p)
+    local top = p:match("^[^/]+")
+    if top and c.mounts and c.mounts[top] then return top, c.mounts[top] end
+    return nil, c.hddCapacity or 1e9
+  end
+  local function usedIn(mount)
+    local n = 0
+    for f, d in pairs(c.files) do
+      local top = f:match("^[^/]+")
+      if (mount and top == mount) or (not mount and not (c.mounts and c.mounts[top or ""])) then n = n + #d end
+    end
+    return n
+  end
+  env._usedIn, env._mountOf = usedIn, mountOf
+  function fs.getFreeSpace(p) local m, cap = mountOf(p or ""); return math.max(0, cap - usedIn(m)) end
+  function fs.getCapacity(p) local _, cap = mountOf(p or ""); return cap end
   function fs.combine(a, ...) local p = a; for _, b in ipairs({ ... }) do p = p .. "/" .. b end return norm(p) end
   function fs.getSize(p)
     local d = c.files[norm(p)]
@@ -266,7 +283,11 @@ function Env.build(world, c)
       local data = (m == "a" and c.files[path]) or ""
       c:writeFile(path, data)
       local h = {}
-      function h.write(s) data = data .. tostring(s); c.files[path] = data end
+      function h.write(s)
+        local m, cap = mountOf(path)
+        if usedIn(m) - #(c.files[path] or "") + #data + #tostring(s) > cap then error("Out of space", 2) end
+        data = data .. tostring(s); c.files[path] = data
+      end
       function h.writeLine(s) h.write(tostring(s) .. "\n") end
       function h.flush() end
       function h.close() end

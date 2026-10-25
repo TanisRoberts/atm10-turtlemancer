@@ -26,7 +26,7 @@ local M = {
       name = "Computer",
       about = "A computer that sits at the base",
       details = "The base's brains: storage, smelting, the mainframe, the Foreman, the MD and Nether Foremans, the Farmhand, the Architect, the Operator, GPS, the plastic factory, the neural lab and the art wall.",
-      order = { "mainframe", "storage", "smelter", "foreman", "mdforeman", "nether", "farmhand", "architect", "operator", "gps", "plastic", "neural", "art" },
+      order = { "mainframe", "storage", "smelter", "foreman", "mdforeman", "nether", "farmhand", "architect", "operator", "gps", "plastic", "neural", "art", "cartographer" },
       roles = {
         mainframe = {
           name = "Mainframe",
@@ -160,13 +160,26 @@ local M = {
         },
         art = {
           name = "Art controller",
-          about = "Monitor wall: turtle map, world map, art",
+          about = "Monitor wall: turtle map, art",
           details = "Shows off the island on an advanced monitor wall: every turtle live by height, "
-            .. "the GPS pylons, Seagull's world map, and generative art you can poke. Three bars in "
+            .. "the GPS pylons, and generative art you can poke. Three bars in "
             .. "the bottom-right corner switch screens. Needs an ender modem and an advanced monitor.",
           run = "art",
-          files = { "computer/art/art.lua", "computer/art/art_gfx.lua", "computer/art/art_scenes.lua",
-                    "shared/mapchunk.lua" },
+          files = { "computer/art/art.lua", "computer/art/art_gfx.lua", "computer/art/art_scenes.lua" },
+        },
+        cartographer = {
+          name = "Cartographer",
+          about = "Holds the world map and draws it on its floor",
+          details = "Keeps the whole world map Seagull finds, region by region, on its own disk (and on floppies in "
+            .. "disk drives when that fills), and draws it on a big advanced monitor laid flat as a floor: pan, "
+            .. "zoom, the region Seagull is scanning, the next one. Its own screen has Seagull's panel, storage "
+            .. "and the controls. Needs an ender modem and an advanced monitor; disk drives are optional.",
+          run = "cartographer",
+          files = { "computer/cartographer/cartographer.lua", "computer/cartographer/carto_store.lua",
+                    "computer/cartographer/carto_paint.lua", "computer/cartographer/carto_floor.lua",
+                    "computer/cartographer/carto_screen.lua", "computer/art/art_gfx.lua", "shared/mapchunk.lua",
+                    "shared/envfile.lua", "shared/slash.lua", "shared/ui.lua", "shared/ui_widgets.lua",
+                    "shared/ui_parts.lua", "shared/ui_motion.lua" },
         },
       },
     },
@@ -202,11 +215,11 @@ local M = {
                    details = "Harvests and replants crops, hoes new soil, drops produce at its dock. "
                      .. "Hoe + wireless or ender modem; GPS makes it unlosable. Run from the Farmhand.",
                    files = { "turtle/partridge/farmer.lua", "shared/farmbot.lua" } },
-        seagull = { name = "Seagull", about = "Cartographer: maps the island", run = "cartographer",
-                   details = "Zig-zags over the island with a Geo Scanner and paints the world map on "
-                     .. "the art wall. Geo Scanner + ender modem, no pickaxe. Needs GPS and a fuel dock "
+        seagull = { name = "Seagull", about = "Maps the world for the Cartographer", run = "seagull",
+                   details = "Zig-zags over the island with a Geo Scanner and sends the world map to "
+                     .. "the Cartographer computer. Geo Scanner + ender modem, no pickaxe. Needs GPS and a fuel dock "
                      .. "with open sky above it.",
-                   files = { "turtle/seagull/cartographer.lua", "shared/mapchunk.lua" } },
+                   files = { "turtle/seagull/seagull.lua", "shared/mapchunk.lua" } },
         bowerbird = { name = "Bowerbird", about = "Crafts matrices for the neural lab", run = "crafter",
                    details = "Keeps storage stocked with prediction matrices (iron, gold, glass panes, "
                      .. "clay). Crafty turtle + wireless or ender modem, parked at a dock barrel that "

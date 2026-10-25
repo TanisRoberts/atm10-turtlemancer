@@ -8,27 +8,24 @@
 --               from Y_MIN to Y_MAX, key on the right), with a trail of where it's been. The GPS
 --               pylons are the red crosses. Tap a turtle for its details; tap anywhere else to
 --               move the map there; - / + zoom; FIT follows everything again.
---   World map   the height map Seagull (the cartographer turtle) paints as he flies: land coloured
---               by height, trees, shallow and deep water. Turtles in magenta, pylons red, Seagull's
---               scan square in white. MAP sends Seagull off on a new pass, DOCK calls him home.
 --   Plasma, Rings, Aurora   generative art. Tap it to send a ripple out from your finger.
 --
--- Settings: art.env (made on first run; edit live). Map copy: art.map (Seagull keeps the master).
--- Terminal keys: 1-5 switch screens, Q stops (and puts the monitor's colours back).
+-- The world map lives on the Cartographer computer (computer/cartographer), not here.
+--
+-- Settings: art.env (made on first run; edit live).
+-- Terminal keys: 1-4 switch screens, Q stops (and puts the monitor's colours back).
 
 local G = dofile("art_gfx.lua")
 local Scenes = dofile("art_scenes.lua")
-local mc = dofile("mapchunk.lua")
 
 local ENV_FILE = "art.env"
-local MAP_FILE = "art.map"
 local CARTO    = "tanis-carto"
 
 local DEFAULTS = {
-  { "DEFAULT_VIEW", "turtles", "Screen to show at start and to go back to when nobody touches it: turtles, world, plasma, rings, aurora." },
+  { "DEFAULT_VIEW", "turtles", "Screen to show at start and to go back to when nobody touches it: turtles, plasma, rings, aurora." },
   { "IDLE_RETURN", 300, "Seconds without a tap before it goes back to DEFAULT_VIEW. 0 = never." },
   { "CYCLE", 0, "Seconds per screen when nobody touches it: it rotates through every screen. 0 = off." },
-  { "FPS", 8, "Frames per second for the art (the maps update once a second)." },
+  { "FPS", 8, "Frames per second for the art (the turtle map updates once a second)." },
   { "ART_SPEED", 1, "Colour flow speed for the art (1 = normal)." },
   { "RESEED", 10, "Minutes without a tap before an art screen draws a new pattern. 0 = never." },
   { "Y_MIN", -64, "Turtle map: bottom of the height colours." },
@@ -89,7 +86,7 @@ local function refreshEnv()
 end
 
 ---------------------------------------------------------------------------
--- Long jobs (a full repaint, loading a big map) call breathe() now and then: CC stops a program
+-- Long jobs (a full repaint) call breathe() now and then: CC stops a program
 -- that runs too long without yielding. It yields briefly, and if the screen's frame timer fires
 -- meanwhile it notes that (frameTimer = nil) so the screen loop starts a new one.
 ---------------------------------------------------------------------------
@@ -107,16 +104,10 @@ local function breathe()
 end
 
 ---------------------------------------------------------------------------
--- What we know: turtles, pylons, Seagull, the map
+-- What we know: turtles, pylons
 ---------------------------------------------------------------------------
 local turtles = {}        -- [id] = { id, label, role, state, msg, pos, seen, trail, fuel }
 local pylons = {}         -- [key] = { x, y, z, seen }
-local zig, zigId, zigSeen = nil, nil, nil
-local chunks = mc.load(MAP_FILE)
-local mapDirty, mapSavedAt = false, os.clock()
-local changedChunks = {}  -- keys changed since the world view last drew them
-local zigCmd = nil        -- { want, seq, until }
-local cmdSeq = math.floor(os.epoch("utc") / 1000) % 100000
 
 local function short(label, id)
   local s = tostring(label or ("#" .. id))
@@ -153,50 +144,6 @@ local function liveTurtles()
   end
   table.sort(out, function(a, b) return a.id < b.id end)
   return out
-end
-
--- Land height range over the whole map (for the World map colours), rounded out to 4s
-local landMin, landMax = nil, nil
-local function scanLandRange()
-  local lo, hi = nil, nil
-  for _, c in pairs(chunks) do
-    breathe()
-    local arr = mc.toArray(c.data)
-    for n = 1, 256 do
-      local y, kind = mc.unpack(arr[n])
-      if y and kind == mc.LAND then
-        if not lo or y < lo then lo = y end
-        if not hi or y > hi then hi = y end
-      end
-    end
-  end
-  if lo then
-    landMin, landMax = math.floor(lo / 4) * 4, math.ceil((hi + 1) / 4) * 4
-  end
-end
-
-local function absorbChunks(list)
-  local grew = false
-  for k, c in pairs(list or {}) do
-    if type(c) == "table" and mc.valid(c.data) and mc.parseKey(k) then
-      local old = chunks[k]
-      if not old or (tonumber(c.rev) or 0) > (old.rev or 0) then
-        local data = old and mc.merge(old.data, c.data) or c.data
-        chunks[k] = { rev = tonumber(c.rev) or 0, data = data }
-        changedChunks[k] = true
-        mapDirty = true
-        local arr = mc.toArray(data)
-        for n = 1, 256 do
-          local y, kind = mc.unpack(arr[n])
-          if y and kind == mc.LAND then
-            if not landMin or y < landMin then landMin = math.floor(y / 4) * 4; grew = true end
-            if not landMax or y >= landMax then landMax = math.ceil((y + 1) / 4) * 4; grew = true end
-          end
-        end
-      end
-    end
-  end
-  return grew
 end
 
 ---------------------------------------------------------------------------
@@ -236,7 +183,6 @@ end
 ---------------------------------------------------------------------------
 local VIEWS = {
   { id = "turtles", label = "Turtle map" },
-  { id = "world",   label = "World map" },
   { id = "plasma",  label = "Art: Plasma" },
   { id = "rings",   label = "Art: Rings" },
   { id = "aurora",  label = "Art: Aurora" },
@@ -589,222 +535,6 @@ local function TurtleView()
 end
 
 ---------------------------------------------------------------------------
--- World map
----------------------------------------------------------------------------
-local W_DEEP, W_SHALLOW, W_TREE, W_LAND0, W_LANDS, W_TURTLE, W_WHITE, W_RED = 1, 2, 3, 4, 9, 13, 14, 15
-local LAND_COLS = { 0xe0d49a, 0xa8d070, 0x7cc35a, 0x5aa646, 0x7d9a4a, 0x9a8a5a, 0x8a7258, 0x9a9a9a, 0xd0d0d0 }
-local function worldPalette()
-  local pal = { [1] = 0x000000, [2] = 0x123a8a, [3] = 0x2f7fd0, [4] = 0x2a5e26,
-                [14] = 0xff40ff, [15] = 0xffffff, [16] = 0xff2424 }
-  for i = 1, W_LANDS do pal[W_LAND0 + i] = LAND_COLS[i] end
-  return pal
-end
-
-local function landBand(y)
-  if not landMin then return W_LAND0 end
-  local f = (y - landMin) / math.max(1, landMax - landMin)
-  return W_LAND0 + math.max(0, math.min(W_LANDS - 1, math.floor(f * W_LANDS)))
-end
-
-local function WorldView()
-  local o = { ui = { fg = W_WHITE, bg = 0, hi = W_SHALLOW, btn = W_DEEP } }
-  local V = newViewport()
-  local hits = {}
-  local lastDraw, lastArea = -100, nil
-  local cache = {}          -- [key] = array of colour per column
-  local bandAt = { landMin, landMax }
-  local needFull = true
-
-  local function colourArray(key)
-    local a = cache[key]
-    if a then return a end
-    local c = chunks[key]
-    if not c then return nil end
-    a = {}
-    local arr = mc.toArray(c.data)
-    for n = 1, 256 do
-      local y, kind = mc.unpack(arr[n])
-      if not y then a[n] = 0
-      elseif kind == mc.DEEP then a[n] = W_DEEP
-      elseif kind == mc.SHALLOW then a[n] = W_SHALLOW
-      elseif kind == mc.FOLIAGE then a[n] = W_TREE
-      else a[n] = landBand(y) end
-    end
-    cache[key] = a
-    return a
-  end
-
-  local function paint(px0, py0, px1, py1)
-    px0, py0 = math.max(1, px0), math.max(1, py0)
-    px1, py1 = math.min(gfx.PW, px1), math.min(gfx.PH, py1)
-    for py = py0, py1 do
-      if py % 16 == 0 then breathe() end
-      local wz = math.floor(V.cz + (py - 0.5 - gfx.PH / 2) * V.s)
-      local ccz = math.floor(wz / 16)
-      local lz = wz - ccz * 16
-      local lastCcx, arr = nil, nil
-      for px = px0, px1 do
-        local wx = math.floor(V.cx + (px - 0.5 - gfx.PW / 2) * V.s)
-        local ccx = math.floor(wx / 16)
-        if ccx ~= lastCcx then arr = colourArray(ccx .. "," .. ccz); lastCcx = ccx end
-        local col = arr and arr[lz * 16 + (wx - ccx * 16) + 1] or 0
-        gfx.setPixel(px, py, col)
-      end
-    end
-  end
-
-  local function areaBox()
-    if zig and type(zig.area) == "table" and tonumber(zig.area.x0) then
-      return zig.area.x0, zig.area.z0, zig.area.x1, zig.area.z1
-    end
-    local x0, z0, x1, z1
-    for k in pairs(chunks) do
-      local cx, cz = mc.parseKey(k)
-      x0, x1 = math.min(x0 or cx, cx), math.max(x1 or cx, cx)
-      z0, z1 = math.min(z0 or cz, cz), math.max(z1 or cz, cz)
-    end
-    if not x0 then return nil end
-    return x0 * 16, z0 * 16, x1 * 16 + 15, z1 * 16 + 15
-  end
-
-  local function fit()
-    local x0, z0, x1, z1 = areaBox()
-    if x0 then fitTo(V, x0, z0, x1, z1, true) else V.cx, V.cz, V.s = 0, 0, 1 end
-  end
-
-  local function overlay()
-    local px, cells, used = {}, {}, {}
-    for _, p in pairs(pylons) do
-      local x, y = w2p(V, p.x, p.z)
-      plus(px, x, y, W_RED)
-    end
-    -- Seagull's scan square
-    if zig and type(zig.scan) == "table" and tonumber(zig.scan.x) and zig.state == "mapping" then
-      local r = tonumber(zig.scan.r) or 8
-      local x0, y0 = w2p(V, zig.scan.x - r, zig.scan.z - r)
-      local x1, y1 = w2p(V, zig.scan.x + r, zig.scan.z + r)
-      for x = x0, x1 do
-        for _, y in ipairs({ y0, y1 }) do local i = gfx.pixelIndex(x, y); if i then px[i] = W_WHITE end end
-      end
-      for y = y0, y1 do
-        for _, x in ipairs({ x0, x1 }) do local i = gfx.pixelIndex(x, y); if i then px[i] = W_WHITE end end
-      end
-    end
-    for _, t in ipairs(liveTurtles()) do
-      local x, y = w2p(V, t.pos.x, t.pos.z)
-      blob(px, x, y, W_TURTLE)
-      placeLabel(cells, used, x, y, short(t.label, t.id), W_WHITE, 0)
-    end
-    gfx.setOverlay(px)
-    gfx.setLayer("labels", cells)
-
-    -- Title + Seagull's news
-    local tc = {}
-    local n = 0
-    for _ in pairs(chunks) do n = n + 1 end
-    gfx.text(tc, 2, 1, ("WORLD MAP  %d chunks mapped"):format(n), W_WHITE, 0)
-    local line
-    if not zig then line = "No cartographer heard yet. Set up a Seagull turtle."
-    else
-      local pct = (tonumber(zig.wps) and zig.wps > 0 and zig.mapping) and
-        (" %d%%"):format(math.floor(((zig.wp or 1) - 1) / zig.wps * 100)) or ""
-      line = ("%s: %s%s. %s. Fuel %s"):format(short(zig.label, zigId), tostring(zig.state or "?"), pct,
-        tostring(zig.msg or ""), tostring(zig.fuel or "?"))
-      if os.clock() - (zigSeen or 0) > E.STALE then line = line .. " (quiet " .. ago(zigSeen) .. ")" end
-      if zigCmd then line = line .. "  -> " .. zigCmd.want:upper() .. " sent" end
-    end
-    gfx.text(tc, 2, 2, line:sub(1, gfx.W - 12), W_WHITE, 0)
-    gfx.setLayer("title", tc)
-
-    -- Key
-    local lc = {}
-    local x = gfx.W - 10
-    local _, by = burgerGeom()
-    local rows = { { W_DEEP, "deep" }, { W_SHALLOW, "shallow" }, { W_TREE, "trees" } }
-    if landMin then
-      for i = W_LANDS, 1, -1 do
-        rows[#rows + 1] = { W_LAND0 + i - 1, tostring(math.floor(landMin + (i - 1) * (landMax - landMin) / W_LANDS)) .. "+" }
-      end
-    end
-    rows[#rows + 1] = { W_TURTLE, "turtle" }
-    rows[#rows + 1] = { W_RED, "pylon" }
-    if #rows + 3 < by then
-      for i, r in ipairs(rows) do
-        gfx.box(lc, x, 2 + i, 2, 1, r[1])
-        gfx.text(lc, x + 3, 2 + i, r[2], W_WHITE, 0)
-      end
-    end
-    gfx.setLayer("legend", lc)
-
-    -- Buttons
-    local bc = {}
-    local bh = gfx.H >= 30 and 3 or 1
-    local list = { { id = "out", label = " - " }, { id = "in", label = " + " }, { id = "fit", label = "FIT", on = V.auto } }
-    if zigId then
-      list[#list + 1] = { id = "map", label = "MAP" }
-      list[#list + 1] = { id = "dock", label = "DOCK" }
-    end
-    hits = buttonRow(bc, 2, gfx.H - bh, list, o.ui, bh)
-    gfx.setLayer("buttons", bc)
-  end
-
-  function o.enter()
-    gfx.setPalette(worldPalette())
-    if V.auto then fit() end
-    needFull = true
-    lastDraw = -100
-  end
-
-  function o.step()
-    if os.clock() - lastDraw < 1 then return end
-    lastDraw = os.clock()
-    for k in pairs(changedChunks) do cache[k] = nil end
-    if bandAt[1] ~= landMin or bandAt[2] ~= landMax then
-      bandAt = { landMin, landMax }
-      cache = {}
-      needFull = true
-    end
-    if V.auto then
-      local x0, z0, x1, z1 = areaBox()
-      local key = x0 and ("%d,%d,%d,%d"):format(x0, z0, x1, z1)
-      if key ~= lastArea then lastArea = key; fit(); needFull = true end
-    end
-    if needFull then
-      needFull = false
-      changedChunks = {}
-      paint(1, 1, gfx.PW, gfx.PH)
-    else
-      for k in pairs(changedChunks) do
-        local cx, cz = mc.parseKey(k)
-        local x0, y0 = w2p(V, cx * 16, cz * 16)
-        local x1, y1 = w2p(V, cx * 16 + 15, cz * 16 + 15)
-        paint(x0 - 1, y0 - 1, x1 + 1, y1 + 1)
-      end
-      changedChunks = {}
-    end
-    overlay()
-  end
-
-  function o.tap(cx, cy)
-    local id = hitTest(hits, cx, cy)
-    if id == "in" then V.s = zoomStep(V.s, -1); V.auto = false; needFull = true
-    elseif id == "out" then V.s = zoomStep(V.s, 1); V.auto = false; needFull = true
-    elseif id == "fit" then V.auto = true; fit(); needFull = true
-    elseif id == "map" or id == "dock" then
-      cmdSeq = cmdSeq + 1
-      zigCmd = { want = id, seq = cmdSeq, untilT = os.clock() + 30, sentAt = -100 }
-    else
-      V.cx, V.cz = p2w(V, cx * 2 - 0.5, cy * 3 - 1)
-      V.auto = false
-      needFull = true
-    end
-    lastDraw = -100
-  end
-
-  return o
-end
-
----------------------------------------------------------------------------
 -- Art screens
 ---------------------------------------------------------------------------
 local function ArtView(name)
@@ -831,13 +561,12 @@ local lastTouch, lastSwitch = os.clock(), os.clock()
 
 local function makeView(id)
   if id == "turtles" then return TurtleView()
-  elseif id == "world" then return WorldView()
   else return ArtView(id) end
 end
 
 local function switchTo(id)
   if not VIEW_INDEX[id] then id = "turtles" end
-  if not viewObjs[id] or (id ~= "turtles" and id ~= "world") then viewObjs[id] = makeView(id) end
+  if not viewObjs[id] or id ~= "turtles" then viewObjs[id] = makeView(id) end
   current, currentId = viewObjs[id], id
   lastSwitch = os.clock()
   clearLayers()
@@ -863,17 +592,13 @@ local function showStatus()
   if term.isColour() then term.setTextColour(colours.cyan) end
   print("ART CONTROLLER")
   term.setTextColour(colours.white)
-  local n = 0
-  for _ in pairs(chunks) do n = n + 1 end
   local np = 0
   for _ in pairs(pylons) do np = np + 1 end
   print(("Monitor: %s"):format(mon and (("%s, %dx%d px"):format(monName, gfx.PW, gfx.PH)) or "none touching me"))
   print(("Showing: %s"):format(tostring(currentId)))
   print(("Turtles on the map: %d   Pylons: %d"):format(#liveTurtles(), np))
-  print(("Map chunks: %d"):format(n))
-  print(("Seagull: %s"):format(zig and (tostring(zig.state) .. " " .. tostring(zig.msg or "")) or "not heard yet"))
   print("")
-  print("1 Turtles 2 World 3 Plasma 4 Rings 5 Aurora")
+  print("1 Turtles 2 Plasma 3 Rings 4 Aurora")
   print("Q = stop. Settings: art.env")
   if status.err then
     term.setTextColour(colours.red); print(status.err:sub(1, w * 3)); term.setTextColour(colours.white)
@@ -952,44 +677,14 @@ local function netLoop()
     status.err = "No ender/wireless modem: I can't hear the turtles."
     return os.pullEvent("never")
   end
-  local lastSync, syncMore = -1000, false
   while true do
     local from, msg, proto = rednet.receive(nil, 0.5)
     if type(msg) == "table" and from then
       if proto == "tanis-miner" and msg.type == "status" then noteTurtle(from, msg, "canary")
       elseif proto == "tanis-farm" and msg.type == "status" then noteTurtle(from, msg, msg.role)
       elseif proto == "tanis-rigger" and msg.type == "status" then noteTurtle(from, msg, "weaver")
-      elseif proto == CARTO then
-        if msg.type == "status" then
-          local first = zigId == nil
-          zig, zigId, zigSeen = msg, from, os.clock()
-          noteTurtle(from, msg, "seagull")
-          if first then lastSync = -1000 end
-          if zigCmd and msg.seq == zigCmd.seq then zigCmd = nil end
-        elseif msg.type == "chunks" and type(msg.chunks) == "table" then
-          absorbChunks(msg.chunks)
-          if from == zigId and msg.more then syncMore = true end
-        end
+      elseif proto == CARTO and msg.type == "status" then noteTurtle(from, msg, "seagull")
       end
-    end
-    -- Catch up with Seagull's map (on start, then every few minutes, faster while he has more)
-    if zigId and (os.clock() - lastSync > 180 or (syncMore and os.clock() - lastSync > 0.5)) then
-      local revs = {}
-      for k, c in pairs(chunks) do revs[k] = c.rev end
-      rednet.send(zigId, { type = "have", to = zigId, revs = revs }, CARTO)
-      lastSync, syncMore = os.clock(), false
-    end
-    -- Orders for Seagull: repeat until his status shows he took it
-    if zigCmd then
-      if os.clock() > zigCmd.untilT then zigCmd = nil
-      elseif os.clock() - zigCmd.sentAt > 2 and zigId then
-        rednet.send(zigId, { type = "cmd", to = zigId, want = zigCmd.want, seq = zigCmd.seq }, CARTO)
-        zigCmd.sentAt = os.clock()
-      end
-    end
-    if mapDirty and os.clock() - mapSavedAt > 60 then
-      mc.save(MAP_FILE, chunks)
-      mapDirty, mapSavedAt = false, os.clock()
     end
   end
 end
@@ -1026,7 +721,6 @@ end
 -- Start
 ---------------------------------------------------------------------------
 readEnv()
-scanLandRange()
 math.randomseed(os.epoch("utc"))
 term.clear()
 findMonitor()
@@ -1045,6 +739,5 @@ if gfx then
   gfx.resetPalette()
   mon.setBackgroundColour(colours.black); mon.clear()
 end
-if mapDirty then mc.save(MAP_FILE, chunks) end
 term.clear(); term.setCursorPos(1, 1)
 print("Art controller stopped. Reboot (Ctrl+R) to start again.")

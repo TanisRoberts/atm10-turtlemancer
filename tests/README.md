@@ -64,6 +64,7 @@ Handy calls:
 - **Turtles:** `w:turtle{id=, x=, y=, z=, facing=0..3 (N,E,S,W), fuel=, left=, right=, items={[slot]={name,count}}}`.
   World blocks: `w:setBlock(x,y,z,"minecraft:stone", inv?)`, `w:fill(x1,y1,z1,x2,y2,z2,block)`, `w:getBlock`, `w:count(name, box)`.
   `w.gpsOn = true` makes `gps.locate()` answer with the true position.
+- **Disks:** `c.mounts = { disk = 125000 }` (and `c.dirs.disk = true`) gives a computer a floppy folder with a size limit; `c.hddCapacity` caps the computer's own disk (writes past it raise "Out of space").
 - **Inventories:** `cc.Inv.new{size=, types=, slotLimit=}`, `inv:give(name, n)`, `inv:count(name)`, `inv:totals()`, `w:furnace{speed=}`.
 - **Time/events:** `w:at(t, fn)` and `w:after(dt, fn)` run a callback at a virtual time (to unplug a modem, drop in an item, ...);
   `net:add / net:remove` while running raises the `peripheral` / `peripheral_detach` events.

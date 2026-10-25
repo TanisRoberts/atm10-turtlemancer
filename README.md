@@ -25,12 +25,13 @@ ComputerCraft (CC:Tweaked + Advanced Peripherals) scripts for Tanis's ATM10 isla
 | Computer | GPS host | `gps_host` | One of 4 GPS towers so turtles know their exact X/Y/Z |
 | Computer | Plastic factory | `plastic` | Industrial Foregoing plastic line: tree taps -> Latex Processing Unit -> furnace -> dock barrel (`plastic.env`) |
 | Computer | Neural lab | `neural` | Hostile Neural Networks wall: runs each chamber + fab column until storage has enough of what it makes (`neural.txt`, `neural.env`) |
-| Computer | Art controller | `art` | Monitor wall: live turtle map coloured by height, GPS pylons, Seagull's world map, generative art you can poke (`art.env`) |
+| Computer | Art controller | `art` | Monitor wall: live turtle map coloured by height, GPS pylons, generative art you can poke (`art.env`) |
+| Computer | Cartographer | `cartographer` | Holds the whole world map Seagull finds and draws it on a floor-size monitor, with its own panel and floppy spill-over (`cartographer.env`, `docs/systems/cartographer.md`) |
 | Turtle | Miner | `miner` | One miner, named by the dimension he's set up in. **Canary** (anywhere but the Nether/End): shaft + expanding squares, `junk.txt`, dump + fuel barrels, numbered Canary-01... by the Foreman. **Firecrest** (Nether): one dock barrel, drinks lava with his bucket (under 25% until 75%), numbered by the Nether Foreman. **Starling** (End): a Canary in the End. All of them empty chests before digging them and never dig turtles, cables, barrels or hoppers |
 | Turtle | Weaver | `weaver` | Builds from a plan file (`mossy.plan`, put on him by hand: it's big); run from the Architect or `island weaver ...` in chat. If storage runs out of a block he leaves a gap, builds everything else he can (never on top of a gap) and fills the gaps when the block turns up. A chunk controller in his bag keeps his own chunk loaded (same swap as the miners) |
 | Turtle | Woodpecker | `lumberjack` | Tree farm: maps a slab-ringed zone, plants a tree grid, chops and replants on a timer (`woodpecker.env`) |
 | Turtle | Partridge | `farmer` | Crop farm: harvests and replants any crop, hoes new soil, picks up what falls (`partridge.env`) |
-| Turtle | Seagull | `cartographer` | Flies over the island with a Geo Scanner and maps it for the art wall's World map (`seagull.env`) |
+| Turtle | Seagull | `seagull` | Flies over the island with a Geo Scanner and sends the map to the Cartographer (`seagull.env`) |
 | Glasses | HUD | `glasses` | Smart Glasses: night vision AUTO / ON / OFF, HUD stats (clock, coords + facing, inventory bar), aggro alerts (`glasses.env`) |
 
 Every role is defined in `manifest.lua`: its files live under `computer/<role>/`, `turtle/<role>/` or `glasses/<role>/`
@@ -128,7 +129,7 @@ A wall of **columns**, one per mob: a **Simulation Chamber** on top, **its Loot 
 - **Alerts** (mainframe): out of matrices, no power, chamber stuck or on Training, fab with no drop picked, dock full, no counts from storage. Chat: `island neural`, `island neural pause | go`.
 - **Tip:** level a model with the Deep Learner (kills) rather than Training mode (one matrix per run). With the mod's default numbers that's about 100 kills from blank to Self Aware.
 
-## The art wall (art controller + Seagull)
+## The art wall (art controller) and the map room (Cartographer + Seagull)
 
 **Art controller:** an advanced computer, an ender modem, and the biggest **advanced** monitor you can build touching it
 (an 8x6 wall = 328 x 243 pixels: every character cell is split into 2 x 3 little pixels). Tap the **three bars in the
@@ -139,30 +140,31 @@ bottom-right corner** to switch screens:
   The **GPS pylons are red crosses**: the wall asks the GPS towers where they are, so new pylons appear by themselves.
   Tap a turtle for its details, tap anywhere else to move the map there, **-** / **+** to zoom, **FIT** to follow everyone again.
   Turtles in the Nether or End aren't shown.
-- **World map:** Seagull's height map: land coloured by height (sand to green to rock to snow, scaled to your island),
-  trees, shallow and deep water, turtles in magenta, pylons red, and Seagull's scan square in white while he works.
-  **MAP** sends Seagull off on a new pass, **DOCK** calls him home.
 - **Art: Plasma, Rings, Aurora:** generative art. Tap to send a ripple out from your finger. A fresh pattern every
   time it's picked, and again after 10 minutes without a tap.
 - Goes back to the Turtle map after 5 minutes without a tap (`DEFAULT_VIEW`, `IDLE_RETURN`), or set `CYCLE=60` to
   rotate through every screen when nobody's touching it. Other settings in `art.env`: height bands, trail length, FPS.
-- Its terminal: `1`-`5` switch screens, `Q` stops it (the monitor's colours go back to normal).
+- Its terminal: `1`-`4` switch screens, `Q` stops it (the monitor's colours go back to normal).
 
-**Seagull (cartographer turtle):** a turtle with a **Geo Scanner** on one side and an **ender modem** on the other. No pickaxe:
+**Cartographer:** an advanced computer, an ender modem and a big advanced monitor laid flat as a floor. It keeps the
+whole world map (the World map used to live on the art wall) and draws it with pan and zoom; its own screen has Seagull's
+panel, the next region, storage and the MAP / DOCK buttons. Read `docs/systems/cartographer.md`.
+
+**Seagull (map-making turtle):** a turtle with a **Geo Scanner** on one side and an **ender modem** on the other. No pickaxe:
 he never digs, he flies over things. Needs the GPS towers.
 
 - **Dock:** a barrel touching him that storage keeps fuelled. On storage: `/assign` the barrel as a Dock, Keeps e.g. `coal 128`
   in it (fewer trips home than the default ~32). **Open sky above his dock spot**: he leaves and lands straight up and down.
 - First start: put him on his dock spot and start him. He finds the barrel, steps once to learn which way he faces, and waits.
-- Press **MAP** on the World map (or **M** on his screen). He covers the area in strips 16 blocks apart, `CLEARANCE` (3) blocks
-  above the ground, scanning every 8 blocks, and the wall paints each scan as it arrives. A full 328 x 243 pass is about an
+- Press **MAP** on the Cartographer (or **M** on his screen). He covers the area in strips 16 blocks apart, `CLEARANCE` (3) blocks
+  above the ground, scanning every 8 blocks, and the Cartographer draws each scan as it arrives. A full 328 x 243 pass is about an
   hour and ~6,500 fuel (80-ish coal). He goes home for fuel when he needs to, and docks when done. **D** on his screen = dock.
 - Area: centred on his dock, 328 x 243 (fills an 8x6 wall at 1 block per pixel). Change `CENTRE_X`, `CENTRE_Z`, `WIDTH`,
   `DEPTH` in `seagull.env`; he starts the pass again if you change the area mid-way.
 - **Chunks:** he only works where chunks are loaded (near a player, or force-loaded). Spots outside are skipped, not fatal:
   run another pass later with someone over there. Restarted or reloaded mid-pass? He asks GPS where he is and carries on.
-- The wall keeps its own copy of the map (`art.map`) and catches up from Seagull's (`seagull.map`) whenever it starts.
-  On the mainframe's board he has his own row (state, % done, chunks, fuel).
+- The Cartographer keeps the map (`regions/` on its disk and floppies) and catches up from Seagull's (`seagull.map`)
+  whenever it starts. On the mainframe's board the Cartographer has one row (Seagull's state, regions held, fuel).
 
 ## Farm turtles and the Farmhand
 

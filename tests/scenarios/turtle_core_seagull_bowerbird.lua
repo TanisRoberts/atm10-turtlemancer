@@ -36,7 +36,7 @@ T.test("Seagull: drinks the lava bucket at his dock, hands the empty back, and r
   t:attach("right", cc.wireless{ ender = true })
   local s = storage(w)
   w:run(1)
-  t:run("cartographer"); w:run(30)
+  t:run("seagull"); w:run(30)
   T.eq(t.body.fuel >= 1900, true, "he drank both lava buckets at boot (fuel " .. tostring(t.body.fuel) .. ")")
   T.eq(dock:count("minecraft:lava_bucket"), 0)
   T.eq(dock:count("minecraft:bucket"), 2, "the empties are back in the dock")
