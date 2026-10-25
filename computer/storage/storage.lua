@@ -1160,15 +1160,23 @@ local function topUpDepots()
       local list = call(d, "list")
       local size = call(d, "size") or 0
       if list then
+        -- A depot holds an item id, so every variant (nbt) of it counts: books, damaged gear, potions
+        local variants, maxOfName = {}, 64
+        for _, e in ipairs(items) do
+          if e.name == name then variants[#variants + 1] = e; maxOfName = e.max end
+        end
         local used, room = 0, false
-        local max = (info[name] and info[name].max) or 64
         for _, it in pairs(list) do
           used = used + 1
+          local max = (info[keyOf(it)] and info[keyOf(it)].max) or maxOfName
           if it.name == name and it.count < max then room = true end
         end
         if used < size or room then
-          local moved = retrieve(name, byName[name], d)
-          if moved > 0 then changed = true; byName[name] = byName[name] - moved end
+          for _, e in ipairs(variants) do
+            local moved, full = retrieve(e.key, e.count, d)
+            if moved > 0 then changed = true; byName[name] = byName[name] - moved end
+            if full then break end
+          end
         end
       end
     end

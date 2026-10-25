@@ -6,7 +6,7 @@ Inv.__index = Inv
 -- Stack sizes. Everything else is 64.
 Inv.stack = {
   ["minecraft:bucket"] = 16, ["minecraft:ender_pearl"] = 16, ["minecraft:snowball"] = 16, ["minecraft:egg"] = 16,
-  ["minecraft:water_bucket"] = 1, ["minecraft:lava_bucket"] = 1, ["minecraft:milk_bucket"] = 1,
+  ["minecraft:enchanted_book"] = 1, ["minecraft:water_bucket"] = 1, ["minecraft:lava_bucket"] = 1, ["minecraft:milk_bucket"] = 1,
 }
 function Inv.stackOf(name)
   local s = Inv.stack[name]
@@ -45,7 +45,7 @@ function Inv:insert(name, count, toSlot, extra)
     local s = self.slots[i]
     local lim = self:limitFor(name)
     if s then
-      if s.name ~= name then return end
+      if s.name ~= name or s.nbt ~= (extra and extra.nbt) then return end
       local n = math.min(lim - s.count, count - put)
       if n > 0 then s.count = s.count + n; put = put + n end
     else
@@ -85,7 +85,7 @@ function Inv:list()
   local out = {}
   for i = 1, self.nslots do
     local s = self.slots[i]
-    if s then out[i] = { name = s.name, count = s.count } end
+    if s then out[i] = { name = s.name, count = s.count, nbt = s.nbt } end
   end
   return out
 end
@@ -94,7 +94,7 @@ function Inv:getItemDetail(slot)
   if slot < 1 or slot > self.nslots then error("Slot out of range", 2) end
   local s = self.slots[slot]
   if not s then return nil end
-  return { name = s.name, count = s.count, displayName = s.displayName, maxCount = self:limitFor(s.name), tags = {} }
+  return { name = s.name, count = s.count, displayName = s.displayName, nbt = s.nbt, maxCount = self:limitFor(s.name), tags = {} }
 end
 function Inv:getItemLimit(slot)
   if slot < 1 or slot > self.nslots then error("Slot out of range", 2) end
@@ -133,8 +133,8 @@ function Inv:pullItems(fromName, fromSlot, limit, toSlot)
 end
 
 -- test-side helpers (not peripheral methods)
-function Inv:give(name, count, slot)         -- returns what didn't fit
-  return count - self:insert(name, count, slot)
+function Inv:give(name, count, slot, extra)  -- extra = { nbt = "..." }; returns what didn't fit
+  return count - self:insert(name, count, slot, extra)
 end
 function Inv:count(name)
   self:touch()

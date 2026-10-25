@@ -202,3 +202,26 @@ T.test("storage: fluids held in the drawer network's fluid drawers are offered a
   T.eq(drawers.amount, 12000)
   T.running(c)
 end)
+
+T.test("storage: a depot set to an item id takes every nbt variant of it, until full", function()
+  local w, c, inv = base()
+  c:writeTable("storage.cfg", { inputs = { "minecraft:barrel_0" }, output = "minecraft:barrel_1",
+    depots = { ["minecraft:barrel_4"] = "minecraft:enchanted_book" } })
+  for i = 1, 10 do inv[0]:give("minecraft:enchanted_book", 1, nil, { nbt = "hash" .. i }) end
+  c:run("storage")
+  T.waitFor(w, function() return inv[4]:count("minecraft:enchanted_book") == 10 end, 60, "depot never took every variant")
+  T.running(c)
+end)
+
+T.test("storage: a depot of unstackable variants stops when full", function()
+  local w, c, inv = base()
+  c:writeTable("storage.cfg", { inputs = { "minecraft:barrel_0" }, output = "minecraft:barrel_1",
+    depots = { ["minecraft:barrel_4"] = "minecraft:enchanted_book" } })
+  for i = 1, 20 do inv[0]:give("minecraft:enchanted_book", 1, nil, { nbt = "hash" .. i }) end
+  for i = 1, 27 - 12 do inv[4]:give("minecraft:dirt", 64) end
+  c:run("storage")
+  T.waitFor(w, function() return inv[4]:count("minecraft:enchanted_book") == 12 end, 60, "depot never filled")
+  w:run(20)
+  T.eq(inv[4]:count("minecraft:enchanted_book"), 12)
+  T.running(c)
+end)
