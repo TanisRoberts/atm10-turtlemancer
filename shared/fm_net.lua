@@ -206,7 +206,7 @@ function workerLoop()
       workerBusy = true
       local ok, err = pcall(barrelPass)
       workerBusy = false
-      if not ok then say("Barrels: " .. tostring(err), K.red) end
+      if not ok and err ~= PAUSED then say("Barrels: " .. tostring(err), K.red) end
       if lastNote then say(lastNote, K.orange); lastNote = nil end
       draw()
     end

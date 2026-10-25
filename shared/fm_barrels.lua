@@ -76,7 +76,7 @@ end
 paused, workerBusy = false, false   -- paused: /assign is watching for a dropped item
 -- What the last pass saw: Stock by item, Output room, docks' item counts, every item name seen,
 -- lava waiting in Factory out, Factory in's and Overflow's slots
-barrel = { stock = {}, outFree = 0, outSlots = 0, outFull = false, docks = {}, seen = {}, factoryLava = 0,
+barrel = { stock = {}, outFree = 0, outSlots = 0, outFull = false, docks = {}, seen = {}, factoryLava = 0, errs = {}, bad = {},
            factoryIn = { used = 0, size = 0 }, overflow = { used = 0, size = 0, items = 0 } }
 requests = {}    -- dock requests waiting for the worker: { id, seq, bucket, fuel }
 holds = {}       -- dock name -> { id, untilT }: left alone while its miner takes his supplies
@@ -103,23 +103,33 @@ function scanStock()
 end
 
 -- Move up to `count` of (from, slot) into the given barrels: ones already holding the item first
+PAUSED = "paused"   -- error thrown to stop a barrel pass at once (/assign has opened)
 function pushInto(list, from, slot, item, count)
+  if paused then error(PAUSED, 0) end
   local moved = 0
   local firstPass, second = {}, {}
   for _, n in ipairs(list) do
-    local holds = false
-    for _, it in pairs(call(n, "list") or {}) do if it.name == item then holds = true; break end end
-    if holds then firstPass[#firstPass + 1] = n else second[#second + 1] = n end
+    if not barrel.bad[n] then
+      local holds = false
+      if #list > 1 then   -- (with one barrel there's nothing to choose: don't spend a tick reading it)
+        for _, it in pairs(call(n, "list") or {}) do if it.name == item then holds = true; break end end
+      end
+      if holds then firstPass[#firstPass + 1] = n else second[#second + 1] = n end
+    end
   end
   for _, group in ipairs({ firstPass, second }) do
     for _, n in ipairs(group) do
       if moved >= count then return moved end
       local m, err = call(from, "pushItems", n, slot, count - moved)
-      if not m and not barrel.moveErr then
-        -- Most likely the two aren't on ONE wired network (a second cable or modem, or a barrel
-        -- touching the computer instead of on the cable): the screen says so
-        barrel.moveErr = ("%s can't reach %s: are both on my cable? (%s)"):format((from:gsub("^.-:", "")),
+      if not m then
+        -- Most likely the two aren't on ONE wired network (a second cable or modem, or a barrel touching
+        -- the computer instead of on the cable). The screen says so, the whole error goes in fm_errors.txt,
+        -- and that barrel is left alone for the rest of this pass (each try costs a tick).
+        local line = ("%s can't reach %s: are both on my cable? (%s)"):format((from:gsub("^.-:", "")),
           (n:gsub("^.-:", "")), tostring(err))
+        barrel.moveErr = barrel.moveErr or line
+        barrel.errs[#barrel.errs + 1] = ("%s -> %s: %s"):format(from, n, tostring(err))
+        barrel.bad[n] = true
       end
       moved = moved + (m or 0)
     end
@@ -303,8 +313,19 @@ local function room(list)
 end
 
 lastNote = nil
+-- The full text of this pass's failed moves, for Tanis to read (edit fm_errors.txt)
+local function writeErrors()
+  if #barrel.errs == 0 then
+    if fs.exists("fm_errors.txt") then fs.delete("fm_errors.txt") end
+    return
+  end
+  local f = fs.open("fm_errors.txt", "w")
+  f.write("Moves that failed in the last barrel pass (from -> to: error):\n" .. table.concat(barrel.errs, "\n") .. "\n")
+  f.close()
+end
+
 function barrelPass()
-  barrel.outFull, barrel.moveErr = false, nil
+  barrel.outFull, barrel.moveErr, barrel.errs, barrel.bad = false, nil, {}, {}
   scanStock()
   while #requests > 0 do
     local r = table.remove(requests, 1)
@@ -319,6 +340,7 @@ function barrelPass()
     if not holds[d] then routeAll(d, true) end
   end
   trimStock()
+  writeErrors()
   -- Room, for the screens
   local used, slots = room(cfg.outputs)
   barrel.outFree, barrel.outSlots = slots - used, slots

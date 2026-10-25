@@ -256,3 +256,40 @@ T.test("md foreman: barrels on two separate cables can't swap items, and the scr
   T.contains(mon, "0 canaries  CAN'T MOVE")
   T.absent(mon, "OUTPUT FULL")
 end)
+
+T.test("md foreman: /assign answers at once even with full docks and barrels it can't reach; errors go to fm_errors.txt", function()
+  local w = cc.world()
+  local a, b = w:net("a"), w:net("b")
+  local docks = {}
+  for i = 0, 3 do
+    local d = a:add("minecraft:barrel_" .. i, MS.barrel())
+    for k = 1, 27 do d:give("minecraft:raw_iron", 64) end
+    docks[#docks + 1] = "minecraft:barrel_" .. i
+  end
+  b:add("minecraft:barrel_9", MS.barrel())                      -- the Output, out of reach
+  local c = w:computer{ id = 3, label = "MD Foreman" }
+  c:attach("back", cc.wired(a)); c:attach("left", cc.wired(b))
+  c:attach("top", cc.wireless{ ender = true })
+  c:installRole("mdforeman")
+  c:writeTable("mdforeman.cfg", { docks = docks, outputs = { "minecraft:barrel_9" }, imported = true })
+  c:run("mdforeman")
+  w:run(20)
+  T.contains(c:readFile("fm_errors.txt") or "", "minecraft:barrel_0 -> minecraft:barrel_9")
+  c:type("/assign"); c:key(257)
+  w:run(2)
+  T.contains(c.screen, "MD BARRELS")
+  local x, y = c.screen:find("barrel_1")
+  c:click(x, y); w:run(1)
+  local function button(text)   -- the buttons are on the second-last row
+    local row = c.screen.h - 1
+    return c.screen:line(row):find(text, 1, true), row
+  end
+  x, y = button("Delete"); c:click(x, y); w:run(1)
+  T.contains(c.screen, "Sure? Delete")
+  x, y = button("Sure? Delete"); c:click(x, y); w:run(2)
+  T.contains(c.screen, "has no job now")
+  x, y = c.screen:find("barrel_2"); c:click(x, y); w:run(1)
+  x, y = button("Cancel"); c:click(x, y); w:run(2)
+  T.contains(c.screen, "MD BARRELS", "back on the list, not stuck")
+  T.running(c)
+end)

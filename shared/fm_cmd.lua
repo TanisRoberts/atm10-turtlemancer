@@ -129,7 +129,7 @@ openAssign = function()
     say(("Barrels: type /assign on %s computer"):format(P.name), K.yellow)
     return
   end
-  assignRunning, uiBusy = true, true
+  assignRunning, uiBusy, paused = true, true, true   -- no barrel moves while /assign is open
   local ok, err = pcall(AUI.run, {
     title = P.short .. " BARRELS",
     hint = "Click one to change it.",
@@ -184,7 +184,7 @@ openAssign = function()
       save = function(n, st) cfg.dockFor[n] = st.id end,
     },
     hold = function() paused = true; while workerBusy do os.sleep(0.2) end end,
-    release = function() paused = false end,
+    release = function() paused = assignRunning end,
     beforeSave = function() while workerBusy do os.sleep(0.1) end end,
     afterSave = function() saveCfg(); if remoteChanged then remoteChanged() end end,
     itemTotals = itemTotals,
