@@ -15,6 +15,20 @@ return function(X)
     return r ~= nil and (r.item ~= nil or r.tag ~= nil or r.mod ~= nil or r.enchanted ~= nil)
   end
 
+  local function ticked(l, v)
+    for _, x in ipairs(l or {}) do if x == v then return true end end
+    return false
+  end
+
+  -- Values joined with ", ", cut to fit `width` with "+N" for the ones left out: "relics, artifacts, +1"
+  local function joined(l, width)
+    for k = #l, 1, -1 do
+      local t = table.concat(l, ", ", 1, k) .. (k < #l and (", +" .. (#l - k)) or "")
+      if #t <= width then return t end
+    end
+    return cut(l[1], width)
+  end
+
   local function nameOf(n) return X.names[n] or X.shortName(n) end
 
   -- Open the rule form for the depot being edited
@@ -54,7 +68,7 @@ return function(X)
     for i, f in ipairs(FIELDS) do
       local y, key = 3 + i, f[1]
       put(2, y, f[2], C.dim)
-      local txt = cut(r[key] or "any", w - 14)
+      local txt = r[key] and joined(r[key], w - 14) or "any"
       put(13, y, txt .. (" "):rep(w - 13 - #txt), r[key] and C.fg or C.dim, C.bar)
       region(13, w, y, function() st.rfield, st.page, st.filter, st.pg = key, "rpick", "", 1 end)
     end
@@ -89,13 +103,20 @@ return function(X)
     local f = st.rfield
     local dp = X.depotOf(e.key)
     local title = f == "item" and "ITEM" or f == "tag" and "TAG" or "MOD"
-    X.titleBar(" DEPOT " .. title, "pick one ")
+    local rows_ = e.rule[f] or {}
+    X.titleBar(" DEPOT " .. title, (#rows_ > 0 and ("%d ticked "):format(#rows_) or "tap to tick "))
     local q = st.filter:lower()
     local shown = {}
     local function add(label, right, value)
       if q == "" or label:lower():find(q, 1, true) then
-        shown[#shown + 1] = { label = label, right = right, pick = function()
-          e.rule[f] = value; st.page, st.filter, st.pg = "rule", "", 1
+        shown[#shown + 1] = { label = label, right = right, value = value, pick = function()
+          local l = e.rule[f] or {}
+          if ticked(l, value) then
+            for i, x in ipairs(l) do if x == value then table.remove(l, i); break end end
+          else
+            l[#l + 1] = value
+          end
+          e.rule[f] = #l > 0 and l or nil
         end }
       end
     end
@@ -107,7 +128,7 @@ return function(X)
       for _, m in ipairs(R.mods()) do add(m.mod, ("%d kinds  %s"):format(m.kinds, fmt(m.items)), m.mod) end
     end
     st.shown = shown
-    if #shown == 1 and st.filter ~= "" then X.line2("Enter (or click) picks " .. shown[1].label, C.good)
+    if #shown == 1 and st.filter ~= "" then X.line2("Enter (or click) ticks " .. shown[1].label, C.good)
     elseif f == "item" then X.line2("Items in storage, variants merged. Type to narrow it down.")
     else X.line2(title:sub(1, 1) .. title:sub(2):lower() .. "s on items in storage. Type to narrow it down.") end
     local top, rows = 3, math.max(1, h - 4)
@@ -118,16 +139,18 @@ return function(X)
       if not it then break end
       local y = top + i - 1
       local only = #shown == 1 and st.filter ~= ""
-      local bg = only and C.accent or (i % 2 == 0 and C.stripe or C.bg)
+      local on = ticked(e.rule[f], it.value)
+      local bg = (on or only) and C.accent or (i % 2 == 0 and C.stripe or C.bg)
+      local dark = on or only
       term.setCursorPos(1, y); term.setBackgroundColour(bg); term.clearLine()
-      put(2, y, cut(it.label, w - #it.right - 3), only and colours.black or C.fg, bg)
-      put(w - #it.right, y, it.right, only and colours.black or C.dim, bg)
+      put(2, y, cut(it.label, w - #it.right - 3), dark and colours.black or C.fg, bg)
+      put(w - #it.right, y, it.right, dark and colours.black or C.dim, bg)
       region(1, w, y, it.pick)
     end
-    local x = btn(2, h - 1, "Any", e.rule[f] == nil, function()
+    local x = btn(2, h - 1, "Done", true, function() st.page, st.filter, st.pg = "rule", "", 1 end, colours.lime)
+    x = btn(x, h - 1, "Any", e.rule[f] == nil, function()
       e.rule[f] = nil; st.page, st.filter, st.pg = "rule", "", 1
     end)
-    btn(x, h - 1, "Back", false, function() st.page, st.filter, st.pg = "rule", "", 1 end)
     X.searchBar()
   end
 
@@ -158,17 +181,19 @@ return function(X)
       return a.tag < b.tag
     end)
     st.like = { name = d.name, label = d.displayName or X.prettyName(d.name), enchanted = i.enchanted,
-      tags = tags, mod = R.modOf(d.name), ticks = { item = true } }
+      tags = tags, mod = R.modOf(d.name), ticks = { item = true, tags = {} } }
     st.page, st.filter, st.pg = "rlike", "", 1
   end
 
   local function likeRule()
     local l = st.like
     local r = {}
-    if l.ticks.item then r.item = l.name end
+    if l.ticks.item then r.item = { l.name } end
     if l.ticks.enchanted then r.enchanted = l.enchanted end
-    if l.ticks.mod then r.mod = l.mod end
-    r.tag = l.ticks.tag
+    if l.ticks.mod then r.mod = { l.mod } end
+    for _, t in ipairs(l.tags) do
+      if l.ticks.tags[t.tag] then r.tag = r.tag or {}; table.insert(r.tag, t.tag) end
+    end
     return r
   end
 
@@ -193,12 +218,12 @@ return function(X)
       function() l.ticks.enchanted = not l.ticks.enchanted or nil end)
     for i = 1, math.min(#l.tags, math.max(1, math.min(5, h - 15))) do
       local t = l.tags[i]
-      row("Tag", t.tag, t.items, l.ticks.tag == t.tag, function()
-        l.ticks.tag = l.ticks.tag ~= t.tag and t.tag or nil
+      row("Tag", t.tag, t.items, l.ticks.tags[t.tag], function()
+        l.ticks.tags[t.tag] = not l.ticks.tags[t.tag] or nil
       end)
     end
     row("Mod", l.mod, R.count({ mod = l.mod }).items, l.ticks.mod, function() l.ticks.mod = not l.ticks.mod or nil end)
-    put(2, y + 1, cut("Only one tag can be ticked: the form has one Tag row.", w - 2), C.dim)
+    put(2, y + 1, cut("Several tags can be ticked: any one of them matches.", w - 2), C.dim)
     local r = likeRule()
     if M.hasRule(r) then
       local res = R.preview(r, e.name)

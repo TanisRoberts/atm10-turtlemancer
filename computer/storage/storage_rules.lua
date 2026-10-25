@@ -2,8 +2,9 @@
 --   dofile("storage_rules.lua")({ cfg = function() return cfg end, info = info, items = function() return items end,
 --                                  nameOf = function(key) ... end })
 --
--- A depot holds a rule: { item=, tag=, mod=, enchanted=true|false|nil, priority=0, added=N }. All set
--- conditions must match. Each item variant goes to at most one depot, the winner:
+-- A depot holds a rule: { item={..}, tag={..}, mod={..}, enchanted=true|false|nil, priority=0, added=N }.
+-- Item, Tag and Mod each hold a list (a bare string is a list of one): a row matches when ANY of its values
+-- does. All set rows must match. Each item variant goes to at most one depot, the winner:
 --   1. most specific rule (Item 8 + Tag 4 + Mod 2 + Enchanted 1), 2. higher priority, 3. added first.
 -- Tags and enchantments are read once per variant (R.fill, from getItemDetail) and kept in `info`.
 -- docs/design/storage.md, "Depot rules".
@@ -13,18 +14,31 @@ return function(o)
 
   local WEIGHT = { item = 8, tag = 4, mod = 2, enchanted = 1 }
 
+  -- A string or a list of strings -> a clean list (no blanks or repeats), or nil when empty
+  local function list(v)
+    if type(v) == "string" then v = { v } end
+    if type(v) ~= "table" then return nil end
+    local out, seen = {}, {}
+    for _, x in ipairs(v) do
+      if type(x) == "string" and x ~= "" and not seen[x] then seen[x] = true; out[#out + 1] = x end
+    end
+    return #out > 0 and out or nil
+  end
+
+  local function has(l, x)
+    for _, v in ipairs(l) do if v == x then return true end end
+    return false
+  end
+
   -- A saved value -> a rule table, or nil for "not chosen yet" (""). Old values were a bare item id.
   function R.normalize(v)
     if type(v) == "string" then
       if v == "" then return nil end
-      return { item = v, priority = 0 }
+      return { item = { v }, priority = 0 }
     end
     if type(v) ~= "table" then return nil end
-    local r = { item = v.item, tag = v.tag, mod = v.mod, enchanted = v.enchanted,
+    local r = { item = list(v.item), tag = list(v.tag), mod = list(v.mod), enchanted = v.enchanted,
                 priority = tonumber(v.priority) or 0, added = v.added }
-    if r.item == "" then r.item = nil end
-    if r.tag == "" then r.tag = nil end
-    if r.mod == "" then r.mod = nil end
     if not (r.item or r.tag or r.mod or r.enchanted ~= nil) then return nil end
     return r
   end
@@ -82,12 +96,16 @@ return function(o)
 
   -- Does the rule match this variant? A variant whose tags are not known yet matches no tag/enchanted rule.
   function R.matches(r, key, name)
-    if r.item and r.item ~= name then return false end
-    if r.mod and r.mod ~= R.modOf(name) then return false end
+    if r.item and not has(r.item, name) then return false end
+    if r.mod and not has(r.mod, R.modOf(name)) then return false end
     if r.tag or r.enchanted ~= nil then
       local i = o.info[key]
       if not (i and i.tags) then return false end
-      if r.tag and not i.tags[r.tag] then return false end
+      if r.tag then
+        local any = false
+        for _, t in ipairs(r.tag) do if i.tags[t] then any = true; break end end
+        if not any then return false end
+      end
       if r.enchanted ~= nil and i.enchanted ~= r.enchanted then return false end
     end
     return true
@@ -206,14 +224,20 @@ return function(o)
     return out
   end
 
+  -- "a", "a or b", "a, b or c"
+  local function orList(l)
+    if #l == 1 then return l[1] end
+    return table.concat(l, ", ", 1, #l - 1) .. " or " .. l[#l]
+  end
+
   -- One line for a rule: "Tag c:enchantables, enchanted"
   function R.describe(rule)
     rule = R.normalize(rule)
     if not rule then return "nothing yet" end
     local p = {}
-    if rule.item then p[#p + 1] = "Item " .. rule.item end
-    if rule.tag then p[#p + 1] = "Tag " .. rule.tag end
-    if rule.mod then p[#p + 1] = "Mod " .. rule.mod end
+    if rule.item then p[#p + 1] = "Item " .. orList(rule.item) end
+    if rule.tag then p[#p + 1] = "Tag " .. orList(rule.tag) end
+    if rule.mod then p[#p + 1] = "Mod " .. orList(rule.mod) end
     if rule.enchanted ~= nil then p[#p + 1] = rule.enchanted and "enchanted" or "not enchanted" end
     return table.concat(p, ", ")
   end

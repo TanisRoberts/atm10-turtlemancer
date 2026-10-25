@@ -46,7 +46,8 @@ T.test("storage: /assign > Add > Depot > container > item > summary > Save, then
   T.contains(c.screen, "Bucket"); T.contains(c.screen, "Cobblestone")
   c:type("buck"); w:run(1)
   T.absent(c.screen, "Cobblestone")
-  c:key(257); w:run(1)                          -- back on the form with the item set
+  c:key(257); w:run(1)                          -- ticks the only match
+  tap(w, c, "Done")                             -- back on the form with the item set
   T.contains(c.screen, "minecraft:bucket")
   tap(w, c, "Next")
   T.contains(c.screen, "step 3 of 3")
@@ -54,7 +55,7 @@ T.test("storage: /assign > Add > Depot > container > item > summary > Save, then
   tap(w, c, " Save ")
   T.contains(c.screen, "Saved")
   local cfg = c:readTable("storage.cfg")
-  T.eq(cfg.depots["minecraft:barrel_4"].item, "minecraft:bucket")
+  T.eq(cfg.depots["minecraft:barrel_4"].item[1], "minecraft:bucket")
   c:click(12, select(2, c.screen:find("Done"))); w:run(1)
   T.waitFor(w, function() return inv[4]:count("minecraft:bucket") == 40 end, 60, "depot never filled")
   T.eq(inv[4]:count("minecraft:cobblestone"), 0)

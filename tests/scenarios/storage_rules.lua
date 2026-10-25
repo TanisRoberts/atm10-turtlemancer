@@ -130,3 +130,32 @@ T.test("storage rules: engine counts what a rule would win and lists tags and mo
   cfg.depots = { [B(3)] = { tag = "c:enchantables", priority = 3, added = 2 }, [B(4)] = { tag = "c:enchantables", priority = 3, added = 1 } }
   T.eq(R.winner("minecraft:iron_sword#p", "minecraft:iron_sword"), B(4), "equal priority: the depot added first")
 end)
+
+T.test("storage rules: a row holds several values and any of them matches; single strings still load", function()
+  local w, c, inv = base{
+    [B(3)] = { mod = { "relics", "artifacts" }, priority = 0, added = 1 },
+    [B(4)] = { item = "minecraft:cobblestone", priority = 0, added = 2 },     -- old single string
+  }
+  inv[0]:give("relics:ring", 2)
+  inv[0]:give("artifacts:hat", 3)
+  inv[0]:give("reliquified_artifacts:x", 4)
+  inv[0]:give("minecraft:cobblestone", 5)
+  c:run("storage")
+  T.waitFor(w, function() return inv[0]:isEmpty() end, 60)
+  w:run(10)
+  T.eq(inv[3]:count("relics:ring"), 2, "first mod")
+  T.eq(inv[3]:count("artifacts:hat"), 3, "second mod")
+  T.eq(inv[3]:count("reliquified_artifacts:x"), 0, "a mod not in the list stays in storage")
+  T.eq(inv[4]:count("minecraft:cobblestone"), 5, "old single-string rule still works")
+  T.running(c)
+end)
+
+T.test("storage rules: describe joins several values, normalize turns strings into lists", function()
+  local R = loadfile(cc.ROOT .. "/computer/storage/storage_rules.lua")()({
+    cfg = function() return { depots = {} } end, info = {}, items = function() return {} end })
+  T.eq(R.describe({ mod = { "relics", "artifacts", "reliquified_artifacts" } }), "Mod relics, artifacts or reliquified_artifacts")
+  T.eq(R.describe({ mod = { "a", "b" }, enchanted = true }), "Mod a or b, enchanted")
+  T.eq(R.normalize({ tag = "c:ores" }).tag[1], "c:ores")
+  T.eq(R.normalize("minecraft:dirt").item[1], "minecraft:dirt")
+  T.eq(R.score({ mod = { "a", "b", "c" } }), 2, "a set row counts once")
+end)

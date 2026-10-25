@@ -290,16 +290,16 @@ A depot holds a **rule** instead of one item. Storage keeps each depot filled wi
 
 ### Rules
 
-- A rule has up to four conditions, all of which must match: **Item** (an item id, every variant of it), **Tag** (one item tag, e.g. `c:enchantables`), **Mod** (the id's namespace, `apotheosis` in `apotheosis:gem`), **Enchanted** (Any / Yes / No). At least one must be set.
+- A rule has up to four conditions, all of which must match: **Item** (item ids, every variant of each), **Tag** (item tags, e.g. `c:enchantables`), **Mod** (id namespaces, `apotheosis` in `apotheosis:gem`), **Enchanted** (Any / Yes / No). At least one must be set. Item, Tag and Mod each take **several values**: the row matches when the item matches **any** of them (Mod = `relics`, `artifacts`, `reliquified_artifacts` takes items from all three). Rows still combine with AND.
 - Tags and enchantments come from `getItemDetail` (`tags`, `enchantments`), read once per variant key and cached with the rest of `info`. Enchanted books count as enchanted (check that CC's `enchantments` includes stored enchantments; if not, treat a non-empty stored list the same).
 - **Priority**: a number 0 to 9999, default 0. Higher wins a tie.
-- Saved in `cfg.depots[container]` as `{ item=, tag=, mod=, enchanted=true|false|nil, priority=0, added=N }` (`added` counts up, for the last tie-break). An old string value (`"minecraft:enchanted_book"`) still loads as `{ item = that }`. `""` is still "not chosen yet".
+- Saved in `cfg.depots[container]` as `{ item={..}, tag={..}, mod={..}, enchanted=true|false|nil, priority=0, added=N }` (lists of strings; a single string in a saved rule loads as a list of one) (`added` counts up, for the last tie-break). An old string value (`"minecraft:enchanted_book"`) still loads as `{ item = { that } }`. `""` is still "not chosen yet".
 
 ### Which depot gets an item
 
 Each item variant goes to at most one depot, the winner:
 
-1. Most specific rule: score Item 8 + Tag 4 + Mod 2 + Enchanted set 1. So an exact item beats any tag rule, and tag + enchanted beats tag alone.
+1. Most specific rule: score Item 8 + Tag 4 + Mod 2 + Enchanted set 1 (a row counts once, however many values it has). So an exact item beats any tag rule, and tag + enchanted beats tag alone.
 2. Then the higher priority.
 3. Then the depot added first.
 
@@ -336,7 +336,7 @@ Example: `library_books` (Item enchanted book) and `disenchant` (Tag c:enchantab
                                                          
 ```
 
-- Tap **Item**, **Tag** or **Mod** to open the pick list for it; tap a set row's value and pick **Any** to clear it. Enchanted is three toggle buttons (cyan = current).
+- Tap **Item**, **Tag** or **Mod** to open the pick list for it; tap a set row again and pick **Any** to clear it. A row with several values shows them joined with `, `, cut to fit with `+N` at the end (`relics, artifacts, +1`). Enchanted is three toggle buttons (cyan = current).
 - **Matches now** is live: kinds and items in storage that this depot would win, top 5 by count. A rule that would lose items to another depot still lists them here, but the summary says where they go (Overlaps).
 - **Next** is disabled (grey) until at least one condition is set.
 - **Something like this** opens the example page.
@@ -370,8 +370,7 @@ Example: `library_books` (Item enchanted book) and `disenchant` (Tag c:enchantab
 ░Search:░c:_░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 
 ```
 
-- Same list as today's item step: search at the bottom, pager, tap a row to pick it and go back to the form. Item lists item ids (variants merged), Tag lists every tag on items in storage with kinds and items, Mod lists namespaces.
-- **Any** clears the condition.
+- Multi-select: search at the bottom, pager, tap a row to tick or untick it (ticked rows are cyan and stay ticked across pages and searches). The header counts the ticked rows. **Done** goes back to the form; **Any** clears the row. Item lists item ids (variants merged), Tag lists every tag on items in storage with kinds and items, Mod lists namespaces.
 
 ### Something like this
 
@@ -386,8 +385,8 @@ Example: `library_books` (Item enchanted book) and `disenchant` (Tag c:enchantab
  ░ ░ Tag                      minecraft:bookshelf_b   96 
  ░ ░ Mod                      minecraft             9.1k 
                                                          
- Ticked lines fill in the form. Only one tag can be      
- ticked (the form has one Tag row).                      
+ Ticked lines fill in the form. Several tags can be      
+ ticked: any one of them matches.                        
                                                          
  Matches now: 1 kind, 41 items                           
                                                          
@@ -403,7 +402,7 @@ Example: `library_books` (Item enchanted book) and `disenchant` (Tag c:enchantab
 ```
 
 - Uses the existing "drop one item in" watch on the depot itself (storage stops moving items while it watches, 30 s). The dropped item stays in the depot.
-- Lists everything true about the example: the item, Enchanted (yes or no), each of its tags, its mod, with how much storage has of each. Tap to tick. Only one Tag line can be ticked; ticking another moves the tick.
+- Lists everything true about the example: the item, Enchanted (yes or no), each of its tags, its mod, with how much storage has of each. Tap to tick. Several Tag lines can be ticked; they all go in the Tag row.
 - **Use these** fills the form's rows from the ticks (replacing them) and goes back. **Other example** watches again.
 
 ### Step 3: summary

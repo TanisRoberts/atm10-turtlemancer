@@ -231,7 +231,8 @@ function A.run(o)
     if o.extra then st.edit.extra = o.extra.init(n) end
     if ruleDepot(key) then
       local r = DEPOT_BY[key].getRule(n) or {}
-      st.edit.rule = { item = r.item, tag = r.tag, mod = r.mod, enchanted = r.enchanted }
+      local function copy(l) return l and { table.unpack(l) } end
+      st.edit.rule = { item = copy(r.item), tag = copy(r.tag), mod = copy(r.mod), enchanted = r.enchanted }
       st.edit.prio = tostring(r.priority or 0)
     elseif DEPOT_BY[key] then st.edit.depot = DEPOT_BY[key].get(n) end
     st.page, st.note = "edit", nil

@@ -54,7 +54,8 @@ T.test("storage: /assign rule form: Tag + Enchanted + priority, live preview, Sa
   T.contains(c.screen, "c:enchantables")
   T.contains(c.screen, "DEPOT TAG")
   c:type("ench"); w:run(1)
-  c:key(257); w:run(1)
+  c:key(257); w:run(1)                          -- ticks the only match
+  tap(w, c, "Done")
   T.contains(c.screen, "c:enchantables")
   T.contains(c.screen, "Matches now: 3 kinds")
   tap(w, c, "Yes")
@@ -70,7 +71,7 @@ T.test("storage: /assign rule form: Tag + Enchanted + priority, live preview, Sa
   tap(w, c, " Save ")
   T.contains(c.screen, "Saved")
   local d = c:readTable("storage.cfg").depots[B(4)]
-  T.eq(d.tag, "c:enchantables"); T.eq(d.enchanted, true); T.eq(d.priority, 7); T.eq(d.item, nil)
+  T.eq(d.tag[1], "c:enchantables"); T.eq(d.enchanted, true); T.eq(d.priority, 7); T.eq(d.item, nil)
   tap(w, c, "Done")
   T.waitFor(w, function() return inv[4]:count("minecraft:diamond_sword") == 1 end, 60, "depot never filled")
   w:run(10)
@@ -92,7 +93,8 @@ T.test("storage: /assign rule form: Next stays off until a condition is set; Any
   c:click(14, 6); w:run(1)                      -- Mod
   T.contains(c.screen, "minecraft")
   c:type("minec"); w:run(1)
-  c:key(257); w:run(1)                          -- the only match
+  c:key(257); w:run(1)                          -- ticks the only match
+  tap(w, c, "Done")
   T.contains(c.screen, "Matches now")
   c:click(14, 6); w:run(1)
   tap(w, c, "Any")                              -- clears the Mod again
@@ -131,6 +133,7 @@ T.test("storage: /assign rule overlaps are named on the summary", function()
   c:click(14, 5); w:run(1)
   c:type("ench"); w:run(1)
   c:key(257); w:run(1)
+  tap(w, c, "Done")
   tap(w, c, "Next")
   T.contains(c.screen, "Overlaps")
   T.contains(c.screen, "barrel_3 wins 2 kinds")
@@ -154,7 +157,44 @@ T.test("storage: /assign Something like this: drop one example in, tick lines, U
   tap(w, c, "Next")
   tap(w, c, " Save ")
   local d = c:readTable("storage.cfg").depots[B(4)]
-  T.eq(d.item, "minecraft:diamond_sword"); T.eq(d.tag, "c:enchantables"); T.eq(d.enchanted, true)
+  T.eq(d.item[1], "minecraft:diamond_sword"); T.eq(d.tag[1], "c:enchantables"); T.eq(d.enchanted, true)
   T.truthy(inv[4]:count("minecraft:diamond_sword") >= 1, "the example stays in the depot")
   T.running(c)
+end)
+
+T.test("storage: /assign pick list ticks several values, Done returns to the form showing them", function()
+  local w, c, inv = base{}
+  addDepot(w, c, "barrel_4")
+  c:click(14, 6); w:run(1)                      -- Mod
+  T.contains(c.screen, "DEPOT MOD")
+  c:type("minec"); w:run(1)
+  c:key(257); w:run(1)                          -- ticks minecraft
+  T.contains(c.screen, "1 ticked")
+  tap(w, c, "Done")
+  T.contains(c.screen, "minecraft")
+  T.contains(c.screen, "Matches now")
+  c:click(14, 6); w:run(1)
+  tap(w, c, "minecraft")                        -- untick
+  T.contains(c.screen, "tap to tick")
+  tap(w, c, "minecraft")                        -- tick again
+  tap(w, c, "Done")
+  tap(w, c, "Next")
+  T.contains(c.screen, "Mod minecraft")
+  tap(w, c, " Save ")
+  local d = c:readTable("storage.cfg").depots[B(4)]
+  T.eq(d.mod[1], "minecraft"); T.eq(#d.mod, 1)
+end)
+
+T.test("storage: /assign Item pick list ticks two items; the form row lists them and the summary joins with or", function()
+  local w, c, inv = base{}
+  addDepot(w, c, "barrel_4")
+  c:click(14, 4); w:run(1)                      -- Item
+  tap(w, c, "Iron Sword")
+  tap(w, c, "Cobblestone")
+  T.contains(c.screen, "2 ticked")
+  tap(w, c, "Done")
+  T.contains(c.screen, "minecraft:iron_sword, +1")   -- the two names do not fit the row
+  T.contains(c.screen, "Matches now: 2 kinds")
+  tap(w, c, "Next")
+  T.contains(c.screen, "Item minecraft:iron_sword or ")
 end)
