@@ -2053,8 +2053,8 @@ local function assignScreen()
       return out
     end,
     depots = {
-      { key = "depot", kind = "Depot", title = "DEPOT", what = "item", tank = false,
-        about = "keeps a container topped up with one item",
+      { key = "depot", kind = "Depot", title = "DEPOT", what = "item", tank = false, rule = true,
+        about = "keeps a container topped up with what a rule matches",
         items = function(n)
           local seen, out = {}, {}
           for _, it in ipairs(items) do
@@ -2075,11 +2075,11 @@ local function assignScreen()
           table.sort(out, function(a, b) return a.label:lower() < b.label:lower() end)
           return out
         end,
-        get = function(n) local d = RULES.normalize(cfg.depots and cfg.depots[n]); return d and d.item or nil end,
-        set = function(n, item)
-          local r = RULES.normalize(cfg.depots[n]) or { priority = 0 }
-          r.item, r.added = item, r.added or RULES.nextAdded()
-          cfg.depots[n] = r
+        getRule = function(n) return RULES.normalize(cfg.depots and cfg.depots[n]) end,
+        setRule = function(n, rule, priority)
+          local old = RULES.normalize(cfg.depots[n])
+          cfg.depots[n] = { item = rule.item, tag = rule.tag, mod = rule.mod, enchanted = rule.enchanted,
+            priority = priority, added = old and old.added or RULES.nextAdded() }
         end,
       },
       { key = "fluidDepot", kind = "Fluid depot", title = "FLUID DEPOT", what = "fluid", tank = true,

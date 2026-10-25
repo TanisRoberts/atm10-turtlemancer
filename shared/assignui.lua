@@ -25,8 +25,10 @@
 --                        items(n) -> { { name, label, count }, ... } offered under "pick the item",
 --                        get(n) -> id or nil,  set(n, id) }. With them, + Add asks which kind (or
 --                      "Other job") first, and a depot goes container -> item -> summary.
---   o.rules        -> storage's depot rules engine (storage_rules.lua) for the rule pages (#78): R.preview(rule, depot)
---                      -> { kinds, items, list, lost } (what the rule would win), R.tags(), R.mods(), R.describe(rule)
+--   o.rules        -> storage's depot rules engine (storage_rules.lua) for the rule pages (assignrules.lua): R.preview,
+--                      R.count, R.tags(), R.mods(), R.describe, R.fill, R.modOf. A depot with `rule = true` holds a rule
+--                      instead of one item: getRule(n) -> { item, tag, mod, enchanted, priority } or nil,
+--                      setRule(n, rule, priority); its `items(n)` still feeds the Item pick list.
 --   o.describe(n)   -> optional { text, count, size } for a container that has no item list (a tank)
 --   o.hold()/o.release()  pause / resume the program's own moving while "Find it" watches
 --   o.beforeSave()  wait until the program's worker is idle;  o.afterSave()  save + rescan
@@ -96,6 +98,8 @@ function A.run(o)
     end
     return out
   end
+  local RU   -- the depot rule pages (assignrules.lua), when the program has a rules engine
+  local function ruleDepot(key) local d = DEPOT_BY[key]; return RU and d and d.rule and d or nil end
   local function curDepot() return DEPOT_BY[st.itemBack == "edit" and st.edit and st.edit.key or st.depotFlow] end
 
   -- What's in each inventory, for the lists (cached while the screen is open)
@@ -225,7 +229,11 @@ function A.run(o)
     st.edit = { name = n, orig = key, auto = autoKey ~= nil, autoKey = autoKey, nick = names[n] or "", isNew = isNew,
       key = key or autoKey or o.defaultKey(n) }
     if o.extra then st.edit.extra = o.extra.init(n) end
-    if DEPOT_BY[key] then st.edit.depot = DEPOT_BY[key].get(n) end
+    if ruleDepot(key) then
+      local r = DEPOT_BY[key].getRule(n) or {}
+      st.edit.rule = { item = r.item, tag = r.tag, mod = r.mod, enchanted = r.enchanted }
+      st.edit.prio = tostring(r.priority or 0)
+    elseif DEPOT_BY[key] then st.edit.depot = DEPOT_BY[key].get(n) end
     st.page, st.note = "edit", nil
   end
 
@@ -264,6 +272,13 @@ function A.run(o)
     return found
   end
 
+  RU = o.rules and dofile("assignrules.lua")({
+    o = o, st = st, C = C, names = names, call = call,
+    size = function() return w, h end,
+    put = put, btn = btn, region = region, titleBar = titleBar, line2 = line2, searchBar = searchBar, pager = pager,
+    say = say, cut = cut, fmt = fmt, prettyName = prettyName, shortName = shortName, findByItem = findByItem,
+    depotOf = function(key) return DEPOT_BY[key] end,
+  })
   local function backToList(msg, col)
     if msg then say(msg, col) end
     desc = {}
@@ -273,7 +288,9 @@ function A.run(o)
   local function save()
     local e = st.edit
     local dp = DEPOT_BY[e.key]
-    if dp and not e.depot then
+    if ruleDepot(e.key) then
+      if not RU.hasRule(e.rule) then RU.open(); return end
+    elseif dp and not e.depot then
       st.itemBack, st.depotName, st.filter, st.pg, st.page = "edit", e.name, "", 1, "item"
       return
     end
@@ -282,7 +299,8 @@ function A.run(o)
     if e.key ~= e.orig then bumped = o.assign(e.name, e.key) end
     if bumped == e.name then bumped = nil end
     if o.extra and e.key == o.extra.key then o.extra.save(e.name, e.extra) end
-    if dp then dp.set(e.name, e.depot) end
+    if ruleDepot(e.key) then dp.setRule(e.name, e.rule, tonumber(e.prio) or 0)
+    elseif dp then dp.set(e.name, e.depot) end
     names[e.name] = e.nick ~= "" and e.nick or nil
     o.afterSave()
     backToList(("Saved: %s = %s%s"):format(shortName(e.name), TYPE_BY[e.key].label,
@@ -343,7 +361,11 @@ function A.run(o)
 
   -- A container was picked under + Add: a depot goes on to pick its item, anything else to the job page
   local function chosen(n)
-    if st.depotFlow then
+    if st.depotFlow and ruleDepot(st.depotFlow) then
+      openEdit(n, true)
+      st.edit.key, st.edit.flow, st.edit.rule, st.edit.prio = st.depotFlow, true, {}, "0"
+      RU.open()
+    elseif st.depotFlow then
       st.depotName, st.itemBack, st.filter, st.pg, st.page = n, "pick", "", 1, "item"
     else
       openEdit(n, true)
@@ -470,7 +492,7 @@ function A.run(o)
     put(2, 5, "Nickname", C.dim)
     local fw = w - 12
     local shownNick = #e.nick > fw - 1 and e.nick:sub(-(fw - 1)) or e.nick
-    if e.focus then
+    if e.focus == true then
       put(12, 5, shownNick .. (" "):rep(fw - #shownNick), colours.black, colours.white)
     else
       local txt = cut(e.nick ~= "" and e.nick or "click to name it (optional)", fw)
@@ -508,8 +530,10 @@ function A.run(o)
       lines[#lines + 1] = piece
       about = about:sub(#piece + 1):gsub("^ +", "")
     end
-    for i, l in ipairs(lines) do put(2, y + i - 1, l, t.col) end
-    y = y + 2
+    if not ruleDepot(e.key) then   -- a rule depot needs the room for its own rows
+      for i, l in ipairs(lines) do put(2, y + i - 1, l, t.col) end
+      y = y + 2
+    end
     -- What saving this will do
     local warn
     local holder = o.single and o.single(e.key)
@@ -521,7 +545,10 @@ function A.run(o)
       warn = o.warn(e, d)
     end
     if warn and y < h - 1 then put(2, y, cut(warn, w - 2), C.warn); y = y + 1 end
-    if DEPOT_BY[e.key] and y < h - 1 then
+    if ruleDepot(e.key) and y < h - 1 then
+      e.rule = e.rule or {}
+      y = RU.editRows(e, y)
+    elseif DEPOT_BY[e.key] and y < h - 1 then
       local dp = DEPOT_BY[e.key]
       local x = btn(2, y, e.depot and "Change" or ("Pick " .. dp.what), false, function()
         st.itemBack, st.depotName, st.filter, st.pg, st.page = "edit", e.name, "", 1, "item"
@@ -536,15 +563,21 @@ function A.run(o)
     end
     -- Buttons
     local x = btn(2, h - 1, "Save", true, save, colours.lime)
-    x = btn(x, h - 1, "Cancel", false, function() st.page, st.edit = e.isNew and "pick" or "list", nil end)
+    local toForm = e.isNew and ruleDepot(e.key) and RU.hasRule(e.rule)
+    x = btn(x, h - 1, toForm and "Back" or "Cancel", false, function()
+      if toForm then RU.open() else st.page, st.edit = e.isNew and "pick" or "list", nil end
+    end)
     if e.orig then
       btn(x, h - 1, e.delArm and "Sure? Delete" or "Delete", e.delArm, function()
         if e.delArm then delete() else e.delArm = true end
       end, colours.red)
     end
-    put(2, h, cut(e.focus and "Typing the nickname. Enter: done" or "Enter: save   Tab: nickname   Backspace: back", w - 2), C.dim)
-    if e.focus then
+    put(2, h, cut(e.focus == "prio" and "Typing the priority. Enter: done"
+      or e.focus and "Typing the nickname. Enter: done" or "Enter: save   Tab: nickname   Backspace: back", w - 2), C.dim)
+    if e.focus == true then
       term.setCursorPos(12 + #shownNick, 5); term.setTextColour(colours.black); term.setCursorBlink(true)
+    elseif e.focus == "prio" and e.prioY then
+      term.setCursorPos(12 + #(e.prio or ""), e.prioY); term.setTextColour(colours.black); term.setCursorBlink(true)
     end
   end
 
@@ -555,7 +588,9 @@ function A.run(o)
     term.setCursorBlink(false)
     term.setBackgroundColour(C.bg); term.setTextColour(C.fg); term.clear()
     if st.page == "list" then drawList() elseif st.page == "pick" then drawPick()
-    elseif st.page == "kind" then drawKind() elseif st.page == "item" then drawItem() else drawEdit() end
+    elseif st.page == "kind" then drawKind() elseif st.page == "item" then drawItem()
+    elseif st.page == "rule" then RU.drawForm() elseif st.page == "rpick" then RU.drawPick()
+    elseif st.page == "rlike" then RU.drawLike() else drawEdit() end
     local redraw = false
     while not redraw do
       local ev, a, b, c = os.pullEvent()
@@ -571,16 +606,25 @@ function A.run(o)
       elseif ev == "char" or ev == "paste" then
         local text = ev == "paste" and a:gsub("[\r\n]", "") or a
         if st.page == "edit" then
-          if e.focus then e.nick = (e.nick .. text):sub(1, 24) else redraw = false end
+          if e.focus == "prio" then
+            local digits = text:gsub("%D", "")
+            e.prio = (e.prio .. digits):sub(1, 4)
+            if digits == "" then redraw = false end
+          elseif e.focus then e.nick = (e.nick .. text):sub(1, 24) else redraw = false end
         else
           st.filter, st.pg = st.filter .. text, 1
         end
       elseif ev == "key" then
         if a == keys.backspace then
           if st.page == "edit" then
-            if e.focus then e.nick = e.nick:sub(1, -2)
+            if e.focus == "prio" then e.prio = e.prio:sub(1, -2)
+            elseif e.focus then e.nick = e.nick:sub(1, -2)
+            elseif e.isNew and ruleDepot(e.key) and RU.hasRule(e.rule) then RU.open()
             else st.page, st.edit = e.isNew and "pick" or "list", nil end
+          elseif st.page == "rule" then RU.back()
+          elseif st.page == "rlike" then st.page = "rule"
           elseif st.filter ~= "" then st.filter, st.pg = st.filter:sub(1, -2), 1
+          elseif st.page == "rpick" then st.page = "rule"
           elseif st.page == "item" then st.page = st.itemBack == "edit" and "edit" or "pick"
           elseif st.page == "pick" then st.page = hasDepots and "kind" or "list"
           elseif st.page == "kind" then st.page = "list" end
@@ -589,6 +633,9 @@ function A.run(o)
         elseif a == keys.enter or a == keys.numPadEnter then
           if st.page == "edit" then
             if e.focus then e.focus = false else save() end
+          elseif (st.page == "rpick" or st.page == "rule") and RU.enter() then
+            st.filter, st.pg = "", 1
+          elseif st.page == "rule" or st.page == "rlike" or st.page == "rpick" then redraw = false
           elseif st.page == "item" and st.shown and #st.shown == 1 and st.filter ~= "" then
             local it, dp = st.shown[1], curDepot()
             if st.itemBack == "edit" and st.edit then st.edit.depot, st.page = it.name, "edit"

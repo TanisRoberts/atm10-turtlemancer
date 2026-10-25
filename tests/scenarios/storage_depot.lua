@@ -41,13 +41,17 @@ T.test("storage: /assign > Add > Depot > container > item > summary > Save, then
   c:type("barrel_4"); w:run(1)
   c:key(257); w:run(1)                          -- the only match
   T.contains(c.screen, "step 2 of 3")
+  T.contains(c.screen, "Set at least one")
+  c:click(14, 4); w:run(1)                      -- the Item row opens its pick list
   T.contains(c.screen, "Bucket"); T.contains(c.screen, "Cobblestone")
   c:type("buck"); w:run(1)
   T.absent(c.screen, "Cobblestone")
-  c:key(257); w:run(1)
+  c:key(257); w:run(1)                          -- back on the form with the item set
+  T.contains(c.screen, "minecraft:bucket")
+  tap(w, c, "Next")
   T.contains(c.screen, "step 3 of 3")
-  T.contains(c.screen, "Keeps Bucket")
-  c:click(3, select(2, c.screen:find("Cancel"))); w:run(2)   -- the Save button, left of Cancel
+  T.contains(c.screen, "Item minecraft:bucket")
+  tap(w, c, " Save ")
   T.contains(c.screen, "Saved")
   local cfg = c:readTable("storage.cfg")
   T.eq(cfg.depots["minecraft:barrel_4"].item, "minecraft:bucket")

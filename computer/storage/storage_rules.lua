@@ -162,6 +162,17 @@ return function(o)
     return res
   end
 
+  -- Everything in storage the rule matches, whether or not another depot wins it: { kinds=, items= }
+  function R.count(rule)
+    rule = R.normalize(rule)
+    local res = { kinds = 0, items = 0 }
+    if not rule then return res end
+    for _, e in ipairs(o.items()) do
+      if R.matches(rule, e.key, e.name) then res.kinds, res.items = res.kinds + 1, res.items + e.count end
+    end
+    return res
+  end
+
   -- Tags on items in storage: { { tag=, kinds=, items= }, ... } sorted by items, biggest first
   function R.tags()
     local t, out = {}, {}
