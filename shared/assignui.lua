@@ -273,11 +273,42 @@ function A.run(o)
     return found
   end
 
+  -- Wait for a slot of ONE inventory to gain an item (the example you drop in). Other inventories
+  -- changing doesn't matter. Returns the slot, or nil on timeout / cancel.
+  local function findInContainer(n)
+    o.hold()
+    local before = {}
+    for s, it in pairs(call(n, "list") or {}) do before[s] = it end
+    local slot, gone = nil, os.clock() + 60
+    while os.clock() < gone and not slot do
+      term.setCursorBlink(false)
+      term.setBackgroundColour(C.bg); term.clear()
+      titleBar(" " .. o.title, "find it ")
+      put(2, 3, cut("Drop ONE item into the depot.", w - 2), C.fg)
+      put(2, 4, cut("Nothing gets moved while I watch it.", w - 2), C.dim)
+      put(2, 5, cut(("Waiting... %ds"):format(math.ceil(gone - os.clock())), w - 2), C.dim)
+      put(2, h, "Backspace or click: cancel", C.dim)
+      local t, cancel = os.startTimer(1), false
+      while true do
+        local e, a = os.pullEvent()
+        if e == "timer" and a == t then break end
+        if (e == "key" and a == keys.backspace) or e == "mouse_click" then cancel = true; break end
+      end
+      if cancel then break end
+      for s, it in pairs(call(n, "list") or {}) do
+        local b = before[s]
+        if not b or b.name ~= it.name or it.count > b.count then slot = s end
+      end
+    end
+    o.release()
+    return slot
+  end
+
   RU = o.rules and dofile("assignrules.lua")({
     o = o, st = st, C = C, names = names, call = call,
     size = function() return w, h end,
     put = put, btn = btn, region = region, titleBar = titleBar, line2 = line2, searchBar = searchBar, pager = pager,
-    say = say, cut = cut, fmt = fmt, prettyName = prettyName, shortName = shortName, findByItem = findByItem,
+    say = say, cut = cut, fmt = fmt, prettyName = prettyName, shortName = shortName, findByItem = findByItem, findInContainer = findInContainer,
     depotOf = function(key) return DEPOT_BY[key] end,
   })
   local function backToList(msg, col)

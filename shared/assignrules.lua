@@ -157,18 +157,9 @@ return function(X)
   -- Drop one item into the depot and read what is true about it
   function M.watch()
     local e = st.edit
-    local before = {}
-    for s, it in pairs(X.call(e.name, "list") or {}) do before[s] = it end
-    local n = X.findByItem()
-    if n ~= e.name then
-      X.say(n and "Drop it into the depot itself." or "Didn't see an item go in. Try again?", C.warn)
-      return
-    end
-    local slot
-    for s, it in pairs(X.call(n, "list") or {}) do
-      local b = before[s]
-      if not b or b.name ~= it.name or it.count > b.count then slot = s end
-    end
+    local slot = X.findInContainer(e.name)
+    if not slot then X.say("Didn't see an item go in. Try again?", C.warn); return end
+    local n = e.name
     local d = slot and X.call(n, "getItemDetail", slot)
     if not d then X.say("Couldn't read that item.", C.warn); return end
     local i = R.fill({}, d)

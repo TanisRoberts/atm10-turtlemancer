@@ -162,6 +162,20 @@ T.test("storage: /assign Something like this: drop one example in, tick lines, U
   T.running(c)
 end)
 
+T.test("storage: /assign Something like this ignores other inventories gaining items", function()
+  local w, c, inv = base{}
+  addDepot(w, c, "barrel_4")
+  tap(w, c, "Something like this")
+  T.contains(c.screen, "Drop ONE item")
+  inv[3]:give("minecraft:cobblestone", 1)       -- a hopper fills some other barrel first
+  w:run(2)
+  T.contains(c.screen, "Drop ONE item")
+  inv[4]:give("minecraft:diamond_sword", 1, nil, { nbt = "e", tags = { ["c:enchantables"] = true }, enchantments = ENCH })
+  w:run(4)
+  T.contains(c.screen, "SOMETHING LIKE THIS")
+  T.contains(c.screen, "Diamond Sword")
+end)
+
 T.test("storage: /assign pick list ticks several values, Done returns to the form showing them", function()
   local w, c, inv = base{}
   addDepot(w, c, "barrel_4")
