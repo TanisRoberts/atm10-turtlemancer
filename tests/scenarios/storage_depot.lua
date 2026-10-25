@@ -50,7 +50,7 @@ T.test("storage: /assign > Add > Depot > container > item > summary > Save, then
   c:click(3, select(2, c.screen:find("Cancel"))); w:run(2)   -- the Save button, left of Cancel
   T.contains(c.screen, "Saved")
   local cfg = c:readTable("storage.cfg")
-  T.eq(cfg.depots["minecraft:barrel_4"], "minecraft:bucket")
+  T.eq(cfg.depots["minecraft:barrel_4"].item, "minecraft:bucket")
   c:click(12, select(2, c.screen:find("Done"))); w:run(1)
   T.waitFor(w, function() return inv[4]:count("minecraft:bucket") == 40 end, 60, "depot never filled")
   T.eq(inv[4]:count("minecraft:cobblestone"), 0)

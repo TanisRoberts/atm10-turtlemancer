@@ -69,6 +69,7 @@ local SMELTER_RESERVE = { ["minecraft:coal"] = 64, ["minecraft:charcoal"] = 64 }
 -- Config
 ---------------------------------------------------------------------------
 local cfg = {}
+local RULES   -- depot rules (storage_rules.lua), set up below
 local function loadCfg()
   if fs.exists(CONFIG) then
     local f = fs.open(CONFIG, "r")
@@ -84,7 +85,8 @@ local function loadCfg()
   cfg.drawers = cfg.drawers or {}   -- assigned as drawers (bulk storage) by hand, besides those found by name
   cfg.ignored = cfg.ignored or {}   -- never touched or counted
   cfg.fluidDepots = cfg.fluidDepots or {}   -- tank -> the fluid storage keeps it filled with ("" = not chosen yet)
-  cfg.depots = cfg.depots or {}     -- container -> the item storage keeps it filled with ("" = not chosen yet)
+  cfg.depots = cfg.depots or {}     -- container -> its rule { item, tag, mod, enchanted, priority, added } ("" = not chosen yet; an item id string = { item = it })
+  if RULES then RULES.upgrade() end
   cfg.names = cfg.names or {}       -- network name -> nickname, shown in /assign
   -- The smelter's factory barrels (from its broadcast): feeds are filled for it and never storage,
   -- outs are emptied into storage like inputs
@@ -396,7 +398,7 @@ local storage = {}   -- storage inventory names (everything except inputs/output
 local cache   = {}   -- name -> list() result
 local sizes   = {}   -- name -> slot count
 local limits  = {}   -- drawer name -> { slot -> size in stacks } (see slotStacks)
-local info    = {}   -- item key -> { label, max }
+local info    = {}   -- item key -> { label, max, tags, enchanted }
 local items   = {}   -- sorted item summaries
 local byName  = {}   -- item id -> total count (all variants)
 local stats   = { used = 0, total = 0, kinds = 0, inv = 0 }
@@ -404,6 +406,8 @@ local overCapList = {}  -- items storage has enough of (sent to Canary via the m
 local minerFuelLimit, weaverBill = nil, {}   -- heard over the network from Canary / Weaver
 
 local function keyOf(it) return it.name .. (it.nbt and ("#" .. it.nbt) or "") end
+
+RULES = dofile("storage_rules.lua")({ cfg = function() return cfg end, info = info, items = function() return items end })
 
 local function scanInv(n)
   cache[n] = call(n, "list") or {}
@@ -463,11 +467,11 @@ local function buildItems()
         map[k] = e
       end
       e.count = e.count + it.count
-      if not info[k] and not missing[k] then
+      if not (info[k] and info[k].tags) and not missing[k] then
         missing[k] = true
         missingFns[#missingFns + 1] = function()
           local d = call(n, "getItemDetail", slot)
-          info[k] = { label = d and d.displayName or prettyName(it.name), max = d and d.maxCount or 64 }
+          info[k] = RULES.fill({ label = d and d.displayName or prettyName(it.name), max = d and d.maxCount or 64 }, d or {})
         end
       end
     end
@@ -510,11 +514,11 @@ end
 local VOID_LIMIT = 2 ^ 30
 local function maxOf(key, n, slot)
   local i = info[key]
-  if i then return i.max end
+  if i and i.tags then return i.max end
   if n then
     local d = call(n, "getItemDetail", slot)
     if d then
-      info[key] = { label = d.displayName or prettyName(d.name), max = d.maxCount or 64 }
+      info[key] = RULES.fill({ label = d.displayName or prettyName(d.name), max = d.maxCount or 64 }, d)
       return info[key].max
     end
   end
@@ -705,8 +709,14 @@ local function depositFrom(input, skip, leave)
     if not (skip and skip[it.name]) and spare > 0 then
       local left = spare
       local key = keyOf(it)
-      maxOf(key, input, slot)   -- learn its stack size before it lands in a drawer
-      for _, t in ipairs(targetsFor(key)) do
+      maxOf(key, input, slot)   -- learn its stack size (and tags) before it lands in a drawer
+      -- A depot that wins this item gets it first; when it's full the item goes to storage as usual
+      local depot = RULES.winner(key, it.name)
+      if depot and depot ~= input and peripheral.isPresent(depot) then
+        local moved = call(input, "pushItems", depot, slot, left) or 0
+        if moved > 0 then left = left - moved; movedTotal = movedTotal + moved end
+      end
+      for _, t in ipairs(left > 0 and targetsFor(key) or {}) do
         if left <= 0 then break end
         local moved = moveInto(input, slot, left, t, key)
         if moved > 0 then
@@ -1152,29 +1162,28 @@ local function topUpDocks()
   return changed
 end
 
--- Keep every depot full of its item, as far as storage has it. Anything else in a depot is left alone.
+-- Keep every depot full of what its rule wins, as far as storage has it. Anything else in a depot is left alone.
 local function topUpDepots()
   local changed = false
-  for d, name in pairs(cfg.depots or {}) do
-    if name ~= "" and (byName[name] or 0) > 0 and peripheral.isPresent(d) then
+  local won = RULES.winners()
+  local names = {}
+  for d in pairs(won) do names[#names + 1] = d end
+  table.sort(names)
+  for _, d in ipairs(names) do
+    if peripheral.isPresent(d) then
       local list = call(d, "list")
       local size = call(d, "size") or 0
       if list then
-        -- A depot holds an item id, so every variant (nbt) of it counts: books, damaged gear, potions
-        local variants, maxOfName = {}, 64
-        for _, e in ipairs(items) do
-          if e.name == name then variants[#variants + 1] = e; maxOfName = e.max end
-        end
         local used, room = 0, false
         for _, it in pairs(list) do
           used = used + 1
-          local max = (info[keyOf(it)] and info[keyOf(it)].max) or maxOfName
-          if it.name == name and it.count < max then room = true end
+          local max = (info[keyOf(it)] and info[keyOf(it)].max) or 64
+          if it.count < max then room = true end
         end
         if used < size or room then
-          for _, e in ipairs(variants) do
+          for _, e in ipairs(won[d]) do
             local moved, full = retrieve(e.key, e.count, d)
-            if moved > 0 then changed = true; byName[name] = byName[name] - moved end
+            if moved > 0 then changed = true; byName[e.name] = byName[e.name] - moved end
             if full then break end
           end
         end
@@ -2012,6 +2021,7 @@ local function assignScreen()
     hint = "Click one to change it. The rest is storage.",
     emptyText = "Nothing assigned yet. + Add, or /setup (markers).",
     types = TYPES, names = cfg.names, call = call,
+    rules = RULES,
     typeOf = typeOf, assign = assign, unassign = unassign,
     inventories = function()
       local out, seen = inventories(), {}
@@ -2065,8 +2075,12 @@ local function assignScreen()
           table.sort(out, function(a, b) return a.label:lower() < b.label:lower() end)
           return out
         end,
-        get = function(n) local d = cfg.depots and cfg.depots[n]; return d ~= "" and d or nil end,
-        set = function(n, item) cfg.depots[n] = item end,
+        get = function(n) local d = RULES.normalize(cfg.depots and cfg.depots[n]); return d and d.item or nil end,
+        set = function(n, item)
+          local r = RULES.normalize(cfg.depots[n]) or { priority = 0 }
+          r.item, r.added = item, r.added or RULES.nextAdded()
+          cfg.depots[n] = r
+        end,
       },
       { key = "fluidDepot", kind = "Fluid depot", title = "FLUID DEPOT", what = "fluid", tank = true,
         about = "keeps a tank full of one fluid from the other tanks",

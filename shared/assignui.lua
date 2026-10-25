@@ -25,6 +25,8 @@
 --                        items(n) -> { { name, label, count }, ... } offered under "pick the item",
 --                        get(n) -> id or nil,  set(n, id) }. With them, + Add asks which kind (or
 --                      "Other job") first, and a depot goes container -> item -> summary.
+--   o.rules        -> storage's depot rules engine (storage_rules.lua) for the rule pages (#78): R.preview(rule, depot)
+--                      -> { kinds, items, list, lost } (what the rule would win), R.tags(), R.mods(), R.describe(rule)
 --   o.describe(n)   -> optional { text, count, size } for a container that has no item list (a tank)
 --   o.hold()/o.release()  pause / resume the program's own moving while "Find it" watches
 --   o.beforeSave()  wait until the program's worker is idle;  o.afterSave()  save + rescan

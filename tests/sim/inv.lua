@@ -51,7 +51,8 @@ function Inv:insert(name, count, toSlot, extra)
     else
       local n = math.min(lim, count - put)
       if n > 0 then
-        self.slots[i] = { name = name, count = n, displayName = pretty(name), nbt = extra and extra.nbt }
+        self.slots[i] = { name = name, count = n, displayName = pretty(name), nbt = extra and extra.nbt,
+                          tags = extra and extra.tags, enchantments = extra and extra.enchantments }
         put = put + n
       end
     end
@@ -94,7 +95,7 @@ function Inv:getItemDetail(slot)
   if slot < 1 or slot > self.nslots then error("Slot out of range", 2) end
   local s = self.slots[slot]
   if not s then return nil end
-  return { name = s.name, count = s.count, displayName = s.displayName, nbt = s.nbt, maxCount = self:limitFor(s.name), tags = {} }
+  return { name = s.name, count = s.count, displayName = s.displayName, nbt = s.nbt, maxCount = self:limitFor(s.name), tags = s.tags or {}, enchantments = s.enchantments }
 end
 function Inv:getItemLimit(slot)
   if slot < 1 or slot > self.nslots then error("Slot out of range", 2) end
@@ -133,7 +134,7 @@ function Inv:pullItems(fromName, fromSlot, limit, toSlot)
 end
 
 -- test-side helpers (not peripheral methods)
-function Inv:give(name, count, slot, extra)  -- extra = { nbt = "..." }; returns what didn't fit
+function Inv:give(name, count, slot, extra)  -- extra = { nbt = "...", tags = { ["c:tools"] = true }, enchantments = { { name = "minecraft:mending", level = 1 } } }; returns what didn't fit
   return count - self:insert(name, count, slot, extra)
 end
 function Inv:count(name)
