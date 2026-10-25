@@ -449,9 +449,12 @@ function Env.build(world, c)
   function rednet.close(n)
     if n then c.openModems[n] = nil else c.openModems = {} end
   end
+  -- like CC: open only while a modem is still there (a chunk controller swapped onto its side isn't one)
+  local function stillModem(n) local d = c.sides[n]; return d ~= nil and d.isModem == true end
   function rednet.isOpen(n)
-    if n then return c.openModems[n] == true end
-    return next(c.openModems) ~= nil
+    if n then return c.openModems[n] == true and stillModem(n) end
+    for side in pairs(c.openModems) do if stillModem(side) then return true end end
+    return false
   end
   function rednet.send(id, msg, protocol)
     local sent, delivered = false, {}

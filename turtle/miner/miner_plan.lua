@@ -45,7 +45,10 @@ function checkpoint()
   applyCtrl()
   maybeReboot()
   if S.want ~= "run" then abort("stop", "Stop requested") end
-  if deaf then abort("stop", "No ender modem: going home") end
+  if deaf then
+    if core.chunk.restore() then deaf = false   -- my modem was in my bag: back on, carry on
+    else abort("stop", "No ender modem: going home") end
+  end
   if S.regionChanged then S.regionChanged = nil; abort("region") end
   refreshChunk()
   dumpJunk(MODE.nether == true)   -- Firecrest: the Nether Foreman's junk is thrown away, never carried home

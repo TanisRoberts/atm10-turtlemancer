@@ -5,7 +5,7 @@
 -- 60 s), so he only ever holds ONE chunk. Equipping it in a new chunk releases the old one at once.
 -- Worn all the time (no modem swap) it reloads his chunk by itself. No controller: nothing happens.
 return function(core)
-local C = { every = 45, note = nil, swaps = 0, at = -1e9, key = nil }
+local C = { every = 45, note = nil, swaps = 0, at = -1e9, key = nil, busy = false }   -- busy: mid-swap
 core.chunk = C
 C.ITEM = "advancedperipherals:chunk_controller"
 local SWAP_FILE = "chunkswap.txt"   -- written during a swap: the side his modem belongs on
@@ -44,12 +44,15 @@ function C.ensure(key, force)
     local prev = turtle.getSelectedSlot()
     turtle.select(slot)
     local f = fs.open(SWAP_FILE, "w"); f.write(side); f.close()   -- unloaded mid-swap: restore() puts it back
+    C.busy = true   -- the modem is off for a moment: other coroutines must not touch the radio or upgrades
     if EQUIP[side]() then
       os.sleep(0.15)                       -- at least one server tick with it on: loads + touches this chunk
       turtle.select(slot)
       EQUIP[side]()                        -- modem back on; the controller goes back into that slot
     end
-    fs.delete(SWAP_FILE)
+    C.busy = false
+    if not sideOfType("modem") then C.restore(side) end   -- the swap back didn't take: put the modem on now
+    if fs.exists(SWAP_FILE) then fs.delete(SWAP_FILE) end
     turtle.select(prev)
     pcall(rednet.open, side)
     C.swaps = C.swaps + 1
@@ -62,6 +65,7 @@ end
 -- Boot: a swap that was cut short leaves the modem in his bag and the controller on. Put it back.
 -- hint: the side the modem was on, if the role remembered it (older saves). True if he had to.
 function C.restore(hint)
+  if C.busy then return false end   -- a swap is in progress: it puts the modem back itself
   local side = nil
   if fs.exists(SWAP_FILE) then
     local f = fs.open(SWAP_FILE, "r"); side = f.readAll(); f.close()

@@ -193,3 +193,30 @@ T.test("miner: losing his ender modem mid-run he stops mining and goes home, ins
   t.body:equip("right", "computercraft:wireless_modem_advanced")   -- put back: he hears his Foreman again
   T.waitFor(w, function() return f.env._G.lastStatus.state == "mining" end, 60, "never went back to mining")
 end)
+
+T.test("miner: many chunk swaps while the radio is busy never lose his modem or controller, nor crash", function()
+  local w = cc.world()
+  w.gpsOn = true
+  w:fill(-24, 58, -24, 39, 63, 39, "minecraft:stone")
+  local dock = MS.barrel()
+  dock:give("minecraft:coal", 64)
+  w:setBlock(1, 64, 0, "minecraft:barrel", dock)
+  local t = MS.turtle(w, { fuel = 5000, items = { [16] = { "advancedperipherals:chunk_controller", 1 } } })
+  local f = MS.foreman(w)
+  -- chatter on his protocol 20 times a second: his radio loop wakes all the time, also mid-swap
+  local chat = w:computer{ id = 60, label = "Chatter" }
+  chat:attach("top", cc.wireless{ ender = true })
+  chat:writeFile("chat.lua", 'rednet.open("top") while true do rednet.broadcast({ type = "noise" }, "tanis-miner") os.sleep(0.05) end')
+  chat:run("chat")
+  MS.setup(w, t)
+  w:run(10)
+  MS.order(f, { minY = 61, maxY = 63, c2 = 1 })                 -- 3x3 chunks: a swap in every one
+  T.waitFor(w, MS.finished(f), 4000, "never finished the 9 chunks")
+  T.running(t)
+  T.eq(t.body.up.right, "computercraft:wireless_modem_advanced", "modem still fitted")
+  local n = 0
+  for _, sl in pairs(t.body.slots) do if sl.name == "advancedperipherals:chunk_controller" then n = n + sl.count end end
+  T.eq(n, 1, "controller still in his bag")
+  T.eq(dock:count("advancedperipherals:chunk_controller") + dock:count("computercraft:wireless_modem_advanced"), 0, "no gear in the dock")
+  T.truthy((f.env._G.lastStatus.swaps or 0) >= 9, "swapped in every chunk")
+end)

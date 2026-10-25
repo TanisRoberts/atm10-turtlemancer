@@ -93,7 +93,8 @@ An Advanced Peripherals chunk controller in his bag keeps the chunk he's in load
 - `chunk.have()`: a controller in his bag or worn.
 - `chunk.ensure(key, force)`: load the chunk `key` names (the role's `"cx,cz"`). Swaps only in a new chunk, `chunk.every` seconds (45, well under 600) after the last swap, or when `force`. True when it loaded it now. `chunk.swaps` counts the swaps.
 - `chunk.note`: why it couldn't, for his screen: `"Chunk controller missing"` or `"No modem to swap with"`. `nil` after a good swap.
-- `chunk.restore(hint)`: at boot, puts the modem back on if a swap was cut short (the side is kept in `chunkswap.txt` during a swap; `hint` is a side the role remembered). True if it had to.
+- `chunk.busy`: true during a swap (the modem is off). Another coroutine must not use the radio or touch upgrades then; only the role's main loop may call `restore`.
+- `chunk.restore(hint)`: at boot (or from the main loop), puts the modem back on if a swap was cut short; does nothing mid-swap (the side is kept in `chunkswap.txt` during a swap; `hint` is a side the role remembered). True if it had to.
 - `chunk.ITEM` (the controller's item id) and `chunk.isModem(name)`, for roles that keep them out of their cargo.
 
 Farm turtles don't call it. The miner calls `ensure` after every move and while waiting, and `restore` at boot.

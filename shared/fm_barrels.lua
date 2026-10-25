@@ -218,7 +218,8 @@ local function drainOverflow()
 end
 
 -- The lava factory: every lava bucket in Factory out goes to Stock while Stock has room, so the factory never
--- stalls on a full output (lava never goes home). Only a full Stock leaves it waiting there.
+-- stalls on a full output (lava never goes home). Only a full Stock leaves it waiting there. An empty bucket
+-- that comes out goes back into Factory in.
 local function factoryPass()
   for _, n in ipairs(cfg.factoryOuts) do
     for slot, it in pairs(call(n, "list") or {}) do
@@ -226,6 +227,10 @@ local function factoryPass()
         local m = pushInto(cfg.stocks, n, slot, LAVA, it.count)
         barrel.stock[LAVA] = (barrel.stock[LAVA] or 0) + m
         barrel.factoryLava = barrel.factoryLava - m
+      elseif it.name == BUCKET then
+        -- an empty bucket the factory let through: back into Factory in (or Stock if that's full)
+        local m = pushInto(cfg.factoryIns, n, slot, BUCKET, it.count)
+        if m < it.count then pushInto(cfg.stocks, n, slot, BUCKET, it.count - m) end
       end
     end
   end

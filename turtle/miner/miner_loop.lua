@@ -71,6 +71,8 @@ function mainLoop()
     elseif S.lost then
       lostFlow()
     elseif deaf then
+      -- a modem left in my bag (a swap cut short): put it back on (here, never in the radio loop)
+      if core.chunk.restore() then print("Put my modem back on.") end
       if not atDock() then setStatus("returning", "No ender modem: going home"); safeHome() end
       setStatus("waiting", "No ender modem: I can't hear my Foreman. Put one on me")
       waitCtrl(10)
@@ -144,11 +146,11 @@ function wirelessModem() return peripheral.find("modem", function(_, m) return m
 -- No ender modem on me (the chunk controller fitted in its place, say): I can't hear my Foreman, so I mustn't
 -- mine on with an old order. `deaf` sends me home to wait (main loop); I keep looking for a modem.
 deaf = false
+-- (only opens a modem that's fitted: putting one back from my bag is the main loop's job, never this loop's,
+-- which may run in the middle of a chunk swap)
 local function openRadio()
   local modem = wirelessModem()
-  if not modem then core.chunk.restore(); modem = wirelessModem() end   -- a modem left in my bag after a swap
-  if modem then rednet.open(peripheral.getName(modem)) end
-  return modem ~= nil
+  return modem ~= nil and pcall(rednet.open, peripheral.getName(modem))
 end
 
 function netLoop()
@@ -159,8 +161,9 @@ function netLoop()
   local me = os.getComputerID()
   local lastSend = -100
   while true do
-    -- (a chunk swap takes the modem off for a moment: only a few misses in a row count)
-    if rednet.isOpen() or openRadio() then misses, deaf, listening = 0, false, true
+    -- (a chunk swap takes the modem off for a moment: that doesn't count, and only a few misses in a row do)
+    if core.chunk.busy then os.sleep(0.2)
+    elseif rednet.isOpen() or openRadio() then misses, deaf, listening = 0, false, true
     else
       misses = misses + 1
       if misses >= 5 then deaf, listening = true, false end
