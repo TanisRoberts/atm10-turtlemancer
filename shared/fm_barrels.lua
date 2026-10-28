@@ -84,11 +84,29 @@ lastReply = {}   -- id -> the last dock_ready sent (repeated if he asks again wi
 servedSeq = {}   -- id -> seq of the last request taken on
 local NEVER_HOME = P.neverHome or {}   -- items that never go home (the MD's buckets)
 
+-- Every inventory call waits for the next game tick, so a pass makes its calls side by side: fn(x) for each x
+-- of the list, all at once (with 11 docks, one at a time took over a minute and the docks filled up).
+function each(list, fn)
+  local tasks = {}
+  for _, x in ipairs(list) do tasks[#tasks + 1] = function() fn(x) end end
+  if #tasks == 1 then tasks[1]() elseif #tasks > 1 then parallel.waitForAll(table.unpack(tasks)) end
+end
+-- A barrel's contents, read once per pass (only used to pick a barrel that already holds an item)
+function listOf(n)
+  local l = barrel.lists[n]
+  if l == nil then l = call(n, "list") or {}; barrel.lists[n] = l end
+  return l
+end
+
 -- What the Stock barrels hold, by item (and the lava waiting in Factory out)
 function scanStock()
   local have, seen = {}, barrel.seen
+  local reads = {}
+  for _, n in ipairs(cfg.stocks) do reads[#reads + 1] = n end
+  for _, n in ipairs(cfg.factoryOuts) do reads[#reads + 1] = n end
+  each(reads, listOf)
   for _, n in ipairs(cfg.stocks) do
-    for _, it in pairs(call(n, "list") or {}) do
+    for _, it in pairs(listOf(n)) do
       have[it.name] = (have[it.name] or 0) + it.count
       seen[it.name] = true
     end
@@ -96,7 +114,7 @@ function scanStock()
   barrel.stock = have
   local lava = 0
   for _, n in ipairs(cfg.factoryOuts) do
-    for _, it in pairs(call(n, "list") or {}) do if it.name == LAVA then lava = lava + it.count end end
+    for _, it in pairs(listOf(n)) do if it.name == LAVA then lava = lava + it.count end end
   end
   barrel.factoryLava = lava
   return have
@@ -111,8 +129,8 @@ function pushInto(list, from, slot, item, count)
   for _, n in ipairs(list) do
     if not barrel.bad[n] then
       local holds = false
-      if #list > 1 then   -- (with one barrel there's nothing to choose: don't spend a tick reading it)
-        for _, it in pairs(call(n, "list") or {}) do if it.name == item then holds = true; break end end
+      if #list > 1 then   -- (with one barrel there's nothing to choose)
+        for _, it in pairs(listOf(n)) do if it.name == item then holds = true; break end end
       end
       if holds then firstPass[#firstPass + 1] = n else second[#second + 1] = n end
     end
@@ -150,15 +168,21 @@ end
 
 -- Everything in one barrel goes to Stock (up to the keep count) or home. Empty buckets go to the lava factory,
 -- and what never goes home (P.neverHome) stays in Stock. Returns items left behind.
+-- (Its slots are moved side by side; Stock's count is reserved before a move, so they don't overfill it.)
 function routeAll(from, stockToo)
   local left = 0
-  for slot, it in pairs(call(from, "list") or {}) do
+  local slots = {}
+  for slot, it in pairs(call(from, "list") or {}) do slots[#slots + 1] = { slot, it } end
+  each(slots, function(e)
+    local slot, it = e[1], e[2]
     barrel.seen[it.name] = true
     local n = it.count
     local want = (cfg.keep[it.name] or 0) - (barrel.stock[it.name] or 0)
     if stockToo and want > 0 then
-      local m = pushInto(cfg.stocks, from, slot, it.name, math.min(n, want))
-      barrel.stock[it.name] = (barrel.stock[it.name] or 0) + m
+      local take = math.min(n, want)
+      barrel.stock[it.name] = (barrel.stock[it.name] or 0) + take
+      local m = pushInto(cfg.stocks, from, slot, it.name, take)
+      barrel.stock[it.name] = barrel.stock[it.name] - (take - m)
       n = n - m
     end
     if n > 0 and it.name == BUCKET and #cfg.factoryIns > 0 then
@@ -174,7 +198,7 @@ function routeAll(from, stockToo)
       n = n - sendHome(from, slot, it.name, n)
     end
     left = left + n
-  end
+  end)
   return left
 end
 
@@ -221,8 +245,13 @@ end
 -- stalls on a full output (lava never goes home). Only a full Stock leaves it waiting there. An empty bucket
 -- that comes out goes back into Factory in.
 local function factoryPass()
+  local slots = {}
   for _, n in ipairs(cfg.factoryOuts) do
-    for slot, it in pairs(call(n, "list") or {}) do
+    for slot, it in pairs(listOf(n)) do slots[#slots + 1] = { n, slot, it } end
+  end
+  each(slots, function(e)
+    local n, slot, it = e[1], e[2], e[3]
+    do
       if it.name == LAVA then
         local m = pushInto(cfg.stocks, n, slot, LAVA, it.count)
         barrel.stock[LAVA] = (barrel.stock[LAVA] or 0) + m
@@ -233,7 +262,7 @@ local function factoryPass()
         if m < it.count then pushInto(cfg.stocks, n, slot, BUCKET, it.count - m) end
       end
     end
-  end
+  end)
 end
 
 -- Take `count` of an item out of Stock (lava: then Factory out) into a dock. Returns how many moved.
@@ -310,10 +339,11 @@ end
 -- Slots used and size of a list of barrels
 local function room(list)
   local used, size, items = 0, 0, 0
-  for _, n in ipairs(list) do
-    size = size + (call(n, "size") or 0)
-    for _, it in pairs(call(n, "list") or {}) do used = used + 1; items = items + it.count end
-  end
+  each(list, function(n)
+    local l
+    each({ "size", "list" }, function(m) if m == "size" then size = size + (call(n, "size") or 0) else l = call(n, "list") or {} end end)
+    for _, it in pairs(l) do used = used + 1; items = items + it.count end
+  end)
   return used, size, items
 end
 
@@ -330,7 +360,7 @@ local function writeErrors()
 end
 
 function barrelPass()
-  barrel.outFull, barrel.moveErr, barrel.errs, barrel.bad = false, nil, {}, {}
+  barrel.outFull, barrel.moveErr, barrel.errs, barrel.bad, barrel.lists = false, nil, {}, {}, {}
   scanStock()
   while #requests > 0 do
     local r = table.remove(requests, 1)
@@ -339,29 +369,31 @@ function barrelPass()
   end
   for d, h in pairs(holds) do if os.clock() > h.untilT then holds[d] = nil end end
   drainOverflow()
-  factoryPass()
-  for _, n in ipairs(cfg.inputs) do routeAll(n, true) end
+  -- The factory, the Inputs and every dock (not held for its Canary) at the same time
+  local jobs = { factoryPass }
+  for _, n in ipairs(cfg.inputs) do jobs[#jobs + 1] = function() routeAll(n, true) end end
   for _, d in ipairs(cfg.docks) do
-    if not holds[d] then routeAll(d, true) end
+    if not holds[d] then jobs[#jobs + 1] = function() routeAll(d, true) end end
   end
+  each(jobs, function(job) job() end)
   trimStock()
   writeErrors()
-  -- Room, for the screens
-  local used, slots = room(cfg.outputs)
-  barrel.outFree, barrel.outSlots = slots - used, slots
-  local u, s = room(cfg.factoryIns)
-  barrel.factoryIn = { used = u, size = s }
-  local fu, fs_ = room(cfg.factoryOuts)
-  barrel.factoryFull = fs_ > 0 and fu >= fs_
-  local ou, os_, oi = room(cfg.overflows)
-  barrel.overflow = { used = ou, size = os_, items = oi }
+  -- Room, for the screens (all read at once)
+  local r, docks = {}, {}
+  each({ "outputs", "factoryIns", "factoryOuts", "overflows", "docks" }, function(k)
+    if k ~= "docks" then r[k] = { room(cfg[k]) }; return end
+    each(cfg.docks, function(d)
+      local c = 0
+      for _, it in pairs(call(d, "list") or {}) do c = c + it.count end
+      docks[d] = c
+    end)
+  end)
+  barrel.outFree, barrel.outSlots = r.outputs[2] - r.outputs[1], r.outputs[2]
+  barrel.factoryIn = { used = r.factoryIns[1], size = r.factoryIns[2] }
+  barrel.factoryFull = r.factoryOuts[2] > 0 and r.factoryOuts[1] >= r.factoryOuts[2]
+  local oi = r.overflows[3]
+  barrel.overflow = { used = r.overflows[1], size = r.overflows[2], items = oi }
   if oi > 0 and #cfg.outputs > 0 then barrel.outFull = true end
-  local docks = {}
-  for _, d in ipairs(cfg.docks) do
-    local c = 0
-    for _, it in pairs(call(d, "list") or {}) do c = c + it.count end
-    docks[d] = c
-  end
   barrel.docks = docks
 end
 

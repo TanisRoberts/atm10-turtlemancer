@@ -31,6 +31,7 @@ function Inv.new(opts)
   return self
 end
 Inv.peripheralMethods = { "size", "list", "getItemDetail", "getItemLimit", "pushItems", "pullItems" }
+Inv.mainThread = true   -- each call costs a game tick when the world has `ticks` on (sim/env.lua), as in CC
 
 function Inv:touch() end                           -- hook for subclasses that change over time (furnaces)
 function Inv:limitFor(name) return self.slotLimit or Inv.stackOf(name) end
@@ -221,6 +222,7 @@ local Tank = {}
 Tank.__index = Tank
 Inv.Tank = Tank
 Tank.peripheralMethods = { "tanks", "pushFluid", "pullFluid" }
+Tank.mainThread = true
 function Tank.new(opts)
   opts = opts or {}
   return setmetatable({ capacity = opts.capacity or 16000, fluid = opts.fluid, amount = opts.amount or 0,

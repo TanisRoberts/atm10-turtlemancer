@@ -304,3 +304,48 @@ T.test("md foreman: an empty bucket that comes out of the factory goes back into
   T.eq(e.b.fin:count("minecraft:bucket"), 5)
   T.eq(e.b.stock:count("minecraft:lava_bucket"), 3)
 end)
+
+-- 11 Canaries' docks, each full (27 stacks), and a full Factory out; every inventory call costs a tick, as in
+-- game. The Outputs are drained the way the hopper into the ender chest drains them.
+T.test("md foreman: with 11 full docks and a full Factory out, everything is moved within a few seconds", function()
+  local w = cc.world()
+  w.ticks = true
+  local net = w:net()
+  local cfg = { docks = {}, outputs = {}, stocks = {}, factoryIns = {}, factoryOuts = {}, overflows = {}, imported = true }
+  local docks, outs = {}, {}
+  for i = 1, 11 do
+    local d = net:add("minecraft:barrel_" .. i, MS.barrel())
+    for k = 1, 22 do d:give("minecraft:raw_iron", 64) end
+    d:give("minecraft:bucket", 16); d:give("minecraft:cobblestone", 64 * 4)
+    docks[#docks + 1] = d; cfg.docks[#cfg.docks + 1] = "minecraft:barrel_" .. i
+  end
+  for i = 1, 4 do
+    outs[#outs + 1] = net:add("minecraft:barrel_" .. (20 + i), MS.barrel())
+    cfg.outputs[#cfg.outputs + 1] = "minecraft:barrel_" .. (20 + i)
+  end
+  local stock = net:add("minecraft:barrel_30", MS.barrel()); cfg.stocks[1] = "minecraft:barrel_30"
+  local stock2 = net:add("minecraft:barrel_31", MS.barrel()); cfg.stocks[2] = "minecraft:barrel_31"
+  local fin = net:add("minecraft:barrel_32", MS.barrel()); cfg.factoryIns[1] = "minecraft:barrel_32"
+  local fout = net:add("minecraft:barrel_33", MS.barrel()); cfg.factoryOuts[1] = "minecraft:barrel_33"
+  fout:give("minecraft:lava_bucket", 27)
+  local c = w:computer{ id = 3, label = "MD Foreman" }
+  c:attach("back", cc.wired(net)); c:attach("top", cc.wireless{ ender = true })
+  c:installRole("mdforeman")
+  c:writeTable("mdforeman.cfg", cfg)
+  -- the ender chests take whatever reaches the Outputs (emptied every second)
+  local function drain() for _, o in ipairs(outs) do for s = 1, 27 do o:extract(s, 64) end end; w:after(1, drain) end
+  w:after(1, drain)
+  local t0 = w.now
+  c:run("mdforeman")
+  local function allEmpty()
+    for _, d in ipairs(docks) do if not d:isEmpty() then return false end end
+    return fout:count("minecraft:lava_bucket") == 0
+  end
+  T.waitFor(w, allEmpty, 120, "docks or Factory out never emptied")
+  local took = w.now - t0
+  print(("    (11 docks + Factory out emptied in %.1f s)"):format(took))
+  T.truthy(took <= 15, ("took %.1f s, too slow"):format(took))
+  T.eq(fin:count("minecraft:bucket"), 11 * 16, "every empty went to the factory")
+  T.eq(stock:count("minecraft:lava_bucket") + stock2:count("minecraft:lava_bucket"), 27)
+  T.running(c)
+end)

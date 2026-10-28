@@ -74,7 +74,9 @@ Foremans share one engine in `shared/fm*.lua` (each a `return function(F) ... en
 | Input | Dropped in by hand: routed like a haul. |
 | Ignore | Never touched. |
 
-Empty and lava buckets never go home. The overview shows "OUTPUT FULL" and how full Overflow is.
+Empty and lava buckets never go home.
+
+Every inventory call waits for a game tick, so a pass makes its calls side by side (`each` in `fm_barrels.lua`): every dock, its slots, the Inputs and Factory out at once, and each barrel is read once per pass. With 11 full docks and a full Factory out a pass takes about 6 s (one call at a time took over a minute). The sim charges the tick when a scenario sets `w.ticks = true`. The overview shows "OUTPUT FULL" and how full Overflow is.
 
 ## Remote protocol: `tanis-remote`
 

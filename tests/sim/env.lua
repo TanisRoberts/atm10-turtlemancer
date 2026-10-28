@@ -427,17 +427,35 @@ function Env.build(world, c)
     if not d then return nil end
     return { table.unpack(d.peripheralMethods or {}) }
   end
+  -- Like CC: an inventory's methods run on the server thread, so each call waits for the next game tick
+  -- (0.05 s). Calls made from several coroutines at once all finish on that same tick. A scenario turns it
+  -- on with `w.ticks = true` (older scenarios assume instant calls).
+  local taskSeq = 0
+  local function nextTick()
+    taskSeq = taskSeq + 1
+    local mine, gen = taskSeq, c.gen
+    local at = (math.floor(world.now / 0.05 + 1e-6) + 1) * 0.05
+    world:at(at, function() if c.alive and c.gen == gen then c:_queue("task_complete", mine) end end)
+    repeat
+      local ev = pack(coroutine.yield("task_complete"))
+      if ev[1] == "terminate" then error("Terminated", 0) end
+    until ev[2] == mine
+  end
+  local function invoke(d, method, ...)
+    if d.mainThread and world.ticks then nextTick() end
+    return d[method](d, ...)
+  end
   function peripheral.call(n, method, ...)
     local d = c:resolve(n)
     if not d then error("No peripheral attached", 2) end
     if not methodsOf(d)[method] then error("No such method " .. tostring(method), 2) end
-    return d[method](d, ...)
+    return invoke(d, method, ...)
   end
   function peripheral.wrap(n)
     local d = c:resolve(n)
     if not d then return nil end
     local w = {}
-    for _, m in ipairs(d.peripheralMethods or {}) do w[m] = function(...) return d[m](d, ...) end end
+    for _, m in ipairs(d.peripheralMethods or {}) do w[m] = function(...) return invoke(d, m, ...) end end
     return w
   end
   local wrapNames = setmetatable({}, { __mode = "k" })

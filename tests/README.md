@@ -66,6 +66,8 @@ Handy calls:
   `w.gpsOn = true` makes `gps.locate()` answer with the true position.
 - **Disks:** `c.mounts = { disk = 125000 }` (and `c.dirs.disk = true`) gives a computer a floppy folder with a size limit; `c.hddCapacity` caps the computer's own disk (writes past it raise "Out of space").
 - **Inventories:** `cc.Inv.new{size=, types=, slotLimit=}`, `inv:give(name, n)`, `inv:count(name)`, `inv:totals()`, `w:furnace{speed=}`.
+- **Ticks:** `w.ticks = true` makes every inventory call (`list`, `pushItems` ...) wait for the next game tick
+  (0.05 s), as in CC, with calls from parallel coroutines sharing a tick. Use it wherever throughput matters.
 - **Time/events:** `w:at(t, fn)` and `w:after(dt, fn)` run a callback at a virtual time (to unplug a modem, drop in an item, ...);
   `net:add / net:remove` while running raises the `peripheral` / `peripheral_detach` events.
 - **Other computers talking on rednet:** write a tiny stand-in with `c:writeFile("x.lua", [[ ... ]])` and `c:run("x")`
