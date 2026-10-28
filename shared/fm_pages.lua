@@ -237,7 +237,7 @@ function drawStatus(id, x, y, w, maxY)
     line(function()
       local dock = dockOf(id)
       lr(x, y, w, "Dock", dock and (dock:gsub("^minecraft:", "") .. ((barrel.docks[dock] or 0) > 0 and (", " .. barrel.docks[dock] .. " in it") or ""))
-        or "no dock barrel: /assign", K.grey, dock and K.grey or K.orange)
+        or (#cfg.docks > 0 and "not learned yet" or "no dock barrel: /assign"), K.grey, dock and K.grey or K.orange)
     end)
   elseif ownerLine then
     line(function() lr(x, y, w, "Foreman", ownerLine(id), K.grey, K.grey) end)

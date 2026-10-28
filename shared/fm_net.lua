@@ -88,8 +88,19 @@ function netLoop()
         elseif lastReply[from] and lastReply[from].seq == msg.seq then
           rednet.send(from, lastReply[from], PROTOCOL)   -- he missed my answer: say it again
         end
+      elseif P.barrels and (msg.type == "dock_mine" or msg.type == "dock_wrong") and msg.id == from then
+        local p = probe   -- his answer to "is this dock yours?" (fm_barrels.lua serveRequest)
+        if p and p.id == from and p.dock == msg.dock and not p.answer then
+          p.answer = msg.type == "dock_mine" and "mine" or "wrong"
+          if p.answer == "mine" then
+            learnDock(p.dock, from)
+            say(("Learned %s's dock."):format(reg[from] and reg[from].label or ("#" .. from)))
+          else lastReply[from] = nil end
+          os.queueEvent(WORK)
+        end
       elseif P.barrels and msg.type == "dock_done" and msg.id == from then
         for dn, hd in pairs(holds) do if hd.id == from then holds[dn] = nil end end
+        if probe and probe.id == from and not probe.answer then probe.answer = "wrong" end   -- a miner that can't answer
         os.queueEvent(WORK)
       elseif msg.type == "status" and msg.id == from then
         if ownsStatus(msg) then ownStatus(from, msg)

@@ -62,17 +62,46 @@ end
 dockReply = nil   -- latest dock_ready for me (set by the network loop)
 ASK_FOR = 10      -- seconds to wait for the Foreman's dock_ready
 
+-- Is what the Foreman says it put in a dock (got) in the barrel next to me?
+function inMyDock(got)
+  if not next(got or {}) then return false end
+  if S.dockDir ~= "up" and S.dockDir ~= "down" then face(S.dockDir) end
+  local l = core.dock.list(S.dockDir)
+  if not l then return false end
+  local have = {}
+  for _, it in pairs(l) do have[it.name] = (have[it.name] or 0) + it.count end
+  for name, n in pairs(got) do if (have[name] or 0) < n then return false end end
+  return true
+end
+
+-- A Foreman that doesn't know my dock yet tries one (r.probe): I answer whether its fuel is in mine. A wrong
+-- one he takes back and tries the next, so every try (and dock_wait: another miner's turn) gives me more time.
 function askDock(needBucket, wantFuel)
   if not rednet.isOpen() then return nil end
   local me, seq = os.getComputerID(), os.epoch("utc")
   dockReply = nil
-  local deadline, nextSend = os.clock() + ASK_FOR, 0
+  local deadline, nextSend, seen = os.clock() + ASK_FOR, 0, nil
   while os.clock() < deadline do
     if os.clock() >= nextSend then
       rednet.broadcast({ type = "dock_req", id = me, seq = seq, bucket = needBucket, fuel = wantFuel }, PROTOCOL)
       nextSend = os.clock() + 3
     end
-    if dockReply and dockReply.seq == seq then return dockReply end
+    local r = dockReply
+    if r and r.seq == seq then
+      if r.type == "dock_wait" then
+        dockReply = nil
+        setStatus("docked", ("%s is finding another dock"):format((MODE.boss:gsub("^t", "T"))))
+        deadline = os.clock() + 30
+      elseif not r.probe then return r
+      elseif r.probe ~= seen then
+        seen = r.probe
+        local mine = inMyDock(r.got)
+        rednet.broadcast({ type = mine and "dock_mine" or "dock_wrong", id = me, seq = seq, dock = r.dock }, PROTOCOL)
+        if mine then return r end
+        setStatus("docked", ("%s is finding my dock"):format((MODE.boss:gsub("^t", "T"))))
+        deadline = os.clock() + 30
+      end
+    end
     os.sleep(0.5)
   end
 end

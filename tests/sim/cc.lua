@@ -314,9 +314,18 @@ function Computer:screenText() return self.screen:text() end
 function Computer:output() return table.concat(self.printLog, "\n") end
 
 -- peripheral resolution: a side name, or a name on a wired network through a modem on one of the sides
+local DX, DZ = { [0] = 0, 1, 0, -1 }, { [0] = -1, 0, 1, 0 }
 function Computer:resolve(name)
   local d = self.sides[name]
   if d then return d end
+  -- like CC: a turtle sees the inventory in front of, above or below it as a peripheral on that side
+  local b = self.body
+  if b and (name == "front" or name == "top" or name == "bottom") then
+    local x, y, z = b.x, b.y, b.z
+    if name == "top" then y = y + 1 elseif name == "bottom" then y = y - 1 else x, z = x + DX[b.facing], z + DZ[b.facing] end
+    local blk = self.world:getBlock(x, y, z)
+    return blk and blk.inv or nil
+  end
   for _, side in ipairs(SIDES) do
     local m = self.sides[side]
     if m and m.isModem and m.wired then

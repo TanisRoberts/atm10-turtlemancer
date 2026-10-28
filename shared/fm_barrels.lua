@@ -99,9 +99,13 @@ function listOf(n)
 end
 
 -- What the Stock barrels hold, by item (and the lava waiting in Factory out)
-function scanStock()
+function scanStock(fresh)
   local have, seen = {}, barrel.seen
   local reads = {}
+  if fresh then   -- read again, not this pass's copy (a dock request comes after moves into Stock)
+    for _, n in ipairs(cfg.stocks) do barrel.lists[n] = nil end
+    for _, n in ipairs(cfg.factoryOuts) do barrel.lists[n] = nil end
+  end
   for _, n in ipairs(cfg.stocks) do reads[#reads + 1] = n end
   for _, n in ipairs(cfg.factoryOuts) do reads[#reads + 1] = n end
   each(reads, listOf)
@@ -292,47 +296,92 @@ function fromStock(item, count, dock)
 end
 
 function dockOf(id)
-  local free
-  for _, d in ipairs(cfg.docks) do
-    if cfg.dockFor[d] == id then return d end
-    if not cfg.dockFor[d] and not free then free = d end
+  for _, d in ipairs(cfg.docks) do if cfg.dockFor[d] == id then return d end end
+end
+
+-- A miner whose dock isn't known yet: I put his fuel in one dock nobody owns and ask "is it yours?". He looks in
+-- the barrel next to him and answers dock_mine (I remember it, like "For" in /assign) or dock_wrong (I take the
+-- fuel back and try the next one). One try at a time, so only one unowned dock ever has fuel in it.
+probe = nil      -- { id, dock, r, untilT, answer = "mine" | "wrong" }
+probeN = 0
+PROBE_FOR = 20   -- seconds he has to answer
+
+function learnDock(d, id)
+  for k, v in pairs(cfg.dockFor) do if v == id then cfg.dockFor[k] = nil end end
+  cfg.dockFor[d] = id
+  saveCfg()
+end
+
+-- Done with the try (or it timed out): wrong ones go back to Stock and his request goes round again
+function settleProbe()
+  local p = probe
+  if not p or p.answer == nil and os.clock() < p.untilT then return end
+  probe = nil
+  if p.answer == "mine" then return end   -- learned in the radio loop; the hold stays until his dock_done
+  holds[p.dock] = nil
+  routeAll(p.dock, true)
+  p.r.tried[p.dock] = true
+  if servedSeq[p.r.id] == p.r.seq then table.insert(requests, 1, p.r) end
+end
+
+-- Load what he asked for into `dock` from Stock (and Factory out)
+local function fill(dock, r, reply)
+  if r.bucket then
+    if fromStock(BUCKET, 1, dock) > 0 then reply.got[BUCKET] = 1
+    else reply.missing[#reply.missing + 1] = "bucket" end
   end
-  return free
+  local units = math.max(0, tonumber(r.fuel) or 0)
+  for _, f in ipairs(FUELS) do
+    local n = math.floor(units / f[2])
+    if f[1] == LAVA then n = math.ceil(units / f[2]) end
+    n = math.min(n, (f[1] == LAVA) and 14 or 64)
+    local have = (barrel.stock[f[1]] or 0) + (f[1] == LAVA and barrel.factoryLava or 0)
+    if n > 0 and have > 0 then
+      local m = fromStock(f[1], math.min(n, have), dock)
+      if m > 0 then
+        reply.got[f[1]] = m
+        units = units - m * f[2]
+        local fromStockN = math.min(m, barrel.stock[f[1]] or 0)
+        barrel.stock[f[1]] = (barrel.stock[f[1]] or 0) - fromStockN
+        if f[1] == LAVA then barrel.factoryLava = barrel.factoryLava - (m - fromStockN) end
+      end
+    end
+    if units <= 0 then break end
+  end
+  if units >= 80 then reply.missing[#reply.missing + 1] = "fuel" end
 end
 
 -- A miner at his dock asks for a bucket and/or fuel: empty the dock, then load what Stock (and Factory out) has
 function serveRequest(r)
   local dock = dockOf(r.id)
   local reply = { type = "dock_ready", id = r.id, seq = r.seq, got = {}, missing = {} }
-  if not dock then
+  local probing = false
+  if not dock and #cfg.docks > 0 then
+    r.tried = r.tried or {}
+    local free = {}
+    for _, d in ipairs(cfg.docks) do
+      if not cfg.dockFor[d] and not holds[d] and not r.tried[d] then free[#free + 1] = d end
+    end
+    -- First try: his haul out of his barrel, so the dock I try is the only unowned one with anything in it
+    if not next(r.tried) then each(free, function(d) routeAll(d, true) end) end
+    dock, probing = free[1], free[1] ~= nil
+    if not dock then
+      reply.note = next(r.tried) and ("Couldn't find %s's dock: set its For in /assign"):format(reg[r.id] and reg[r.id].label or ("#" .. r.id))
+        or "No free dock barrel: /assign one"
+    end
+  elseif not dock then
     reply.note = ("No dock barrel: /assign one on %s"):format(P.name)
-  else
+  end
+  if dock then
     routeAll(dock, true)
-    scanStock()
-    if r.bucket then
-      if fromStock(BUCKET, 1, dock) > 0 then reply.got[BUCKET] = 1
-      else reply.missing[#reply.missing + 1] = "bucket" end
+    scanStock(true)
+    fill(dock, r, reply)
+    if probing and next(reply.got) then
+      probeN = probeN + 1
+      reply.probe, reply.dock = probeN, dock
+      probe = { id = r.id, dock = dock, r = r, untilT = os.clock() + PROBE_FOR }
     end
-    local units = math.max(0, tonumber(r.fuel) or 0)
-    for _, f in ipairs(FUELS) do
-      local n = math.floor(units / f[2])
-      if f[1] == LAVA then n = math.ceil(units / f[2]) end
-      n = math.min(n, (f[1] == LAVA) and 14 or 64)
-      local have = (barrel.stock[f[1]] or 0) + (f[1] == LAVA and barrel.factoryLava or 0)
-      if n > 0 and have > 0 then
-        local m = fromStock(f[1], math.min(n, have), dock)
-        if m > 0 then
-          reply.got[f[1]] = m
-          units = units - m * f[2]
-          local fromStockN = math.min(m, barrel.stock[f[1]] or 0)
-          barrel.stock[f[1]] = (barrel.stock[f[1]] or 0) - fromStockN
-          if f[1] == LAVA then barrel.factoryLava = barrel.factoryLava - (m - fromStockN) end
-        end
-      end
-      if units <= 0 then break end
-    end
-    if units >= 80 then reply.missing[#reply.missing + 1] = "fuel" end
-    holds[dock] = { id = r.id, untilT = os.clock() + HOLD_FOR }
+    if not probing or reply.probe then holds[dock] = { id = r.id, untilT = os.clock() + HOLD_FOR } end
     if #reply.missing > 0 then
       reply.note = "Stock has no " .. table.concat(reply.missing, " or ")
     end
@@ -368,11 +417,20 @@ end
 function barrelPass()
   barrel.outFull, barrel.moveErr, barrel.errs, barrel.bad, barrel.lists = false, nil, {}, {}, {}
   scanStock()
+  settleProbe()
+  local later = {}
   while #requests > 0 do
     local r = table.remove(requests, 1)
-    local rep = serveRequest(r)
-    lastNote = rep.note
+    if servedSeq[r.id] ~= r.seq then                         -- he has asked again since: that one counts
+    elseif probe and not dockOf(r.id) then                   -- finding another miner's dock: his turn next
+      later[#later + 1] = r
+      if rednet.isOpen() then rednet.send(r.id, { type = "dock_wait", id = r.id, seq = r.seq }, PROTOCOL) end
+    else
+      local rep = serveRequest(r)
+      if not rep.probe then lastNote = rep.note end
+    end
   end
+  for _, r in ipairs(later) do requests[#requests + 1] = r end
   for d, h in pairs(holds) do if os.clock() > h.untilT then holds[d] = nil end end
   drainOverflow()
   -- The factory, the Inputs and every dock (not held for its Canary) at the same time

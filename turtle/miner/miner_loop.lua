@@ -178,7 +178,7 @@ function netLoop()
       os.setComputerLabel(lbl:sub(1, #MODE.name + 1) == MODE.name .. "-" and lbl or myLabel(S.num))
       print(("%s named me %s."):format((MODE.boss:gsub("^t", "T")), os.getComputerLabel()))
       save()
-    elseif type(msg) == "table" and msg.type == "dock_ready" and msg.id == me then
+    elseif type(msg) == "table" and (msg.type == "dock_ready" or msg.type == "dock_wait") and msg.id == me then
       dockReply = msg
     elseif type(msg) == "table" and msg.type == "cmd" and msg.to == me and cmdForMe(msg) then
       ctrl = msg

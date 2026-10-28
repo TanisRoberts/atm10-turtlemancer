@@ -403,3 +403,53 @@ T.test("md foreman: Factory out never fills while the factory runs flat out next
   T.truthy(most <= 6, "Factory out filled up to " .. most .. " slots")
   T.eq(fout:count("minecraft:bucket"), 0, "an empty left in Factory out")
 end)
+
+-- Docks nobody set "For" on: the Foreman learns each Canary's dock by putting his fuel in one and asking him.
+-- Three Canaries ask at once; the first dock on the list has no turtle at all, the next is the last Canary's.
+T.test("md foreman: Canaries whose docks aren't known get them learned, and their fuel stays put", function()
+  local w = cc.world()
+  w.gpsOn = true
+  w.ticks = true
+  w:fill(-20, 40, -20, 40, 63, 20, "minecraft:stone")
+  local net = w:net()
+  local cfg = { docks = {}, outputs = { "minecraft:barrel_1" }, stocks = { "minecraft:barrel_3", "minecraft:barrel_5" },
+    factoryIns = { "minecraft:barrel_4" }, factoryOuts = {}, overflows = {}, imported = true, nextNum = 4, canaries = {} }
+  net:add("minecraft:barrel_1", MS.barrel())
+  local stock = net:add("minecraft:barrel_3", MS.barrel())
+  stock:give("minecraft:lava_bucket", 27)
+  net:add("minecraft:barrel_5", MS.barrel()):give("minecraft:lava_bucket", 27)
+  net:add("minecraft:barrel_4", MS.barrel())
+  net:add("minecraft:barrel_10", MS.barrel()); cfg.docks[1] = "minecraft:barrel_10"     -- nobody's
+  local docks, ts = {}, {}
+  for i, id in ipairs({ 9, 7, 8 }) do
+    local x = (id - 7) * 4
+    local d = MS.barrel()
+    w:setBlock(x + 1, 64, 0, "minecraft:barrel", d)
+    net:add("minecraft:barrel_" .. (10 + i), d); cfg.docks[#cfg.docks + 1] = "minecraft:barrel_" .. (10 + i)
+    docks[id] = "minecraft:barrel_" .. (10 + i)
+  end
+  local c = w:computer{ id = 3, label = "MD Foreman" }
+  c:attach("back", cc.wired(net)); c:attach("top", cc.wireless{ ender = true })
+  c:monitor("right", 57, 24)
+  c:installRole("mdforeman")
+  for _, id in ipairs({ 7, 8, 9 }) do
+    cfg.canaries[id] = { num = id - 6, label = "Canary-0" .. (id - 6), want = "run", minY = 60, maxY = 63, pMin = 60, pMax = 63,
+      r1 = 0, r2 = 0, pR1 = 0, pR2 = 0, seq = 1 }
+  end
+  c:writeTable("mdforeman.cfg", cfg)
+  c:run("mdforeman")
+  for _, id in ipairs({ 7, 8, 9 }) do
+    ts[id] = MS.turtle(w, { id = id, x = (id - 7) * 4, fuel = 400 })
+    MS.setup(w, ts[id])
+  end
+  -- ordered to mine already: each asks for fuel as soon as he's set up
+  T.waitFor(w, function()
+    for _, id in ipairs({ 7, 8, 9 }) do if ts[id].body.fuel < 2000 then return false end end
+    return true
+  end, 400, "not every Canary got his fuel")
+  local learned = c:readTable("mdforeman.cfg").dockFor
+  for _, id in ipairs({ 7, 8, 9 }) do T.eq(learned[docks[id]], id, "learned the dock of #" .. id) end
+  T.eq(learned["minecraft:barrel_10"], nil, "the empty dock stays nobody's")
+  T.running(c)
+  for _, id in ipairs({ 7, 8, 9 }) do T.running(ts[id]) end
+end)
