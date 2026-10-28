@@ -218,9 +218,22 @@ function workerLoop()
   end
 end
 
+-- Factory out, every half second: lava to Stock, empties back to Factory in (fm_barrels.lua factoryPass)
+FACTORY_EVERY = 0.5
+function factoryLoop()
+  if not P.barrels then return os.pullEvent("never") end
+  while true do
+    if not paused and #cfg.factoryOuts > 0 then
+      local ok, err = pcall(factoryPass)
+      if not ok and err ~= PAUSED then say("Factory: " .. tostring(err), K.red) end
+    end
+    os.sleep(FACTORY_EVERY)
+  end
+end
+
 function start()
   loadCfg()
   draw()
-  parallel.waitForAny(netLoop, inputLoop, workerLoop)
+  parallel.waitForAny(netLoop, inputLoop, workerLoop, factoryLoop)
 end
 

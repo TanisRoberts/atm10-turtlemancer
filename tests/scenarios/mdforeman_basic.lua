@@ -349,3 +349,57 @@ T.test("md foreman: with 11 full docks and a full Factory out, everything is mov
   T.eq(stock:count("minecraft:lava_bucket") + stock2:count("minecraft:lava_bucket"), 27)
   T.running(c)
 end)
+
+-- The lava factory can't be stopped: a full Factory out drops buckets on the floor. With 11 full docks being
+-- emptied at the same time (every call a tick), Factory out must never fill.
+T.test("md foreman: Factory out never fills while the factory runs flat out next to 11 full docks", function()
+  local w = cc.world()
+  w.ticks = true
+  local net = w:net()
+  local cfg = { docks = {}, outputs = {}, stocks = {}, factoryIns = {}, factoryOuts = {}, overflows = {}, imported = true }
+  local docks, outs = {}, {}
+  for i = 1, 11 do
+    docks[i] = net:add("minecraft:barrel_" .. i, MS.barrel()); cfg.docks[i] = "minecraft:barrel_" .. i
+  end
+  for i = 1, 4 do outs[i] = net:add("minecraft:barrel_" .. (20 + i), MS.barrel()); cfg.outputs[i] = "minecraft:barrel_" .. (20 + i) end
+  for i = 1, 30 do net:add("minecraft:barrel_" .. (30 + i), MS.barrel()); cfg.stocks[i] = "minecraft:barrel_" .. (30 + i) end
+  local fin = net:add("minecraft:barrel_70", MS.barrel()); cfg.factoryIns[1] = "minecraft:barrel_70"
+  local fout = net:add("minecraft:barrel_71", MS.barrel()); cfg.factoryOuts[1] = "minecraft:barrel_71"
+  fin:give("minecraft:bucket", 16 * 10)
+  local c = w:computer{ id = 3, label = "MD Foreman" }
+  c:attach("back", cc.wired(net)); c:attach("top", cc.wireless{ ender = true })
+  c:installRole("mdforeman")
+  c:writeTable("mdforeman.cfg", cfg)
+  c:run("mdforeman")
+  local most, dropped = 0, 0
+  -- the factory: an empty from Factory in becomes lava in Factory out 4 times a second; an empty slips through now and then
+  local made = 0
+  local function factory()
+    for s = 1, 27 do
+      if fin.slots[s] then
+        fin:extract(s, 1)
+        made = made + 1
+        local put = fout:insert(made % 10 == 0 and "minecraft:bucket" or "minecraft:lava_bucket", 1)
+        if put == 0 then dropped = dropped + 1 end
+        break
+      end
+    end
+    most = math.max(most, #(function() local t = {} for s in pairs(fout.slots) do t[#t + 1] = s end return t end)())
+    w:after(0.25, factory)
+  end
+  w:after(1, factory)
+  -- every 20 s all 11 Canaries come home full
+  local function haul()
+    for _, d in ipairs(docks) do for k = 1, 25 do d:give("minecraft:raw_iron", 64) end; d:give("minecraft:bucket", 2) end
+    w:after(20, haul)
+  end
+  w:after(2, haul)
+  local function drain() for _, o in ipairs(outs) do for s = 1, 27 do o:extract(s, 64) end end; w:after(1, drain) end
+  w:after(1, drain)
+  w:run(90)
+  T.running(c)
+  print(("    (Factory out held at most %d slots; %d buckets dropped)"):format(most, dropped))
+  T.eq(dropped, 0, "buckets dropped on the floor")
+  T.truthy(most <= 6, "Factory out filled up to " .. most .. " slots")
+  T.eq(fout:count("minecraft:bucket"), 0, "an empty left in Factory out")
+end)

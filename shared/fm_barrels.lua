@@ -126,6 +126,11 @@ function pushInto(list, from, slot, item, count)
   if paused then error(PAUSED, 0) end
   local moved = 0
   local firstPass, second = {}, {}
+  if #list > 1 then   -- read the barrels not read yet this pass, all at once (30 Stock barrels one by one took 1.5 s)
+    local unread = {}
+    for _, n in ipairs(list) do if barrel.lists[n] == nil and not barrel.bad[n] then unread[#unread + 1] = n end end
+    each(unread, listOf)
+  end
   for _, n in ipairs(list) do
     if not barrel.bad[n] then
       local holds = false
@@ -241,13 +246,14 @@ local function drainOverflow()
   end
 end
 
--- The lava factory: every lava bucket in Factory out goes to Stock while Stock has room, so the factory never
--- stalls on a full output (lava never goes home). Only a full Stock leaves it waiting there. An empty bucket
--- that comes out goes back into Factory in.
-local function factoryPass()
+-- The lava factory can't be stopped: a full Factory out drops its buckets on the floor, where they despawn.
+-- So every lava bucket in Factory out goes to Stock while Stock has room (lava never goes home); only a full
+-- Stock leaves it waiting there. An empty bucket that comes out goes back into Factory in. Factory out has its
+-- own lane, every half second (fm_net.lua factoryLoop).
+function factoryPass()
   local slots = {}
   for _, n in ipairs(cfg.factoryOuts) do
-    for slot, it in pairs(listOf(n)) do slots[#slots + 1] = { n, slot, it } end
+    for slot, it in pairs(call(n, "list") or {}) do slots[#slots + 1] = { n, slot, it } end
   end
   each(slots, function(e)
     local n, slot, it = e[1], e[2], e[3]
@@ -370,7 +376,7 @@ function barrelPass()
   for d, h in pairs(holds) do if os.clock() > h.untilT then holds[d] = nil end end
   drainOverflow()
   -- The factory, the Inputs and every dock (not held for its Canary) at the same time
-  local jobs = { factoryPass }
+  local jobs = {}   -- (Factory out has its own lane: factoryLoop)
   for _, n in ipairs(cfg.inputs) do jobs[#jobs + 1] = function() routeAll(n, true) end end
   for _, d in ipairs(cfg.docks) do
     if not holds[d] then jobs[#jobs + 1] = function() routeAll(d, true) end end

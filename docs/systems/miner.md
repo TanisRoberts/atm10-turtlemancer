@@ -70,7 +70,7 @@ Foremans share one engine in `shared/fm*.lua` (each a `return function(F) ... en
 | Overflow | Haul goes here when every Output is full. When an Output has room, Overflow drains into it first. |
 | Stock | Stays in the MD: every lava bucket from the factory, empty buckets and fuel up to their keep counts (Rules page). |
 | Factory in | The lava factory's input: gets every empty bucket (from docks, and Stock above its keep). |
-| Factory out | The factory's output: emptied into Stock every pass, so the factory never stalls on a full output. Only a full Stock leaves lava waiting here ("Factory out full" on the overview); a dock that asked can still take it straight from here. An empty bucket that comes out goes back into Factory in. |
+| Factory out | The factory's output. The factory can't be stopped (a full Factory out drops buckets on the floor), so Factory out has its own lane every half second: every lava bucket to Stock while Stock has room, every empty bucket back to Factory in. Only a full Stock leaves lava waiting here ("Factory out full" on the overview); a dock that asked can still take it straight from here. |
 | Input | Dropped in by hand: routed like a haul. |
 | Ignore | Never touched. |
 
