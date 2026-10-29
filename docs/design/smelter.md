@@ -443,3 +443,177 @@ Mockup legend: every block is exactly the width in its `w=` tag. A space is a bl
 ```
 
 - Three steps (machine, feed, out), each a list of what is left on the cable. `Cancel` leaves.
+
+
+## Factories: ORES list and + Item (#63)
+
+The Factories page lists what the factories have learned under ORES. A `+ Item` button adds anything else by hand (ancient debris first). `+ Item` does exactly what `enrich add <item>` does on the terminal: it queues a normal factory trial, and the item stays on the list after a Retry.
+
+```text w=57
+▓FACTORIES▓                                     1 set up 
+─────────────────────────────────────────────────────────
+ ▒ Factory 1: working                          80% power 
+ ▒   advancedEnrichingFactory_0              5 processes 
+ ▒   feed barrel_65 -> out barrel_63                     
+                                                         
+ ORES                                                    
+  raw iron -> 4 dust per 3                      via dust 
+ ▓+ancient▓debris▓->▓1▓netherite▓scrap▓per▓1▓▓▓▓▓▓direct▓
+  raw osmium                                    trying 2 
+ +dirty netherite scrap                           queued 
+  raw tin                                        refused 
+  raw lead -> 4 dust per 3                  not worth it 
+                                                         
+                                                         
+                                                         
+                                                         
+                                                         
+                                                         
+                                                         
+                                                         
+ + = added by hand. Tap one for Retry / Remove.          
+                                                         
+ ▒+▒Add▒ ▒+▒Item▒ ▒Retry▒ ░Sure?▒Remove░                 
+░<░ Back                                                 
+```
+
+- `+ Item` sits in the footer after `+ Add`, at every size, and opens the pick page.
+- ORES rows: the item, what its trial learned (`made` per `used`), and its state on the right. A leading `+` marks an item added by hand.
+- States: `queued` (grey, waiting for an idle factory), `trying n` (yellow, n items dripped in so far), `checking dust` (yellow, the trainer is checking the dust), `via dust` (lime: ore to dust, the dust smelts), `direct` (lime: the factory makes the final product itself, e.g. debris to scrap), `refused` (orange: the factory wouldn't take it), `not worth it` (orange: its output smelts into nothing useful).
+- Tap a row to select it (gold bar). The footer then shows `Retry` (forget the result and trial it again, same as `enrich forget`) and, for hand-added items only, `Remove` (tap-twice: `Sure? Remove`), which takes it off the list for good (`enrich remove <item>` on the terminal). Learned ores can only be retried, not removed: the next one that comes in would be trialled anyway.
+- Hint line above the footer: `+ = added by hand. Tap one for Retry / Remove.`
+
+### A factory whose machine is gone
+
+```text w=57
+▓FACTORIES▓                                     1 set up 
+─────────────────────────────────────────────────────────
+ ▒ Factory 1: factory missing, re-add it                 
+ ▒   basicEnrichingFactory_0            not on the cable 
+ ▒   feed barrel_65 -> out barrel_63                     
+                                                         
+                                                         
+                                                         
+                                                         
+                                                         
+                                                         
+                                                         
+                                                         
+                                                         
+                                                         
+                                                         
+                                                         
+                                                         
+                                                         
+                                                         
+                                                         
+                                                         
+ ▒+▒Add▒ ▒+▒Item▒ ░Remove▒F1░                            
+░<░ Back                                                 
+```
+
+- The card turns red with `factory missing, re-add it`, and its second line says `not on the cable`. Its ores go to the furnaces meanwhile. The fix is `Remove F1`, then `+ Add` with the upgraded machine.
+
+### Pick an item
+
+```text w=57
+▓ADD▓AN▓ITEM▓                             smeltable  1/2 
+─────────────────────────────────────────────────────────
+ Pick an item to try in the factory. The trial learns    
+ what one makes; nothing is hard-coded.                  
+                                                         
+ ▓▓ancient▓debris▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓2,304▓ 
+   dirty netherite scrap                              96 
+   cobblestone                                    41,210 
+   oak log                                         1,280 
+   cod                                               412 
+   sand                                              388 
+   raw iron                                   already on 
+                                                         
+                                                         
+                                                         
+                                                         
+                                                         
+                                                         
+                                                         
+ Tap one, then Try it. Smeltable = the furnaces cook it. 
+                                                         
+ ▒Try▒it▒ ▒Smeltable▒ ░All░                  <  1/2  ░>░ 
+░Cancel░                                                 
+```
+
+- Same pattern as the trainer's pick list: one row per item, tap to select (gold bar), then `Try it`. No keyboard needed.
+- `Smeltable` (the default) lists storage items the recipe book can cook, plus anything already queued or hand-added. `All` lists every item in storage. Most first, pager for more.
+- Items already on the ORES list say `already on` and can't be picked again.
+- `Try it` adds it, says `ancient debris queued for a factory trial` in the notice line and goes back to Factories. `Cancel` goes back without adding.
+
+### Smaller sizes
+
+51x19:
+
+```text w=51
+▓FACTORIES▓                               1 set up 
+───────────────────────────────────────────────────
+ ▒ Factory 1: working                    80% power 
+ ▒   advancedEnrichingFactory_0             5 proc 
+ ▒   feed barrel_65 -> out barrel_63               
+                                                   
+ ORES                                              
+  raw iron 3->4 dust                      via dust 
+ +ancient debris 1->1 scrap                 direct 
+  raw osmium                              trying 2 
+ +dirty netherite scrap                     queued 
+                                                   
+                                                   
+                                                   
+                                                   
+                                                   
+ ▒+▒Add▒ ▒+▒Item▒ ▒Retry▒ ░Remove░                 
+                                                   
+░<░ Back                                           
+```
+
+39x13: one line per factory card, and the learned ratio is shortened (`3->4`):
+
+```text w=39
+▓FACTORIES▓                          1 
+───────────────────────────────────────
+ ▒ F1 working                      80% 
+ ORES                                  
+  raw iron 3->4                   dust 
+ +ancient debris 1->1           direct 
+  raw osmium                  trying 2 
+ +dirty netherite scr           queued 
+                                       
+                                       
+ ▒+▒Add▒ ▒+▒Item▒ ▒Retry▒ ░Remove░     
+                                       
+░<░ Back                               
+```
+
+26x20: the footer wraps onto two rows and ratios are left out (they're on the bigger screens and the terminal):
+
+```text w=26
+▓FACTORIES▓             1 
+──────────────────────────
+ ▒ F1 working         80% 
+                          
+ ORES                     
+  raw iron           dust 
+ +ancient debris   direct 
+  raw osmium        try 2 
+ +dirty netherite  queued 
+                          
+                          
+                          
+                          
+                          
+                          
+                          
+ ▒+▒Add▒ ▒+▒Item▒         
+ ▒Retry▒ ░Remove░         
+                          
+░<░ Back                  
+```
+
+The pick page has the same layout at every size, with fewer rows per page; the hint lines are dropped below 51 wide.
