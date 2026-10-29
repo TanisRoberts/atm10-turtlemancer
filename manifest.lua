@@ -59,7 +59,7 @@ local M = {
             .. "first. Teach it new recipes with a training furnace. Storage moves the items. "
             .. "Wired modem on the storage cable; advanced monitor optional (3x2 is ideal).",
           run = "smelter",
-          files = { "computer/smelter/smelter.lua", "computer/smelter/drip.lua", "shared/ui.lua", "shared/ui_widgets.lua", "shared/ui_parts.lua", "shared/ui_motion.lua" },
+          files = { "computer/smelter/smelter.lua", "computer/smelter/drip.lua", "computer/smelter/direct.lua", "shared/ui.lua", "shared/ui_widgets.lua", "shared/ui_parts.lua", "shared/ui_motion.lua" },
           once = { "computer/smelter/smelt.txt" },
         },
         foreman = {

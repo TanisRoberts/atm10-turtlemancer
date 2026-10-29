@@ -53,6 +53,7 @@ local TOPUP_AT      = 32      -- a busy furnace gets more of the same once it's 
 -- locals together with each function's, and stops at 200
 local FX = {}
 FX.FACTORY_BUFFER = 3     -- batches per process kept queued at a factory (feed barrel + its inputs)
+FX.direct = require("direct") -- direct or via dust, and the hand-added list (computer/smelter/direct.lua)
 FX.drip = require("drip") -- the drip trial's decisions (computer/smelter/drip.lua)
 FX.kit = require("ui")    -- the UI kit's motion: ui.beat, ui.anim (ANIM=full|calm|off in smelter.env)
 FX.FALLBACK_AFTER = 300   -- seconds every factory can be down before ore goes to the furnaces again
@@ -130,7 +131,8 @@ local STONE_TIER = { "furnace", "FURNACE", 200, K.grey, K.white, "STONE" }
 --   speed   = { [furnace] = { t = seconds busy, n = items cooked } }  (measured)
 --   factories = { { machine, feed, out }, ... }  (enriching factories, see the top)
 --   enrich  = { [ore] = { out = dust, used = ore in, made = dust out, drip = true, at } or { no = true, at }
---               (dustBad = its dust didn't smelt; drip = used counts ore for ONE process, learned by a drip trial)
+--               (direct = the product is what the furnace makes from it too: no dust check;
+--               dustBad = its dust didn't smelt; drip = used counts ore for ONE process, learned by a drip trial)
 --   trialSaved = { [machine] = { eject, sort, at } }  only while a drip trial runs: the factory's settings to
 --               put back (also after a reboot)
 --   dripProgress = true: a drip trial tells "a process started" by getRecipeProgress, not by waiting an operation
@@ -147,6 +149,7 @@ local function loadCfg()
   if type(cfg.speed) ~= "table" then cfg.speed = {} end
   if type(cfg.factories) ~= "table" then cfg.factories = {} end
   if type(cfg.enrich) ~= "table" then cfg.enrich = {} end
+  if type(cfg.enrichExtra) ~= "table" then cfg.enrichExtra = {} end
 end
 local function saveCfg()
   local f = fs.open(CONFIG .. ".new", "w"); f.write(textutils.serialize(cfg)); f.close()
@@ -489,6 +492,11 @@ function FX.isOreish(name)
     or name:find(":ancient_debris$") ~= nil
 end
 
+-- Worth a factory trial: an ore, or something added by hand (enrich add)
+function FX.trialable(name)
+  return FX.isOreish(name) or FX.direct.isExtra(cfg.enrichExtra, name)
+end
+
 function FX.factoryName(i) return "Factory " .. i end
 -- One batch for every process: what a drip trial used x the factory's processes. (Entries learned
 -- before the drip trial count a whole batch of 3 per process.)
@@ -614,7 +622,11 @@ end
 -- How many of a recipe's output one of this ore makes by way of a factory (0 = no route)
 function FX.enrichPer(r, ore)
   local e = cfg.enrich[ore]
-  if type(e) ~= "table" or not e.out or e.dustBad or not isInputOf(r, e.out) then return 0 end
+  if type(e) ~= "table" or not e.out or e.dustBad then return 0 end
+  if FX.direct.kind(book, ore, e) == "direct" then
+    return outMatches(r, e.out) and isInputOf(r, ore) and e.made / math.max(1, e.used) or 0
+  end
+  if not isInputOf(r, e.out) then return 0 end
   return (e.made / math.max(1, e.used)) * perOf(r, e.out)
 end
 
@@ -627,7 +639,9 @@ function FX.pendingFor(r)
       for name, c in pairs(s.feed) do n = n + c * FX.enrichPer(r, name) end
       for name, c in pairs(s.ins) do n = n + c * FX.enrichPer(r, name) end
       for name, c in pairs(s.outs) do if isInputOf(r, name) then n = n + c * perOf(r, name) end end
+      for name, c in pairs(s.outs) do if outMatches(r, name) then n = n + c end end          -- a direct product
       for name, c in pairs(s.outBarrel or {}) do if isInputOf(r, name) then n = n + c * perOf(r, name) end end
+      for name, c in pairs(s.outBarrel or {}) do if outMatches(r, name) then n = n + c end end
       for name, c in pairs(s.drained or {}) do if isInputOf(r, name) then n = n + c * perOf(r, name) end end
     end
   end
@@ -649,7 +663,8 @@ function FX.enrichList()
     local state
     if e.no then state = "refused"
     elseif e.dustBad then state = "dust won't smelt"
-    elseif FX.dustRecipe(e.out) then state = "on"
+    elseif FX.direct.kind(book, ore, e) == "direct" then state = "direct"
+    elseif FX.dustRecipe(e.out) then state = "via dust"
     else state = "checking dust" end
     out[#out + 1] = { ore = ore, e = e, state = state }
   end
@@ -850,6 +865,18 @@ local function smeltPass()
     if #cfg.factories == 0 or not FX.factoriesHold() then return nil end
     local e = cfg.enrich[input]
     if type(e) == "table" and (e.no or e.dustBad) then return nil end
+    if type(e) == "table" and e.out and FX.direct.kind(book, input, e) == "direct" then
+      -- The factory makes what the furnace would: only that recipe takes it, and no dust check is waited on
+      if not (outMatches(r, e.out) and isInputOf(r, input)) then return nil end
+      local n = have[input] or 0
+      if n > 0 and n < FX.minUnit(input) then
+        FX.leftoverSince[input] = FX.leftoverSince[input] or os.clock()
+        if os.clock() - FX.leftoverSince[input] > FX.LEFTOVER_WAIT then return nil end
+      else
+        FX.leftoverSince[input] = nil
+      end
+      return "factory", e
+    end
     if type(e) == "table" and e.out then
       if isInputOf(r, e.out) then
         local n = have[input] or 0
@@ -872,7 +899,7 @@ local function smeltPass()
       if metal == made then guesses[e.out] = r.out; return "hold" end
       return nil
     end
-    if FX.isOreish(input) then
+    if FX.trialable(input) then
       if FX.trialFor(input) then return "hold" end
       return startTrial(input)
     end
@@ -914,7 +941,8 @@ local function smeltPass()
     for _, o in ipairs(ores) do
       if amount <= 0 then break end
       local ratio = o.e.made / math.max(1, o.e.used)
-      local per = job and 1 or ratio * perOf(r, o.e.out)
+      local direct = FX.direct.kind(book, o.input, o.e) == "direct"
+      local per = job and 1 or ratio * (direct and 1 or perOf(r, o.e.out))
       local want = math.ceil(amount / per)
       local roundUp = keepKey and os.clock() - FX.shortSince[keepKey] >= 10
       local taken = feedFactories(o.input, want, job, roundUp)
@@ -925,7 +953,7 @@ local function smeltPass()
         give(o.input, math.min(before, want - taken), job)
         amount = amount - (before - have[o.input])
       end
-      if job and taken > 0 then
+      if job and taken > 0 and not direct then
         job.follow = job.follow or {}
         job.follow[o.e.out] = (job.follow[o.e.out] or 0) + math.floor(taken * ratio)
         job.followAt = os.clock()
@@ -1349,7 +1377,7 @@ function FX.trialVerdict(i, t, v)
   local ore = pretty(t.input)
   if t.probe then return FX.probeEnd(i, t, v) end
   if v.kind == "learned" then
-    cfg.enrich[t.input] = FX.drip.result(t, v.product, v.made)
+    cfg.enrich[t.input] = FX.drip.result(t, v.product, v.made, FX.direct.furnaceRecipe(book, t.input, v.product) ~= nil)
     saveCfg()
     FX.endTrial(i, ("Factory: %d %s -> %d %s (%d to start)"):format(t.n, ore, v.made, pretty(v.product), t.n), K.lime)
   elseif v.kind == "refused" then
@@ -1763,7 +1791,7 @@ function FX.drawFactories(w, h)
       if y > bottom then break end
       local e = o.e
       local left = itemShort(o.ore) .. (e.out and (" -> " .. e.made .. " " .. itemShort(e.out) .. " per " .. e.used) or "")
-      local col = o.state == "on" and K.lime or (o.state == "checking dust" and K.yellow or K.orange)
+      local col = (o.state == "direct" or o.state == "via dust") and K.lime or (o.state == "checking dust" and K.yellow or K.orange)
       lr(2, y, w - 2, left, o.state, K.white, col)
       y = y + 1
     end
@@ -2442,7 +2470,7 @@ local function drawRule(w, h)
   end
   for _, ore in ipairs(sortedKeys(cfg.enrich)) do
     local e = cfg.enrich[ore]
-    if type(e) == "table" and e.out and not e.dustBad and isInputOf(r, e.out) then
+    if type(e) == "table" and e.out and not e.dustBad and (isInputOf(r, e.out) or (FX.direct.kind(book, ore, e) == "direct" and outMatches(r, e.out))) then
       line("Factory", ("%s -> %d %s per %d"):format(pretty(ore), e.made, pretty(e.out), e.used), K.lightGrey, K.lime)
     end
   end
@@ -2571,7 +2599,7 @@ end
 ---------------------------------------------------------------------------
 -- Terminal commands (type anywhere on the computer's own screen)
 ---------------------------------------------------------------------------
-local HELP = "smelt <item> <n> | train | recipes | rule <item> | trainer | factories | factory add <machine> <feed> <out> | probe [item] [factory] | probe stop | factory remove <n> | enrich forget <ore> | pause | run | home"
+local HELP = "smelt <item> <n> | train | recipes | rule <item> | trainer | factories | factory add <machine> <feed> <out> | probe [item] [factory] | probe stop | factory remove <n> | enrich add <item> | enrich forget <ore> | pause | run | home"
 local function runCommand(line)
   ui = views[2].ui
   local q = line:lower():gsub("^%s*/", ""):gsub("^%s+", ""):gsub("%s+$", "")
@@ -2619,11 +2647,31 @@ local function runCommand(line)
   elseif q:match("^enrich%s+forget%s+%S+$") then
     local word = q:match("(%S+)$")
     local gone = 0
-    for ore in pairs(cfg.enrich) do
-      if ore == word or shortName(ore) == word or shortName(ore) == "raw_" .. word then cfg.enrich[ore] = nil; gone = gone + 1 end
+    for _, ore in ipairs(FX.direct.match(word, sortedKeys(cfg.enrich))) do
+      cfg.enrich[ore] = nil; FX.trialCool[ore] = nil; gone = gone + 1
     end
     saveCfg()
     say(gone > 0 and ("Forgot what the factories learned about " .. word .. ": it gets tried again.") or ("Nothing learned about " .. word .. "."), K.lime, ui)
+  elseif q:match("^enrich%s+add%s+%S+$") then
+    local word = q:match("(%S+)$")
+    local names = {}
+    for name in pairs(byName) do names[#names + 1] = name end
+    for _, name in ipairs(cfg.enrichExtra) do names[#names + 1] = name end
+    table.sort(names)
+    local found = FX.direct.match(word, names)
+    if #found == 0 and word:find(":", 1, true) then found = { word } end
+    if #found == 0 then say("No '" .. word .. "' in storage. Use the full id (mod:item) if there is none yet.", K.orange, ui)
+    elseif #found > 1 then
+      local short = {}
+      for i = 1, math.min(#found, 4) do short[i] = shortName(found[i]) end
+      say("Which one? " .. table.concat(short, ", "), K.orange, ui)
+    else
+      local item = found[1]
+      if FX.direct.addExtra(cfg.enrichExtra, item) then
+        saveCfg()
+        say(pretty(item) .. " will be tried in a factory.", K.lime, ui)
+      else say(pretty(item) .. " is on the list already.", K.white, ui) end
+    end
   elseif q == "status" then
     local st = smeltStatus()
     say(table.concat(st, " | "), K.white, ui)

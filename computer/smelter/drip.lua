@@ -58,10 +58,11 @@ function D.sent(t, moved)
   end
 end
 
--- The result I learn: kept in one place so a later change (a "direct" final-product marker) adds a field here.
+-- The result I learn: kept in one place so a change to its shape adds a field here. `direct = true` (set by the
+-- caller (`direct` argument) when the furnace makes the same product from the same item, see direct.lua) marks a final product.
 -- `used` and `made` are per operation; `drip` says used counts items for ONE process (older entries count a batch).
-function D.result(t, product, made)
-  return { out = product, used = t.n, made = made, drip = true, at = os.epoch("utc") }
+function D.result(t, product, made, direct)
+  return { out = product, used = t.n, made = made, drip = true, direct = direct or nil, at = os.epoch("utc") }
 end
 
 local function biggest(outs)
