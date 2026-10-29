@@ -116,6 +116,12 @@ function World:furnace(opts)
   return Inv.Furnace.new(opts)
 end
 
+function World:factory(opts)
+  opts = opts or {}
+  opts.clock = function() return self.now end
+  return require("sim.factory").new(opts)
+end
+
 function World:reactor(opts)
   opts = opts or {}
   opts.clock = function() return self.now end

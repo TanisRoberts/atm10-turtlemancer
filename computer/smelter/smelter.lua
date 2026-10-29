@@ -31,7 +31,7 @@
 --   -> factory (wired modem on it, so I can read it) -> auto-eject into an out barrel (on the cable).
 -- Add one on the Factories page (or: factory add <machine> <feed> <out>). Storage fills the feed
 -- barrel, treats the out barrel like an input chest, and never stores anything in either.
--- Raw ore with a factory route goes to the factories (whole batches: 3 per process) instead of the
+-- Raw ore with a factory route goes to the factories (whole batches: what a drip trial used, per process) instead of the
 -- furnaces, and its dust is smelted. A new ore is tried once: 3 per process into the feed, eject off
 -- so I can read what comes out (raw tin 9 -> tin dust 12), eject back on. The dust is then checked in
 -- the training furnace (it has to smelt into the same thing), and from then on that ore is enriched.
@@ -53,11 +53,12 @@ local TOPUP_AT      = 32      -- a busy furnace gets more of the same once it's 
 -- locals together with each function's, and stops at 200
 local FX = {}
 FX.FACTORY_BUFFER = 3     -- batches per process kept queued at a factory (feed barrel + its inputs)
+FX.drip = require("drip") -- the drip trial's decisions (computer/smelter/drip.lua)
 FX.kit = require("ui")    -- the UI kit's motion: ui.beat, ui.anim (ANIM=full|calm|off in smelter.env)
 FX.FALLBACK_AFTER = 300   -- seconds every factory can be down before ore goes to the furnaces again
 FX.STUCK_AFTER    = 120   -- seconds with ore waiting and nothing moving = that factory is stuck
-FX.TRIAL_REFUSE   = 20    -- seconds a new ore can sit untouched in the feed before it counts as refused
-FX.TRIAL_TIMEOUT  = 90    -- seconds to wait for a new ore's dust
+FX.MISSING_AFTER  = 10    -- seconds a factory can be unseen before the screen says "factory missing, re-add it"
+FX.IDLE_FOR       = 3     -- seconds a factory has to be empty before a drip trial may start on it
 FX.LEFTOVER_WAIT  = 600   -- an odd few ore (less than a batch) go to the furnaces after this long
 
 local K = colours
@@ -128,8 +129,11 @@ local STONE_TIER = { "furnace", "FURNACE", 200, K.grey, K.white, "STONE" }
 --   learned = { [key] = { out, inputs = { name... }, per = { [input] = outputs per input }, at } }
 --   speed   = { [furnace] = { t = seconds busy, n = items cooked } }  (measured)
 --   factories = { { machine, feed, out }, ... }  (enriching factories, see the top)
---   enrich  = { [ore] = { out = dust, used = ore in, made = dust out, at } or { no = true, at }
---               (dustBad = its dust didn't smelt) }
+--   enrich  = { [ore] = { out = dust, used = ore in, made = dust out, drip = true, at } or { no = true, at }
+--               (dustBad = its dust didn't smelt; drip = used counts ore for ONE process, learned by a drip trial)
+--   trialSaved = { [machine] = { eject, sort, at } }  only while a drip trial runs: the factory's settings to
+--               put back (also after a reboot)
+--   dripProgress = true: a drip trial tells "a process started" by getRecipeProgress, not by waiting an operation
 ---------------------------------------------------------------------------
 local cfg = { trainer = nil, paused = false, learned = {}, speed = {}, factories = {}, enrich = {} }
 local function loadCfg()
@@ -482,10 +486,18 @@ end
 -- Raw ore or an ore block: worth trying in a factory
 function FX.isOreish(name)
   return (name:find(":raw_[%w_]+$") ~= nil and not name:find("_block$")) or name:find("_ore$") ~= nil
+    or name:find(":ancient_debris$") ~= nil
 end
 
 function FX.factoryName(i) return "Factory " .. i end
-function FX.unitOf(i) return 3 * ((FX.facs[i] and FX.facs[i].procs) or 3) end   -- one batch for every process
+-- One batch for every process: what a drip trial used x the factory's processes. (Entries learned
+-- before the drip trial count a whole batch of 3 per process.)
+function FX.procsOf(i) return (FX.facs[i] and FX.facs[i].procs) or 3 end
+function FX.unitOf(i, ore)
+  local e = ore and cfg.enrich[ore]
+  local used = (type(e) == "table" and e.drip and e.used) or 3
+  return math.max(1, used) * FX.procsOf(i)
+end
 
 function FX.readItem(it, into)
   if type(it) == "table" and it.name and it.name ~= "minecraft:air" and (it.count or 0) > 0 then
@@ -501,9 +513,21 @@ function FX.readFactory(i)
   local s = FX.facs[i]
   if not s or s.machine ~= f.machine then s = { machine = f.machine, lastMove = os.clock() }; FX.facs[i] = s end
   local why
-  if not peripheral.isPresent(f.machine) then why = "can't see the factory"
+  if not peripheral.isPresent(f.machine) then
+    s.unseenSince = s.unseenSince or os.clock()
+    why = os.clock() - s.unseenSince >= FX.MISSING_AFTER and "factory missing, re-add it" or "can't see the factory"
+    if why ~= "can't see the factory" and not s.missingNoted then
+      s.missingNoted = true
+      local cand = FX.machineCandidates()[1]
+      local text = ("%s: %s is gone: factory missing, re-add it%s"):format(FX.factoryName(i), shortName(f.machine),
+        cand and (" (found " .. cand .. ": factory add " .. cand .. " " .. f.feed .. " " .. f.out .. ")") or "")
+      print(text)
+      FX.notify(("%s missing: re-add it (factory add <machine> <feed> <out>)"):format(FX.factoryName(i)), K.orange)
+    end
+    if s.trial then s.trial = nil end                 -- its settings are restored once it's back
   elseif not peripheral.isPresent(f.feed) then why = "can't see its feed barrel"
   elseif not peripheral.isPresent(f.out) then why = "can't see its out barrel" end
+  if why ~= "factory missing, re-add it" and why ~= "can't see the factory" then s.unseenSince, s.missingNoted = nil, nil end
   s.ins, s.outs, s.feed, s.feedSlots = {}, {}, {}, {}
   s.insTotal, s.outsTotal, s.feedTotal = 0, 0, 0
   if not why then
@@ -539,6 +563,9 @@ function FX.readFactory(i)
     end
     s.outBarrel = outB
     s.energy = tonumber((call(f.machine, "getEnergyFilledPercentage")))
+    if not s.trial and cfg.trialSaved and cfg.trialSaved[f.machine] then FX.restoreSettings(f.machine) end
+    local empty = s.feedTotal + s.insTotal + s.outsTotal == 0
+    if empty then s.idleSince = s.idleSince or os.clock() else s.idleSince = nil end
     if s.energy and s.energy <= 0 then why = "no power" end
     -- Auto-eject has to be on (except while I'm reading a new ore's dust)
     if not s.trial and os.clock() - (s.ejectCheck or -100) > 30 then
@@ -572,9 +599,9 @@ function FX.factoriesHold()
   return false
 end
 
-function FX.minUnit()
+function FX.minUnit(ore)
   local u
-  for i in ipairs(cfg.factories) do u = math.min(u or 1e9, FX.unitOf(i)) end
+  for i in ipairs(cfg.factories) do u = math.min(u or 1e9, FX.unitOf(i, ore)) end
   return u or 9
 end
 
@@ -732,9 +759,10 @@ local function smeltPass()
   local facRoom = {}
   for i in ipairs(cfg.factories) do
     local fs = FX.facs[i]
-    if fs and fs.ok and not fs.trial then
-      local unit = FX.unitOf(i)
-      facRoom[i] = math.max(0, math.floor((unit * FX.FACTORY_BUFFER - fs.feedTotal - fs.insTotal) / unit) * unit)
+    local held = fs and fs.reserved                   -- kept clear for a drip trial that's waiting for it
+    if fs then fs.reserved = nil end
+    if fs and fs.ok and not fs.trial and not held then
+      facRoom[i] = math.max(0, FX.FACTORY_BUFFER * 3 * FX.procsOf(i) - fs.feedTotal - fs.insTotal)
     end
   end
   local feeds = {}           -- { i, item, n, job, trial }
@@ -750,11 +778,12 @@ local function smeltPass()
         if room > 0 and (not bestRoom or room > bestRoom or (room == bestRoom and i < best)) then best, bestRoom = i, room end
       end
       if not best then break end
-      local unit = FX.unitOf(best)
+      local unit = FX.unitOf(best, ore)
       local n = math.min(bestRoom, (roundUp and math.ceil(left / unit) or math.floor(left / unit)) * unit)
       n = math.floor(math.min(n, (have[ore] or 0) - taken) / unit) * unit
       if n <= 0 then break end
       feeds[#feeds + 1] = { i = best, item = ore, n = n, job = job }
+      FX.facs[best].lastFeed = os.clock()
       facRoom[best] = bestRoom - n
       taken = taken + n
       left = left - n
@@ -766,14 +795,18 @@ local function smeltPass()
     return taken
   end
 
-  -- Try a new ore in a factory (eject off so its dust stays where I can read it)
-  local function startTrial(ore)
-    if FX.trialCool[ore] and os.clock() - FX.trialCool[ore] < 600 then return nil end
-    local best
+  -- Try a new ore in a factory: a drip trial (see drip.lua) on a factory that's empty and idle, with
+  -- eject and auto-sort off so its dust stays where I can read it. Only one item goes in now.
+  local function startTrial(ore, probe)
+    if not probe and FX.trialCool[ore] and os.clock() - FX.trialCool[ore] < 600 then return nil end
+    local best, idle
     for i in ipairs(cfg.factories) do
       local fs = FX.facs[i]
-      if fs and fs.ok and not fs.trial and (not best or fs.feedTotal + fs.insTotal < FX.facs[best].feedTotal + FX.facs[best].insTotal) then
-        best = i
+      if fs and fs.ok and not fs.trial and (not probe or not probe.i or probe.i == i) then
+        local isIdle = (fs.idleSince and os.clock() - fs.idleSince >= FX.IDLE_FOR and os.clock() - (fs.lastFeed or -1e9) > FX.IDLE_FOR * 2) and true or false
+        if not best or (isIdle and not idle) or (isIdle == idle and fs.feedTotal + fs.insTotal < FX.facs[best].feedTotal + FX.facs[best].insTotal) then
+          best, idle = i, isIdle
+        end
       end
     end
     if not best then
@@ -781,19 +814,34 @@ local function smeltPass()
       for i in ipairs(cfg.factories) do if FX.facs[i] and FX.facs[i].ok then return "hold" end end
       return nil
     end
-    local unit = FX.unitOf(best)
-    if (have[ore] or 0) < unit then return nil end
+    if (have[ore] or 0) < 1 then return nil end
     for _, f in ipairs(feeds) do if f.i == best then return "hold" end end   -- already fed this pass
-    local f = cfg.factories[best]
-    call(f.machine, "setEjecting", "ITEM", false)
-    local base = {}
-    for k, v in pairs(FX.facs[best].outs or {}) do base[k] = v end
-    FX.facs[best].trial = { input = ore, n = unit, t0 = os.clock(), ejectOff = call(f.machine, "isEjecting", "ITEM") == false,
-                         seen = {}, outLast = nil, base = base }
-    feeds[#feeds + 1] = { i = best, item = ore, n = unit, trial = true }
-    facRoom[best] = 0
-    have[ore] = have[ore] - unit
+    if not idle then FX.facs[best].reserved = true; return "hold" end      -- let it empty, route nothing more to it
+    local t = FX.beginTrial(best, ore, probe and { probe = true } or nil)
+    FX.facs[best].lastFeed = os.clock()
+    t.want, t.pending, t.pendingAt = false, true, os.clock()
+    feeds[#feeds + 1] = { i = best, item = ore, n = 1, trial = true }
+    facRoom[best] = nil
+    have[ore] = have[ore] - 1
     return "hold"
+  end
+
+  -- The next drip of a running trial, one item at a time
+  local function dripFeeds()
+    for i in ipairs(cfg.factories) do
+      local fs = FX.facs[i]
+      local t = fs and fs.trial
+      if t and t.want and not t.pending then
+        if (have[t.input] or 0) < 1 then
+          FX.endTrial(i, "Trial of " .. pretty(t.input) .. " called off: none left in storage.", K.orange)
+        else
+          t.want, t.pending, t.pendingAt = false, true, os.clock()
+          fs.lastFeed = os.clock()
+          feeds[#feeds + 1] = { i = i, item = t.input, n = 1, trial = true }
+          have[t.input] = have[t.input] - 1
+        end
+      end
+    end
   end
 
   -- Where does this input go? "factory" (+ its route), "hold" (wait: a factory is trying it, or its
@@ -805,7 +853,7 @@ local function smeltPass()
     if type(e) == "table" and e.out then
       if isInputOf(r, e.out) then
         local n = have[input] or 0
-        if n > 0 and n < FX.minUnit() then
+        if n > 0 and n < FX.minUnit(input) then
           FX.leftoverSince[input] = FX.leftoverSince[input] or os.clock()
           if os.clock() - FX.leftoverSince[input] > FX.LEFTOVER_WAIT then return nil end
         else
@@ -953,6 +1001,16 @@ local function smeltPass()
     end
   end
   local feedAt = {}
+  if FX.probeReq then
+    local pr = FX.probeReq
+    if not FX.probeActive() and os.clock() - pr.since > 120 then
+      FX.probeReq = nil
+      FX.probeSay("Probe called off: no free factory, or none of " .. pretty(pr.item) .. " in storage.", K.orange)
+    elseif startTrial(pr.item, pr) == "hold" and FX.probeActive() then
+      FX.probeReq = nil
+    end
+  end
+  dripFeeds()
   for _, fd in ipairs(feeds) do
     ops[#ops + 1] = { op = "fill", fz = cfg.factories[fd.i].feed, item = fd.item, count = math.min(64, fd.n) }
     feedAt[#ops] = fd
@@ -1004,12 +1062,7 @@ local function smeltPass()
       local short = fd.n - moved
       if fd.trial then
         local fs = FX.facs[fd.i]
-        if moved <= 0 and fs and fs.trial then
-          fs.trial = nil
-          call(cfg.factories[fd.i].machine, "setEjecting", "ITEM", true)
-        elseif fs and fs.trial then
-          fs.trial.n, fs.trial.sentAt = moved, os.clock()
-        end
+        if fs and fs.trial then FX.drip.sent(fs.trial, moved) end
       elseif short > 0 and fd.job then
         fd.job.left = fd.job.left + short
         for dust, n in pairs(fd.job.follow or {}) do
@@ -1170,83 +1223,203 @@ local function trainStep()
   end
 end
 
--- A new ore in a factory: did it go in, and what came out? (every half second while it runs)
+-- The factory's own switches: which method names this machine has for auto-sort
+function FX.sortMethod(machine, prefix)
+  for _, m in ipairs(peripheral.getMethods(machine) or {}) do
+    if prefix == "get" and (m == "isAutoSort" or m == "isAutoSortEnabled") then return m end
+    if prefix == "set" and m == "setAutoSort" then return m end
+  end
+end
+
+-- Put eject and auto-sort back as they were before a trial (kept in smelter.cfg while it runs, so a
+-- reboot or a cancel can't leave the factory with eject off)
+function FX.restoreSettings(machine)
+  local saved = cfg.trialSaved and cfg.trialSaved[machine]
+  if not saved then return end
+  if not peripheral.isPresent(machine) then return end
+  call(machine, "setEjecting", "ITEM", saved.eject ~= false)
+  local set = FX.sortMethod(machine, "set")
+  if set and saved.sort ~= nil then call(machine, set, saved.sort) end
+  cfg.trialSaved[machine] = nil
+  if next(cfg.trialSaved) == nil then cfg.trialSaved = nil end
+  saveCfg()
+end
+
+-- Everything the drip trial needs to know about a factory right now
+function FX.snapshot(i, t)
+  local fs, f = FX.facs[i], cfg.factories[i]
+  local snap = { feedN = 0, inN = 0, outs = {}, progress = 0, procs = {} }
+  local l = call(f.feed, "list")
+  if type(l) == "table" then
+    for _, it in pairs(l) do if it.name == t.input then snap.feedN = snap.feedN + it.count end end
+  end
+  for p = 0, (fs.procs or 3) - 1 do
+    local a = call(f.machine, "getInput", p)
+    local o = call(f.machine, "getOutput", p)
+    local prog = tonumber((call(f.machine, "getRecipeProgress", p))) or 0
+    if type(a) == "table" and a.name == t.input then snap.inN = snap.inN + (a.count or 0) end
+    FX.readItem(o, snap.outs)
+    snap.progress = math.max(snap.progress, prog)
+    snap.procs[#snap.procs + 1] = { input = type(a) == "table" and a.count or "?", output = type(o) == "table" and o.count or "?", progress = prog }
+  end
+  snap.outs[t.input] = nil
+  if not t.ejectOff then
+    -- Eject wouldn't turn off: count what lands in the out barrel instead (storage leaves that
+    -- barrel alone while I try an ore: "hold" in my broadcast)
+    local ol = call(f.out, "list")
+    local cur = {}
+    if type(ol) == "table" then for _, it in pairs(ol) do cur[it.name] = (cur[it.name] or 0) + it.count end end
+    t.outBase = t.outBase or cur
+    for name, c in pairs(cur) do
+      local d = c - (t.outBase[name] or 0)
+      if d > 0 then snap.outs[name] = (snap.outs[name] or 0) + d end
+    end
+  end
+  snap.ticks = tonumber((call(f.machine, "getTicksRequired")))
+  snap.powered = not (fs.energy and fs.energy <= 0)
+  return snap
+end
+
+-- A drip trial on factory i: eject and auto-sort off, the original settings saved first
+function FX.beginTrial(i, ore, opts)
+  local f, fs = cfg.factories[i], FX.facs[i]
+  local t = FX.drip.begin(ore, opts)
+  cfg.trialSaved = cfg.trialSaved or {}
+  if not cfg.trialSaved[f.machine] then
+    local get = FX.sortMethod(f.machine, "get")
+    local sort = get and call(f.machine, get)
+    if sort == nil then sort = true end               -- can't read it: auto-sort is on in the real setup
+    cfg.trialSaved[f.machine] = { eject = call(f.machine, "isEjecting", "ITEM") ~= false, sort = sort, at = os.epoch("utc") }
+    saveCfg()
+  end
+  call(f.machine, "setEjecting", "ITEM", false)
+  local set = FX.sortMethod(f.machine, "set")
+  if set then call(f.machine, set, false) end
+  t.ejectOff = call(f.machine, "isEjecting", "ITEM") == false
+  t.t0 = os.clock()
+  fs.trial = t
+  return t
+end
+
+-- Call a trial off (verdict done, cancel, lost): settings back, the factory free again
+function FX.endTrial(i, text, col)
+  local f, fs = cfg.factories[i], FX.facs[i]
+  if fs then fs.trial = nil end
+  if f then FX.restoreSettings(f.machine) end
+  if text then FX.notify(text, col); print(text) end
+  redraw()
+end
+
+-- What's sitting in a factory (for the alert when a trial is called off)
+function FX.contents(i)
+  local fs = FX.facs[i]
+  local parts = {}
+  for _, tbl in ipairs({ fs.ins or {}, fs.outs or {}, fs.feed or {} }) do
+    for name, c in pairs(tbl) do parts[#parts + 1] = c .. " " .. pretty(name) end
+  end
+  return #parts > 0 and table.concat(parts, ", ") or "nothing"
+end
+
+-- A new ore in a factory, a drip at a time: did a process start, and what came out? (every half second)
 function FX.trialStep()
+  FX.drip.useProgress = cfg.dripProgress == true
   for i, f in ipairs(cfg.factories) do
     local fs = FX.facs[i]
     local t = fs and fs.trial
-    if t and not t.sentAt and os.clock() - t.t0 > 30 then
-      -- The pass that started it never sent the ore (it failed half way): call it off
-      fs.trial = nil
-      call(f.machine, "setEjecting", "ITEM", true)
-    elseif t and t.sentAt then
+    if t then
       local now = os.clock()
-      local feedN, inN, otherIns = 0, 0, 0
-      local l = call(f.feed, "list")
-      if type(l) == "table" then
-        for _, it in pairs(l) do if it.name == t.input then feedN = feedN + it.count end end
-      end
-      local outs = {}
-      for p = 0, (fs.procs or 3) - 1 do
-        local a = call(f.machine, "getInput", p)
-        if type(a) == "table" and a.name == t.input then inN = inN + (a.count or 0)
-        elseif type(a) == "table" and a.name and a.name ~= "minecraft:air" then otherIns = otherIns + (a.count or 0) end
-        FX.readItem(call(f.machine, "getOutput", p), outs)
-      end
-      if not t.ejectOff then
-        -- Eject wouldn't turn off: count what lands in the out barrel instead (storage leaves that
-        -- barrel alone while I try an ore: "hold" in my broadcast)
-        local ol = call(f.out, "list")
-        local cur = {}
-        if type(ol) == "table" then for _, it in pairs(ol) do cur[it.name] = (cur[it.name] or 0) + it.count end end
-        t.outBase = t.outBase or cur
-        for name, c in pairs(cur) do
-          local d = c - (t.outBase[name] or 0)
-          if d > 0 then outs[name] = (outs[name] or 0) + d end
-        end
-      end
-      -- Another ore's dust (still finishing) isn't this ore's
-      for _, e in pairs(cfg.enrich) do if type(e) == "table" and e.out and outs[e.out] then outs[e.out] = nil end end
-      local product, made = nil, 0
-      for name, c in pairs(outs) do
-        local extra = c - (t.base[name] or 0)
-        if name ~= t.input and extra > made then product, made = name, extra end
-      end
-      if product or inN > 0 or feedN < t.n then t.accepted = true end
-      local function finish(text, col)
-        fs.trial = nil
-        call(f.machine, "setEjecting", "ITEM", true)
-        saveCfg()
-        if text then FX.notify(text, col) end
-        redraw()
-      end
-      if not t.accepted then
-        if otherIns == 0 then
-          t.idleSince = t.idleSince or now
-          if now - t.idleSince > FX.TRIAL_REFUSE then
-            cfg.enrich[t.input] = { no = true, at = os.epoch("utc") }
-            finish(pretty(t.input) .. " doesn't go in the factory: it stays in the furnaces.", K.orange)
-          end
-        end
+      t.lastStep = t.lastStep or now
+      local dt = now - t.lastStep
+      t.lastStep = now
+      if t.pending and now - t.pendingAt > 30 then
+        -- The pass that was sending the item never finished (it failed half way): call it off
+        FX.endTrial(i)
       else
-        local left = feedN + inN
-        local function learnIt(used)
-          cfg.enrich[t.input] = { out = product, used = used, made = made, at = os.epoch("utc") }
-          finish(("Factory: %d %s -> %d %s"):format(used, pretty(t.input), made, pretty(product)), K.lime)
-        end
-        if product and left == 0 then
-          if made ~= t.lastMade then t.lastMade, t.doneSince = made, now end
-          if now - t.doneSince >= (t.ejectOff and 1.5 or 3) then learnIt(t.n) end
-        elseif now - t.sentAt > FX.TRIAL_TIMEOUT then
-          if product and t.n - left > 0 then learnIt(t.n - left)
-          else
-            FX.trialCool[t.input] = now
-            finish("Tried " .. pretty(t.input) .. " in " .. FX.factoryName(i) .. ": nothing came out. Trying again later.", K.orange)
-          end
-        end
+        local snap = FX.snapshot(i, t)
+        if t.probe then FX.probeSample(i, t, snap) end
+        local v = FX.drip.step(t, snap, dt)
+        if v then FX.trialVerdict(i, t, v) end
       end
     end
   end
+end
+
+function FX.trialVerdict(i, t, v)
+  local name = FX.factoryName(i)
+  local ore = pretty(t.input)
+  if t.probe then return FX.probeEnd(i, t, v) end
+  if v.kind == "learned" then
+    cfg.enrich[t.input] = FX.drip.result(t, v.product, v.made)
+    saveCfg()
+    FX.endTrial(i, ("Factory: %d %s -> %d %s (%d to start)"):format(t.n, ore, v.made, pretty(v.product), t.n), K.lime)
+  elseif v.kind == "refused" then
+    cfg.enrich[t.input] = { no = true, at = os.epoch("utc") }
+    saveCfg()
+    FX.endTrial(i, v.feedN > 0 and (ore .. " doesn't go in " .. name .. ": it stays in the furnaces.")
+      or ("1 " .. ore .. " is stuck in " .. name .. "'s hopper: pull it out by hand. It stays in the furnaces."), K.orange)
+  elseif v.kind == "capped" then
+    FX.trialCool[t.input] = os.clock()
+    FX.endTrial(i, ("Dripped %d %s into %s and nothing started: trial called off. It holds %s."):format(t.added, ore, name, FX.contents(i)), K.orange)
+  elseif v.kind == "lost" then
+    FX.endTrial(i, "Trial of " .. ore .. " called off: storage couldn't deliver it.", K.orange)
+  else
+    FX.trialCool[t.input] = os.clock()
+    FX.endTrial(i, "Tried " .. ore .. " in " .. name .. ": nothing came out. Trying again later.", K.orange)
+  end
+end
+
+-- The probe: a drip trial that writes down every sample (and learns nothing), for Tanis and for #60
+FX.PROBE_LOG = "probe.log"
+FX.probeReq = nil          -- { item, i, since } until a factory is free to run it
+FX.probeLog = {}
+function FX.probeSay(text, col)
+  FX.probeLog[#FX.probeLog + 1] = text
+  print(text)
+  if col then FX.notify(text, col) end
+end
+
+function FX.probeSample(i, t, snap)
+  local now = os.clock()
+  if t.lastSample and now - t.lastSample < 0.5 then return end
+  t.lastSample = now
+  t.probeT0 = t.probeT0 or now
+  FX.probeLog[#FX.probeLog + 1] = FX.drip.sampleLine(now - t.probeT0, snap, snap.procs)
+end
+
+function FX.probeEnd(i, t, v)
+  local f = cfg.factories[i]
+  local what = v.kind == "learned" and ("%d %s -> %d %s (not saved)"):format(t.n, pretty(t.input), v.made, pretty(v.product))
+    or ("ended: " .. v.kind)
+  FX.probeSay("Probe " .. what)
+  FX.probeSay(("detector: %s; items dripped: %d"):format(FX.drip.useProgress and "getRecipeProgress" or "wait one operation", t.added))
+  FX.endTrial(i)
+  local fh = fs.open(FX.PROBE_LOG, "w")
+  fh.write(table.concat(FX.probeLog, "\n") .. "\n")
+  fh.close()
+  FX.notify("Probe done: " .. what .. ". Log in " .. FX.PROBE_LOG, K.lime)
+  if http and shell then
+    print("Uploading " .. FX.PROBE_LOG .. " to pastebin...")
+    if not pcall(shell.run, "pastebin", "put", FX.PROBE_LOG) then print("Upload failed: run  pastebin put " .. FX.PROBE_LOG) end
+  else
+    print("Run  pastebin put " .. FX.PROBE_LOG .. "  to share it.")
+  end
+end
+
+function FX.probeStart(item, which)
+  if FX.probeReq or FX.probeActive() then return "A probe is already running." end
+  if #cfg.factories == 0 then
+    local m = FX.machineCandidates()[1]
+    return "No factory set up yet: factory add " .. (m or "<machine>") .. " sophisticatedstorage:barrel_65 sophisticatedstorage:barrel_63"
+  end
+  if which and not cfg.factories[which] then return "No factory " .. which .. "." end
+  FX.probeReq = { item = item or "minecraft:ancient_debris", i = which, since = os.clock() }
+  FX.probeLog = {}
+  FX.probeSay(("== probe %s  %s  computer %d"):format(os.date("%Y-%m-%d %H:%M"), pretty(FX.probeReq.item), os.getComputerID()))
+  return "Probe starting: it waits for a free factory and pauses the smelter's use of it."
+end
+
+function FX.probeActive()
+  for i in ipairs(cfg.factories) do if FX.facs[i] and FX.facs[i].trial and FX.facs[i].trial.probe then return i end end
 end
 
 -- Factory dust that isn't known to smelt yet: put one in the idle trainer and train it
@@ -1308,7 +1481,8 @@ end
 FX.factoryLine = function(i)
   local fs = FX.facs[i]
   if not fs then return "starting" end
-  if fs.trial then return "trying " .. pretty(fs.trial.input) end
+  if fs.trial and fs.trial.probe then return "probe: " .. pretty(fs.trial.input) .. ", " .. fs.trial.added .. " dripped" end
+  if fs.trial then return "trying " .. pretty(fs.trial.input) .. ": " .. fs.trial.added .. " dripped" end
   if fs.why then
     local down = fs.downSince and os.clock() - fs.downSince or 0
     return fs.why .. (down >= FX.FALLBACK_AFTER and " (ore to furnaces)" or "")
@@ -1494,7 +1668,8 @@ end
 function FX.removeFactory(i)
   local fs = FX.facs[i]
   local f = cfg.factories[i]
-  if fs and fs.trial and f then call(f.machine, "setEjecting", "ITEM", true) end
+  if fs and fs.trial and f then FX.endTrial(i) end
+  if f then FX.restoreSettings(f.machine) end
   table.remove(cfg.factories, i)
   table.remove(FX.facs, i)
   saveCfg()
@@ -2396,7 +2571,7 @@ end
 ---------------------------------------------------------------------------
 -- Terminal commands (type anywhere on the computer's own screen)
 ---------------------------------------------------------------------------
-local HELP = "smelt <item> <n> | train | recipes | rule <item> | trainer | factories | factory add <machine> <feed> <out> | factory remove <n> | enrich forget <ore> | pause | run | home"
+local HELP = "smelt <item> <n> | train | recipes | rule <item> | trainer | factories | factory add <machine> <feed> <out> | probe [item] [factory] | probe stop | factory remove <n> | enrich forget <ore> | pause | run | home"
 local function runCommand(line)
   ui = views[2].ui
   local q = line:lower():gsub("^%s*/", ""):gsub("^%s+", ""):gsub("%s+$", "")
@@ -2412,6 +2587,18 @@ local function runCommand(line)
   elseif q == "reload" then loadSmeltRules(); say(("Loaded %d rule(s) from smelt.txt."):format(#smeltRules), K.lime, ui)
   elseif q == "home" or q == "" then go("home")
   elseif q == "factories" or q == "factory" then go("factories")
+  elseif q == "probe stop" then
+    local i = FX.probeActive()
+    FX.probeReq = nil
+    if i then FX.probeEnd(i, FX.facs[i].trial, { kind = "stopped" }) end
+    say("Probe stopped.", K.orange, ui)
+  elseif q:match("^probe") then
+    local item, which = nil, nil
+    for w in q:gmatch("%S+") do
+      if w:match("^%d+$") then which = tonumber(w)
+      elseif w ~= "probe" then item = w:find(":") and w or ("minecraft:" .. w:gsub("^minecraft:", "")) end
+    end
+    say(FX.probeStart(item, which), K.white, ui)
   elseif q:match("^factory%s+add") then
     local m, fd, o = line:match("[Aa][Dd][Dd]%s+(%S+)%s+(%S+)%s+(%S+)")
     local pm, pf, po = FX.findPeripheral(m), FX.findPeripheral(fd), FX.findPeripheral(o)

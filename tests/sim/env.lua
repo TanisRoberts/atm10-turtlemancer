@@ -130,6 +130,7 @@ function Env.build(world, c)
     if kind == "ingame" then return math.floor(world.now / 1200 * 86400000) end
     return math.floor((world.epoch0 + world.now) * 1000)
   end
+  function os.date(fmt, t) return _G.os.date(fmt or "%c", t or math.floor(world.epoch0 + world.now)) end
   os.version = function() return "CraftOS 1.9" end
   local function pullEventRaw(filter) return coroutine.yield(filter) end
   local function pullEvent(filter)
