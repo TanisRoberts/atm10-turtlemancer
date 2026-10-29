@@ -393,16 +393,28 @@ end
 
 -- Slots used and size of a list of barrels
 local function room(list)
-  local used, size, items = 0, 0, 0
+  -- Each barrel's numbers go in its own slot: the calls wait a tick, so a shared running total would lose counts
+  local got = {}
   each(list, function(n)
-    local l
-    each({ "size", "list" }, function(m) if m == "size" then size = size + (call(n, "size") or 0) else l = call(n, "list") or {} end end)
-    for _, it in pairs(l) do used = used + 1; items = items + it.count end
+    local g = {}
+    got[n] = g
+    each({ "size", "list" }, function(m) if m == "size" then g.size = call(n, "size") or 0 else g.list = call(n, "list") or {} end end)
   end)
+  local used, size, items = 0, 0, 0
+  for _, g in pairs(got) do
+    size = size + g.size
+    for _, it in pairs(g.list) do used = used + 1; items = items + it.count end
+  end
   return used, size, items
 end
 
 lastNote = nil
+-- A barrel pass that failed outright: kept in fm_errors.txt as well as on the screen
+function writePassError(what, err)
+  local f = fs.open("fm_errors.txt", "w")
+  f.write(what .. " stopped with an error:\n" .. tostring(err) .. "\n")
+  f.close()
+end
 -- The full text of this pass's failed moves, for Tanis to read (edit fm_errors.txt)
 local function writeErrors()
   if #barrel.errs == 0 then

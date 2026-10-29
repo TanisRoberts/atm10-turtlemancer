@@ -217,7 +217,7 @@ function workerLoop()
       workerBusy = true
       local ok, err = pcall(barrelPass)
       workerBusy = false
-      if not ok and err ~= PAUSED then say("Barrels: " .. tostring(err), K.red) end
+      if not ok and err ~= PAUSED then say("Barrels: " .. tostring(err), K.red); writePassError("Barrel pass", err) end
       if lastNote then say(lastNote, K.orange); lastNote = nil end
       draw()
     end
@@ -236,7 +236,7 @@ function factoryLoop()
   while true do
     if not paused and #cfg.factoryOuts > 0 then
       local ok, err = pcall(factoryPass)
-      if not ok and err ~= PAUSED then say("Factory: " .. tostring(err), K.red) end
+      if not ok and err ~= PAUSED then say("Factory: " .. tostring(err), K.red); writePassError("Factory pass", err) end
     end
     os.sleep(FACTORY_EVERY)
   end
