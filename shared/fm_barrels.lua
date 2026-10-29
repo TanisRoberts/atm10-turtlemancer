@@ -50,8 +50,21 @@ function assignJob(n, key)
   listAdd(cfg[LISTS[key]], n)
 end
 
+-- CC keeps only 256 queued events and drops the rest. Every call that waits for its tick gets its answer as
+-- an event, so hundreds of calls at once (11 full docks, a move per slot) lose answers and their tasks wait
+-- forever: the pass hangs and the screen goes stale. So no more than MAX_CALLS wait at the same time.
+MAX_CALLS = 100
+local inFlight, gated = 0, 0
 function call(name, method, ...)
+  while inFlight >= MAX_CALLS do
+    gated = gated + 1
+    os.pullEvent("fm_gate")
+    gated = gated - 1
+  end
+  inFlight = inFlight + 1
   local ok, a, b = pcall(peripheral.call, name, method, ...)
+  inFlight = inFlight - 1
+  if gated > 0 then os.queueEvent("fm_gate") end
   if ok then return a, b end
   return nil, a
 end
@@ -427,6 +440,7 @@ local function writeErrors()
 end
 
 function barrelPass()
+  barrel.passStart = os.clock()
   barrel.outFull, barrel.moveErr, barrel.errs, barrel.bad, barrel.lists = false, nil, {}, {}, {}
   scanStock()
   settleProbe()
@@ -471,6 +485,7 @@ function barrelPass()
   barrel.overflow = { used = r.overflows[1], size = r.overflows[2], items = oi }
   if oi > 0 and #cfg.outputs > 0 then barrel.outFull = true end
   barrel.docks = docks
+  barrel.passEnd = os.clock()
 end
 
 -- Item names typed on the computer: "bucket", "lava_bucket", "ancient debris", "mod:thing"

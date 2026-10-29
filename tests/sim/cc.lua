@@ -203,7 +203,10 @@ end
 ---------------------------------------------------------------------------
 -- Computer: files, peripherals, input
 ---------------------------------------------------------------------------
+-- CC keeps at most 256 queued events per computer; any more are dropped (a coroutine waiting on one waits forever)
+Computer.MAX_EVENTS = 256
 function Computer:_queue(...)
+  if #self.q >= Computer.MAX_EVENTS then self.dropped = (self.dropped or 0) + 1; return end
   self.q[#self.q + 1] = table.pack(...)
 end
 
@@ -470,6 +473,8 @@ function World:runUntil(pred, max)
       table.remove(self.timers, 1)
       if t.at > self.now then self.now = t.at; guard = 0 end
       self:_fire(t)
+      -- Everything due at this same instant is queued before any program runs, as in a game tick
+      while self.timers[1] and self.timers[1].at <= self.now do self:_fire(table.remove(self.timers, 1)) end
     end
   end
   return pred and pred() or false

@@ -11,6 +11,10 @@ function barrelLine()
   if #cfg.docks == 0 or #cfg.outputs == 0 then
     return "Barrels: tap Barrels (or /assign) to give them jobs", K.orange
   end
+  -- watchdog: a pass that began a minute ago and hasn't finished is stuck, and the numbers below are old
+  if barrel.passStart and (barrel.passEnd or -1) < barrel.passStart and os.clock() - barrel.passStart > 60 then
+    return ("Barrel pass stuck for %d s: numbers are old, reboot me"):format(math.floor(os.clock() - barrel.passStart)), K.red
+  end
   if barrel.moveErr then return barrel.moveErr, K.red end
   if barrel.outFull and #cfg.overflows > 0 then
     return ("Output full: haul waits in Overflow (%d/%d slots)"):format(barrel.overflow.used, barrel.overflow.size), K.orange

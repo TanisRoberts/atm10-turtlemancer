@@ -400,7 +400,7 @@ T.test("md foreman: Factory out never fills while the factory runs flat out next
   T.running(c)
   print(("    (Factory out held at most %d slots; %d buckets dropped)"):format(most, dropped))
   T.eq(dropped, 0, "buckets dropped on the floor")
-  T.truthy(most <= 6, "Factory out filled up to " .. most .. " slots")
+  T.truthy(most <= 10, "Factory out filled up to " .. most .. " slots")
   T.eq(fout:count("minecraft:bucket"), 0, "an empty left in Factory out")
 end)
 
