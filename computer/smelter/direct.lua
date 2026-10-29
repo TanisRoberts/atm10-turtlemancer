@@ -55,5 +55,11 @@ function X.addExtra(extra, item)
   return true
 end
 function X.isExtra(extra, item) return has(extra, item) end
+function X.removeExtra(extra, item)
+  for i, v in ipairs(extra) do
+    if v == item then table.remove(extra, i); return true end
+  end
+  return false
+end
 
 return X

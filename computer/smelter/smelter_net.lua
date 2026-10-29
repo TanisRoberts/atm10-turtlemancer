@@ -99,17 +99,22 @@ cmds:add({ name = "probe", args = "[item] [factory] | stop", max = 2, help = "lo
     return true, FX.probeStart(item, which), "plain"
   end })
 
-cmds:add({ name = "enrich", args = "add <item> | forget <ore>", min = 2, max = 2, help = "pick what the factories try",
+cmds:add({ name = "enrich", args = "add <item> | forget <ore> | remove <item>", min = 2, max = 2, help = "pick what the factories try",
   run = function(a)
     local word = a.words[2]:lower()
     if a:is(1, "forget") then
       local gone = 0
       for _, ore in ipairs(FX.direct.match(word, sortedKeys(cfg.enrich))) do
-        cfg.enrich[ore] = nil; FX.trialCool[ore] = nil; gone = gone + 1
+        FX.enrichForget(ore); gone = gone + 1
       end
-      saveCfg()
       if gone > 0 then return true, "Forgot what the factories learned about " .. word .. ": it gets tried again." end
       return true, "Nothing learned about " .. word .. ".", "warn"
+    elseif a:is(1, "remove") then
+      local found = FX.direct.match(word, cfg.enrichExtra)
+      if #found == 0 then return true, "No '" .. word .. "' was added by hand.", "warn" end
+      if #found > 1 then return false, "Which one? " .. table.concat(found, ", ") end
+      FX.enrichRemove(found[1])
+      return true, pretty(found[1]) .. " is off the factory list."
     elseif a:is(1, "add") then
       local names = {}
       for name in pairs(S.byName) do names[#names + 1] = name end
@@ -123,10 +128,7 @@ cmds:add({ name = "enrich", args = "add <item> | forget <ore>", min = 2, max = 2
         for i = 1, math.min(#found, 4) do short[i] = shortName(found[i]) end
         return false, "Which one? " .. table.concat(short, ", ")
       end
-      if FX.direct.addExtra(cfg.enrichExtra, found[1]) then
-        saveCfg()
-        return true, pretty(found[1]) .. " will be tried in a factory."
-      end
+      if FX.enrichAdd(found[1]) then return true, pretty(found[1]) .. " will be tried in a factory." end
       return true, pretty(found[1]) .. " is on the list already.", "plain"
     end
     return false

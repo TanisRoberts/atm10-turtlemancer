@@ -200,20 +200,49 @@ function FX.dustRecipe(dust)
   end
 end
 
--- Lines for the screen and the status: every ore I know about
+-- Lines for the screen and the status: every ore I know about, and every item added by hand that has no result yet
+-- (queued for an idle factory, or trying n: n items dripped in so far)
 function FX.enrichList()
-  local out = {}
-  for _, ore in ipairs(sortedKeys(cfg.enrich)) do
+  local out, names = {}, {}
+  for ore in pairs(cfg.enrich) do names[ore] = true end
+  for _, ore in ipairs(cfg.enrichExtra or {}) do names[ore] = true end
+  for _, ore in ipairs(sortedKeys(names)) do
     local e = cfg.enrich[ore]
     local state
-    if e.no then state = "refused"
-    elseif e.dustBad then state = "dust won't smelt"
+    if not e then
+      local i = FX.trialFor(ore)
+      state = i and ("trying " .. (FX.facs[i].trial.added or 0)) or "queued"
+      e = {}
+    elseif e.no then state = "refused"
+    elseif e.dustBad then state = "not worth it"
     elseif FX.direct.kind(S.book, ore, e) == "direct" then state = "direct"
     elseif FX.dustRecipe(e.out) then state = "via dust"
     else state = "checking dust" end
     out[#out + 1] = { ore = ore, e = e, state = state }
   end
   return out
+end
+
+-- Hand-added items (the terminal's `enrich add / forget / remove` and the Factories page's + Item / Retry / Remove)
+function FX.enrichAdd(item)
+  if FX.direct.addExtra(cfg.enrichExtra, item) then
+    saveCfg()
+    return true
+  end
+  return false
+end
+function FX.enrichForget(ore)                          -- the result goes; it is tried again
+  local had = cfg.enrich[ore] ~= nil
+  cfg.enrich[ore] = nil; FX.trialCool[ore] = nil
+  saveCfg()
+  return had
+end
+function FX.enrichRemove(item)                         -- off the list for good, result and all
+  local i = FX.trialFor(item)
+  if i then FX.endTrial(i) end
+  local was = FX.direct.removeExtra(cfg.enrichExtra, item)
+  if was then cfg.enrich[item] = nil; FX.trialCool[item] = nil; saveCfg() end
+  return was
 end
 
 -- The factory's own switches: which method names this machine has for auto-sort
