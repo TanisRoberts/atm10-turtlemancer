@@ -215,9 +215,22 @@ function workerLoop()
   while true do
     if not paused then
       workerBusy = true
-      local ok, err = pcall(barrelPass)
+      resetCalls()   -- a pass that was abandoned (PAUSED, an error in one task) leaves calls counted
+      -- Watchdog: a pass that hasn't finished in PASS_LIMIT seconds (a call that never answers, a barrel in a
+      -- chunk that isn't loaded yet) is abandoned, and the next one starts at once
+      local ok, err, done = true, nil, false
+      parallel.waitForAny(
+        function() ok, err = pcall(barrelPass); done = true end,
+        function() os.sleep(PASS_LIMIT) end)
       workerBusy = false
-      if not ok and err ~= PAUSED then say("Barrels: " .. tostring(err), K.red); writePassError("Barrel pass", err) end
+      if not done then
+        resetCalls()
+        local msg = ("no answer in %d s: the pass was abandoned and restarted"):format(PASS_LIMIT)
+        say("Barrels: " .. msg, K.red); writePassError("Barrel pass", msg)
+        os.queueEvent(WORK)   -- the next pass starts at once
+      elseif not ok and err ~= PAUSED then
+        say("Barrels: " .. tostring(err), K.red); writePassError("Barrel pass", err)
+      end
       if lastNote then say(lastNote, K.orange); lastNote = nil end
       draw()
     end

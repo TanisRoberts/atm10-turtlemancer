@@ -54,17 +54,28 @@ end
 -- an event, so hundreds of calls at once (11 full docks, a move per slot) lose answers and their tasks wait
 -- forever: the pass hangs and the screen goes stale. So no more than MAX_CALLS wait at the same time.
 MAX_CALLS = 100
-local inFlight, gated = 0, 0
+local inFlight, gated, callGen = 0, 0, 0
+-- A pass that is abandoned (PAUSED, an error in a sibling task, the watchdog) leaves tasks stuck inside call()
+-- that never get to count themselves out. resetCalls() starts a new generation: the old ones are forgotten,
+-- and a call that began in an older generation doesn't touch the counters when it ends.
+function resetCalls()
+  callGen, inFlight, gated = callGen + 1, 0, 0
+  os.queueEvent("fm_gate")
+end
 function call(name, method, ...)
-  while inFlight >= MAX_CALLS do
+  local gen = callGen
+  while inFlight >= MAX_CALLS and gen == callGen do
     gated = gated + 1
     os.pullEvent("fm_gate")
-    gated = gated - 1
+    if gen == callGen then gated = math.max(0, gated - 1) end
   end
+  gen = callGen
   inFlight = inFlight + 1
   local ok, a, b = pcall(peripheral.call, name, method, ...)
-  inFlight = inFlight - 1
-  if gated > 0 then os.queueEvent("fm_gate") end
+  if gen == callGen then
+    inFlight = math.max(0, inFlight - 1)
+    if gated > 0 then os.queueEvent("fm_gate") end
+  end
   if ok then return a, b end
   return nil, a
 end

@@ -13,7 +13,7 @@ function barrelLine()
   end
   -- watchdog: a pass that began a minute ago and hasn't finished is stuck, and the numbers below are old
   if barrel.passStart and (barrel.passEnd or -1) < barrel.passStart and os.clock() - barrel.passStart > 60 then
-    return ("Barrel pass stuck for %d s: numbers are old, reboot me"):format(math.floor(os.clock() - barrel.passStart)), K.red
+    return ("Barrel pass stuck for %d s: numbers are old, restarting it at %d s"):format(math.floor(os.clock() - barrel.passStart), PASS_LIMIT), K.red
   end
   if barrel.moveErr then return barrel.moveErr, K.red end
   if barrel.outFull and #cfg.overflows > 0 then

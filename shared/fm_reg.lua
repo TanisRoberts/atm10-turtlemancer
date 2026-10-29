@@ -4,6 +4,7 @@ SEND_EVERY = 3     -- seconds between order broadcasts
 STALE      = 15    -- seconds without news before a miner greys out
 TEXT_SCALE = 0.5
 TICK       = 2     -- seconds between barrel passes
+PASS_LIMIT = 120   -- seconds a barrel pass may take before the watchdog abandons it and starts a new one
 HOLD_FOR   = 90    -- seconds a dock stays untouched while its miner takes his supplies
 RING_CAP   = 16    -- furthest CHUNK ring (33x33 chunks; matches miner.lua)
 NAME_MAX   = 16
