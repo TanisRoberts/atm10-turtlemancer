@@ -690,12 +690,23 @@ local function smeltPass()
                             spi = spiOf(fz), add = 0, jobs = {} }
     end
   end
+  -- Fair shares: while capR is set, that recipe may hold at most capN furnaces (empty ones up to
+  -- capN, top-ups only while it isn't over), so one rule with lots of input can't take them all.
+  -- capFree: empty ones are free for anyone (the second round), top-ups are still capped
+  local capR, capN, capFree
+  local function held(r)
+    local n = 0
+    for _, f in ipairs(slots) do if f.name and isInputOf(r, f.name) then n = n + 1 end end
+    return n
+  end
   local function give(input, amount, job)
     local left = amount
     while left > 0 do
       local best, bestT
+      local h = capR and held(capR)
       for _, f in ipairs(slots) do
-        if (f.name == nil or f.name == input) and (f.count <= TOPUP_AT or f.add > 0) then
+        if (f.name == nil or f.name == input) and (f.count <= TOPUP_AT or f.add > 0)
+           and (not h or h < capN or (f.name == nil and capFree) or (f.name ~= nil and h <= capN)) then
           local room = 64 - f.count - f.add
           if room > 0 then
             local t = (f.count + f.add + math.min(CHUNK, left, room)) * f.spi
@@ -823,7 +834,7 @@ local function smeltPass()
   -- Hand a recipe's work out: what the furnaces can take straight away (incl. dust) to the furnaces,
   -- ore with a factory route to the factories. amount = output items wanted (rules) or input items
   -- (jobs: job.left).
-  local function serve(r, amount, job, keepKey)
+  local function serve(r, amount, job, keepKey, furnaceOnly)
     local inputs = {}
     for name, n in pairs(have) do if n > 0 and isInputOf(r, name) then inputs[#inputs + 1] = name end end
     table.sort(inputs, function(a, b)
@@ -833,6 +844,7 @@ local function smeltPass()
     local ores = {}
     for _, input in ipairs(inputs) do
       local how, e = enrichState(r, input)
+      if furnaceOnly and how == "factory" then how = "skip" end
       if how == "factory" then
         ores[#ores + 1] = { input = input, e = e }
       elseif how == nil and amount > 0 and (have[input] or 0) > 0 then
@@ -844,6 +856,7 @@ local function smeltPass()
         if not job then amount = amount - have[input] * per end
       end
     end
+    if furnaceOnly then return end
     if keepKey then
       -- Keep-N: only for a shortfall that lasts (two passes; a part batch, 10 s)
       if amount <= 0 then FX.shortSince[keepKey] = nil; return end
@@ -898,20 +911,34 @@ local function smeltPass()
         i = i + 1
       end
     end
-    -- Then the standing rules, in smelt.txt order
-    for _, rule in ipairs(smeltRules) do
+    -- Then the standing rules, in smelt.txt order: first each rule with work up to its fair share
+    -- of the furnaces, then the furnaces still free go to whichever rule can use them
+    local function wantOf(rule)
       local r = rule.r
-      if rule.all then
-        serve(r, math.huge)
-      else
-        local made = outCount(r)
-        for name, c in pairs(cooked) do if outMatches(r, name) then made = made + c end end
-        for name, c in pairs(busy) do if isInputOf(r, name) then made = made + c * perOf(r, name) end end
-        made = made + FX.pendingFor(r)
-        local want = rule.stacks * 64 - made
-        serve(r, want, nil, rule.name)
-      end
+      if rule.all then return math.huge end
+      local made = outCount(r)
+      for name, c in pairs(cooked) do if outMatches(r, name) then made = made + c end end
+      for name, c in pairs(busy) do if isInputOf(r, name) then made = made + c * perOf(r, name) end end
+      return rule.stacks * 64 - made - FX.pendingFor(r)
     end
+    local function hasInput(r)
+      for name, n in pairs(have) do if n > 0 and isInputOf(r, name) then return true end end
+    end
+    local working = 0
+    for _, job in ipairs(smeltQueue) do if job.left > 0 then working = working + 1 end end
+    for _, rule in ipairs(smeltRules) do
+      rule.working = wantOf(rule) > 0 and hasInput(rule.r)
+      if rule.working then working = working + 1 elseif not rule.all then FX.shortSince[rule.name] = nil end
+    end
+    capN = math.max(1, math.ceil(#slots / math.max(1, working)))
+    for _, rule in ipairs(smeltRules) do
+      if rule.working then capR = rule.r; serve(rule.r, wantOf(rule), nil, not rule.all and rule.name or nil) end
+    end
+    capFree = true
+    for _, rule in ipairs(smeltRules) do
+      if rule.working then capR = rule.r; serve(rule.r, wantOf(rule), nil, nil, true) end
+    end
+    capR = nil
   end
 
   -- Feed barrels: things that shouldn't be there (an ore it refused, a forgotten route) go back
