@@ -19,6 +19,7 @@ Miners are one program (`turtle/miner/`) named by the dimension they are set up 
 - **One brain per miner.** A miner takes `cmd` only from his own dimension's Foreman, on its protocol. `cmd.kind` names the bird it is meant for (`canary`, `firecrest`, `starling`); a miner ignores a `cmd` for another kind, and on `tanis-miner` one with no kind (an old Foreman). The Overworld Foreman never sends `cmd` to a Canary or a Firecrest: it sends `remote_cmd` to their Foreman.
 - **Dig rules don't weaken:** never dig a turtle, a cable/pipe/modem/computer/barrel/hopper/ender chest/storage block (`isProtected`), and empty a chest before digging it (`isLootable`, `lootAt`).
 - **Numbers:** each Foreman hands out its bird's numbers (`Canary-04`); a retired number is never reused.
+- **Last seen survives a reboot.** Each miner's latest status (position, dimension, state, message, fuel, chunk) is kept in its registry entry as `last = { at, s }` (`fm_reg.lua` `snapshotLast`) and written to disk at most every 30 s, and only when place or state changed. On load `restoreLive` rebuilds `live` from it, so a miner that hasn't spoken yet shows greyed with "not heard for <time>" and its last position. The Overworld Foreman's mirrors of other Foremans' miners are not saved: those Foremans keep them.
 - Everything on a dimension Foreman's cable is a barrel (chest → hopper → barrel where a chest is needed).
 
 ## Docks

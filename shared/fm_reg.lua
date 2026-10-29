@@ -82,8 +82,43 @@ function loadCfg()
     for _, dd in pairs(reg) do fix(dd, "r1", "r2"); fix(dd, "pR1", "pR2") end
     cfg.chunkRings = true
   end
+  restoreLive()
+end
+
+-- A miner's last status survives my reboot: reg[id].last = { at = utc ms, s = the status fields worth keeping }.
+-- ownStatus() snapshots it on every status (in memory) and flushLast() writes it to disk at most every LAST_SAVE s.
+LAST_SAVE = 30
+LAST_KEYS = { "kind", "label", "state", "msg", "pos", "far", "dim", "y", "facing", "home", "minY", "maxY",
+              "fuel", "fuelLimit", "hungry", "chunk", "chunks", "ring", "layer", "layers" }
+lastDirty, lastSaved = false, 0
+function restoreLive()
+  local now = os.epoch("utc")
+  for id, dd in pairs(reg) do
+    if type(dd.last) == "table" and type(dd.last.s) == "table" and not live[id] then
+      -- seen = os.clock() at the time he spoke, so "not heard for ..." counts the time I was off too
+      live[id] = { s = dd.last.s, seen = os.clock() - math.max(0, now - (tonumber(dd.last.at) or now)) / 1000 }
+    end
+  end
+end
+function snapshotLast(dd, msg)
+  local s = {}
+  for _, k in ipairs(LAST_KEYS) do s[k] = msg[k] end
+  local old = dd.last and dd.last.s
+  dd.last = { at = os.epoch("utc"), s = s }
+  -- Only a change of place or state is worth a disk write (a miner's seen-time alone is not)
+  if not old or old.state ~= s.state or old.msg ~= s.msg or old.dim ~= s.dim
+    or not (old.pos and s.pos and old.pos.x == s.pos.x and old.pos.y == s.pos.y and old.pos.z == s.pos.z) then
+    lastDirty = true
+  end
+end
+function flushLast()
+  if lastDirty and os.clock() - lastSaved >= LAST_SAVE then
+    lastDirty, lastSaved = false, os.clock()
+    saveCfg()
+  end
 end
 function saveCfg()
+  lastDirty, lastSaved = false, os.clock()
   local f = fs.open(P.config, "w"); f.write(textutils.serialize(cfg)); f.close()
 end
 

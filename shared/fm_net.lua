@@ -31,6 +31,7 @@ function numbers(bird) return not P.registers or P.registers[bird or ""] == true
 function ownStatus(from, msg)
   live[from] = { s = msg, seen = os.clock() }
   local dd = reg[from]
+  if dd then snapshotLast(dd, msg) end
   if dd and dd.reboot and msg.rebootDone == dd.reboot then
     if msg.state == "rebooting" then
       dd.rebootSeen = true
@@ -121,6 +122,7 @@ function netLoop()
     sendNow = {}
     if all then lastSend = os.clock() end
     if remoteTick then remoteTick(all) end
+    flushLast()
     draw()
   end
 end
