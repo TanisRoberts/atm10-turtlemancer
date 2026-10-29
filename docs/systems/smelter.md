@@ -1,6 +1,19 @@
 # Smelter: factories and the drip trial
 
-Code: `computer/smelter/smelter.lua` (everything under `FX.`), decisions in `computer/smelter/drip.lua`, direct/via-dust and the hand-added list in `computer/smelter/direct.lua`.
+Code: `computer/smelter/smelter.lua` is the thin main; the program lives in modules that share one state table `S` (each is `return function(S) ... end`; names an earlier module defined are local aliases, anything reassigned lives in `S`, and what others need is exported to `S` at the end):
+
+| Module | Holds |
+|---|---|
+| `smelter_core` | constants, `cfg` load/save, shared state, small helpers, the link to storage (`sendBatch`) |
+| `smelter_recipes` | recipe book, `smelt.txt` rules, `learn` / `forget` |
+| `smelter_factory` | everything under `FX.`: routing, drip trial, probe, add/remove setups |
+| `smelter_pass` | the smelting pass (fair shares, give/serve) |
+| `smelter_train` | training furnace, "Find it", factory-dust check |
+| `smelter_screen` | views, drawing helpers, draw cycle, touch/key loop |
+| `smelter_home`, `smelter_trainui` | the pages (all drawing code stays in the screen modules) |
+| `smelter_net` | status for chat/mainframe, terminal commands, background loops |
+
+A new module needs its `manifest.lua` entry and a slot in the load list in `smelter.lua`. Drip decisions are in `drip.lua`, direct/via-dust and the hand-added list in `direct.lua`, power-cut safe config in `trainsafe.lua`.
 
 ## Factory routing
 - A setup is feed barrel → hopper → factory → out barrel (`factory add <machine> <feed> <out>`; Mekanism machines are read-only over the cable). The process count is read from the machine (`getInput(p)` until it stops answering), never hard-coded.
