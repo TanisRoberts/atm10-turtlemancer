@@ -244,6 +244,7 @@ for _, s in ipairs(SIZES) do
     T.eq(#scr:line(3):gsub("%s+$", ""), W - 1)
     T.eq(fg(scr, W - 1, 3), COL.cyan)
     T.truthy(inRow(scr, 4, "..") and inRow(scr, 4, "204"), "long name cut, value kept")
+    if rpp >= 6 then T.eq(fg(scr, W - 1, 3 + 5), COL.lime, "row.tone colours the value") end
     -- stripe: state colour at the left except on narrow
     if W > 30 then T.eq(bg(scr, 1, 3), COL.orange, "row 1 is state 'warn'"); T.eq(inRow(scr, 3, "Item"), 3)
     else T.eq(inRow(scr, 3, "Item"), 2, "narrow drops the stripe") end
@@ -281,6 +282,13 @@ T.test("ui2: search bar filters as you type, Backspace, Esc, Enter opens the top
   key(world, c, ESC)
   T.truthy(inRow(scr, 18, "search, / = commands"), "Esc clears the text")
   T.truthy(inRow(scr, 3, "Item number 01"))
+end)
+
+T.test("ui2: a list with once = true opens a row with one tap", function()
+  local world, c = demo2(51, 19, { tab = "list", rows = 10, once = true })
+  tap(world, c, 8, 5)
+  T.eq(d2(c).opened, "Item number 03", "one tap opens")
+  T.eq(bg(c.screen, 8, 5), COL.yellow, "and the row is selected")
 end)
 
 T.test("ui2: / turns the search bar into a command bar: list, Tab, Up/Down, Enter, Esc", function()

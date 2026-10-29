@@ -24,7 +24,7 @@ Paging state lives on the view: `v.page` is the page being shown, lists and tile
 - `v:tiles(items, { render = fn(item) -> fields, on })` and `ui.layout.tiles(W, H, n)` (columns, width, height, rows per page, pages). Fields: name, state, activity, fuel (0..1), numbers, seen, stale (`"3m"`), color. 5-row tiles, or 2-row (name and fuel) on short screens. Arrows move the highlight, Enter opens, Esc clears.
 - `v:bar(x, y, w, label, frac, { kind = "fuel"|"cap"|"progress", text })`; `ui.barColour(kind, frac)`.
 - `ui.field{ hint, max, validate, on_commit, on_cancel }` and `v:field(x, y, label, w, f)`. `v:search(f, { hint, commands = { { name, help, fn(arg) } } })` draws the input row and returns true in command mode; call it after the list, because the command list replaces what was drawn above it (and its hit boxes). A search bar takes all typing unless another field is focused, so button hotkeys and `1`-`9` are off on screens that have one. Enter on a search bar with no `on_commit` opens the selected list row, else the top one.
-- `v:list(rows, { on, input, top })`: (`top` = first row to use, to leave room above for a question) rows `{ name, value, state (colour role), id }`. Up/Down, PgUp/PgDn, Home/End, Enter.
+- `v:list(rows, { on, input, top, once })`: (`top` = first row to use, to leave room above for a question; `once = true`: one tap opens a row, for a pick list) rows `{ name, value, state (colour role), id, tone }` (`tone` = the value's colour role, default cyan; use it when the value is a state word). Up/Down, PgUp/PgDn, Home/End, Enter.
 - `v:map({ get = fn(x, z) -> role | { role, char, text, textRole }, at = { x, z, facing, fg, bg }, on_cell, input, area, bounds, wide })`: pan buttons, `Follow`, arrows, Home or `f`, wheel. `area` draws in a box instead of the content area (the pan row is its last row). `bounds` says where the map exists: a map that fits is centred with no pan row, a bigger one stays inside it; `wide` makes cells 2 characters when they fit. `v:cells(x, y, { { char, fg, bg }, ... })` draws one row of coloured cells with a single `blit` (the map uses it; so can a thumbnail).
 
 The map thumbnail on a tile is done by the screen through `fields.extra` and `v:cells`.
@@ -41,7 +41,7 @@ Loaded by `ui.lua` after `ui_widgets.lua`; every role that uses the kit lists al
 - `ui.picker{ question, items = { { id, name, tag, lines | text } }, index, hint, on_pick(item, i), on_move(item, i) }` and `v:picker(p)`: the question and `n of m` counter, the previous and next items peeking above and below (`^`/`v`, click to move to one), the current one as a gold title bar (name, tag) with its body (`lines`, or `text` word-wrapped; cut with `...`). It draws the hint and `Pick >` on the footer row, so call it **after** `v:footer{ back }`. Up/Down/Left/Right, wheel, Home/End, `1`-`9`; Enter with nothing focused (or `Pick >`) picks. Wraps around. `p:move(d)`, `p:jump(i)`, `p:pick()`.
 - `v:report{ title, state, color, right, back, rows }`: a whole info page. Rows are `{ section }`, `{ key, value, tone }`, `{ alert, tone }`, `{ text, tone }` or `{ blank = true }`; a blank row goes above every section but the first, a pager appears when it does not fit, and the footer has Back. Use it for what a command used to print on the terminal.
 - `v:spinner_line(x, y, text)`: the orange waiting glyph (`. o O o`, 4 beats a second) then the text; sets `v.animated`. `ui.anim == "off"` or no colour shows a still glyph. It uses `ui.beat` when motion lands, else the clock at the same rate.
-- The furnace tile and the padlock live in the smelter's and storage's own screens modules.
+- The furnace tile (`smelter_home.lua`) and the padlock live in the smelter's and storage's own screens modules, built from `v:put`, `v:fill` and `v:glyph`.
 
 ## Motion (#24): `shared/ui_motion.lua`
 
@@ -77,7 +77,7 @@ v:search(st.field, { commands = cmds:commands() })
 - Unknown command: "Unknown command /x." and the list of usage lines. `/help` lists them; `/help goto` gives one. A screen can replace `/help` by adding its own.
 - Results go to `ui.say` (one line, so keep them short) unless `slash.new{ say = }` says otherwise. `cmds:run(line)` returns `ok, text, tone` and shows nothing.
 - `cmds:commands()` is the list the kit's command bar takes (`v:search`): typing `/` shows it, Tab completes, Enter runs. The kit's bar needs the computer's own screen: a monitor has no keyboard, so draw `v:search` only when `not v.side`. `v:tiles` takes `input = 2` to leave room for a search row below a button row.
-- Storage and the smelter keep their own parsers until their UI-kit rebuilds (#21, #20). The Farmhand is the demo: `/status`, `/help`.
+- Storage keeps its own parser until its UI-kit rebuild (#21). The Farmhand and the smelter use it (`docs/systems/smelter.md` lists the smelter's commands). A line printed to the terminal behind the kit scrolls it: call `v:invalidate()` on every view afterwards.
 
 ## Tests
 

@@ -47,12 +47,12 @@
 --   factory  factories: routing, the drip trial, probe, adding and removing setups
 --   pass     the smelting pass (fair shares, give / serve through storage)
 --   train    the training furnace, "Find it", the factory-dust check
---   screen   views, drawing helpers, the draw cycle and the touch / key loop
---   home, trainui   the pages (all drawing lives in the screen modules)
---   net      status for chat and the mainframe, terminal commands, the background loops
+--   screen   the kit's views, the page router, button rows, the command bar and the event loop
+--   home, trainui, lists, facui   the pages, built from the UI kit (home; training and pick the trainer; recipes and rule; factories)
+--   net      status for chat and the mainframe, the slash commands (shared/slash.lua), the background loops
 
 local S = {}
-for _, part in ipairs({ "core", "recipes", "factory", "pass", "train", "screen", "home", "trainui", "net" }) do
+for _, part in ipairs({ "core", "recipes", "factory", "pass", "train", "screen", "home", "trainui", "lists", "facui", "net" }) do
   require("smelter_" .. part)(S)
 end
 local K, FX = S.K, S.FX

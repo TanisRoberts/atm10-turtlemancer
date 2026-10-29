@@ -59,5 +59,5 @@ T.test("smelter: says so on screen when storage is not on the network", function
   local w, st, sm, inv, furnaces, mon = base("iron all\n")
   sm:run("smelter")                                  -- storage never started
   w:run(30)
-  T.contains(mon, "no storage!")
+  T.contains(mon, "Storage not heard")
 end)

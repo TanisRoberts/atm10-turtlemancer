@@ -339,7 +339,9 @@ end
 ---------------------------------------------------------------------------------------------------------
 -- Paged list rows (4.9)
 ---------------------------------------------------------------------------------------------------------
--- v:list(rows, { on = fn(row), input = true if a search bar sits below, top = first row to use (default 3) })  rows: { name, value, state, id }.
+-- v:list(rows, { on = fn(row), input = true if a search bar sits below, top = first row to use (default 3) })  rows: { name, value, state, id, tone }.
+-- tone = the value's colour role (default cyan: you can open it); use it where the value is a state word.
+-- once = true: one tap opens a row (a pick list); the default is tap to select, tap again to open.
 -- name left, value right (cyan: you can open it), a one-cell stripe in the stock-state colour (not on narrow),
 -- the selected row gold. Tap a row to select it, tap it again or the value to open. Up/Down, PgUp/PgDn, Home/End
 -- move, Enter opens. Rows per page = the free rows between the rule and the footer (less one for an input row).
@@ -370,11 +372,11 @@ function View:list(rows, o)
     local nx = sx and 3 or 2
     self:put(nx, y, fit(row.name or "", vx - 1 - nx), ink, rb)
     if #val > 0 then
-      self:put(vx, y, val, sel and "bg" or "info", rb)
+      self:put(vx, y, val, sel and "bg" or row.tone or "info", rb)
       self:_box({ vx, y, W, y }, nil, { id = "val:" .. idx, fn = function() self.sel = idx; if o.on then o.on(row) end end })
     end
     self:_box({ 1, y, W, y }, nil, { id = "row:" .. idx, fn = function()
-      if self.sel == idx then if o.on then o.on(row) end else self.sel = idx end end })
+      if self.sel == idx or o.once then self.sel = idx; if o.on then o.on(row) end else self.sel = idx end end })
   end
   return pages, rpp
 end

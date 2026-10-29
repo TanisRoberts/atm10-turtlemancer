@@ -74,7 +74,7 @@ function FX.readFactory(i)
       local cand = FX.machineCandidates()[1]
       local text = ("%s: %s is gone: factory missing, re-add it%s"):format(FX.factoryName(i), shortName(f.machine),
         cand and (" (found " .. cand .. ": factory add " .. cand .. " " .. f.feed .. " " .. f.out .. ")") or "")
-      print(text)
+      FX.print(text)
       FX.notify(("%s missing: re-add it (factory add <machine> <feed> <out>)"):format(FX.factoryName(i)), K.orange)
     end
     if s.trial then s.trial = nil end                 -- its settings are restored once it's back
@@ -299,7 +299,7 @@ function FX.endTrial(i, text, col)
   local f, fs = cfg.factories[i], FX.facs[i]
   if fs then fs.trial = nil end
   if f then FX.restoreSettings(f.machine) end
-  if text then FX.notify(text, col); print(text) end
+  if text then FX.notify(text, col); FX.print(text) end
   redraw()
 end
 
@@ -367,7 +367,7 @@ FX.probeReq = nil          -- { item, i, since } until a factory is free to run 
 FX.probeLog = {}
 function FX.probeSay(text, col)
   FX.probeLog[#FX.probeLog + 1] = text
-  print(text)
+  FX.print(text)
   if col then FX.notify(text, col) end
 end
 
@@ -391,10 +391,11 @@ function FX.probeEnd(i, t, v)
   fh.close()
   FX.notify("Probe done: " .. what .. ". Log in " .. FX.PROBE_LOG, K.lime)
   if http and shell then
-    print("Uploading " .. FX.PROBE_LOG .. " to pastebin...")
-    if not pcall(shell.run, "pastebin", "put", FX.PROBE_LOG) then print("Upload failed: run  pastebin put " .. FX.PROBE_LOG) end
+    FX.print("Uploading " .. FX.PROBE_LOG .. " to pastebin...")
+    if not pcall(shell.run, "pastebin", "put", FX.PROBE_LOG) then FX.print("Upload failed: run  pastebin put " .. FX.PROBE_LOG) end
+    FX.print("")
   else
-    print("Run  pastebin put " .. FX.PROBE_LOG .. "  to share it.")
+    FX.print("Run  pastebin put " .. FX.PROBE_LOG .. "  to share it.")
   end
 end
 

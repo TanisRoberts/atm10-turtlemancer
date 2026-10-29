@@ -2,7 +2,7 @@
 
 Part of issue #26. Built from the UI kit (`docs/design/ui-kit.md`): header B, buttons B, tiles B, the palette and motion A.
 
-**Code:** `computer/smelter/smelter.lua`
+**Code:** `computer/smelter/` (see `docs/systems/smelter.md`)
 
 Auto-smelting computer: furnace array, training furnace, recipes, rules, factories. Monitor 3x2 (57x24) is the target; the computer screen shows the same.
 

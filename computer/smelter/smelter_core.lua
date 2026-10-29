@@ -204,6 +204,7 @@ end
 
 local function redraw() os.queueEvent("smelter_draw") end
 FX.notify = function() end   -- set once the screens exist: a notice on both screens
+FX.print = print             -- a line on the terminal log; the screens repaint after it (smelter_screen)
 
 S.BASE, S.CHUNK, S.FIND_TIME, S.FRAME, S.FUEL_VALUE, S.FX = BASE, CHUNK, FIND_TIME, FRAME, FUEL_VALUE, FX
 S.K, S.SMELT_FILE, S.SMELT_FUELS, S.TEXT_SCALE, S.TICK, S.TOPUP_AT = K, SMELT_FILE, SMELT_FUELS, TEXT_SCALE, TICK, TOPUP_AT

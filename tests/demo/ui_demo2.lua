@@ -20,6 +20,7 @@ local rows = {}
 for i = 1, cfg.rows do
   rows[i] = { name = ("Item number %02d"):format(i), value = i * 100 + 4, state = ({ "good", "warn", "bad" })[i % 3 + 1], id = i }
 end
+rows[6].tone = "good"      -- a value in a state colour (row.tone), not the default cyan
 rows[2].name = "A very long item name that cannot possibly fit on a narrow screen"
 
 local filter = ui.field{ hint = "search" }
@@ -54,7 +55,7 @@ ui.run(views, function(v)
     for _, r in ipairs(rows) do
       if filter.text:sub(1, 1) == "/" or r.name:lower():find(filter.text:lower(), 1, true) then shown[#shown + 1] = r end
     end
-    v:list(shown, { input = true, on = function(r) d2.opened = r.name end })
+    v:list(shown, { input = true, once = cfg.once, on = function(r) d2.opened = r.name end })
     v:search(filter, { commands = {
       { name = "reboot", help = "reboot a turtle", fn = function(a) d2.cmd = "reboot " .. a end },
       { name = "refuel", help = "send fuel to a turtle", fn = function(a) d2.cmd = "refuel " .. a end },
