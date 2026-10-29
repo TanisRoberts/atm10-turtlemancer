@@ -54,6 +54,7 @@ local TOPUP_AT      = 32      -- a busy furnace gets more of the same once it's 
 local FX = {}
 FX.FACTORY_BUFFER = 3     -- batches per process kept queued at a factory (feed barrel + its inputs)
 FX.direct = require("direct") -- direct or via dust, and the hand-added list (computer/smelter/direct.lua)
+FX.ts = require("trainsafe") -- config save/load that survives a power cut, training recovery (computer/smelter/trainsafe.lua)
 FX.drip = require("drip") -- the drip trial's decisions (computer/smelter/drip.lua)
 FX.kit = require("ui")    -- the UI kit's motion: ui.beat, ui.anim (ANIM=full|calm|off in smelter.env)
 FX.FALLBACK_AFTER = 300   -- seconds every factory can be down before ore goes to the furnaces again
@@ -139,12 +140,9 @@ local STONE_TIER = { "furnace", "FURNACE", 200, K.grey, K.white, "STONE" }
 ---------------------------------------------------------------------------
 local cfg = { trainer = nil, paused = false, learned = {}, speed = {}, factories = {}, enrich = {} }
 local function loadCfg()
-  if fs.exists(CONFIG) then
-    local f = fs.open(CONFIG, "r"); local t = textutils.unserialize(f.readAll() or ""); f.close()
-    if type(t) == "table" then
-      for k, v in pairs(t) do cfg[k] = v end
-    end
-  end
+  local t, from, bad = FX.ts.load(CONFIG)
+  if t then for k, v in pairs(t) do cfg[k] = v end end
+  FX.cfgNote = bad and "smelter.cfg was unreadable: kept as smelter.cfg.bad" or from and ("smelter.cfg restored from " .. from) or nil
   if type(cfg.learned) ~= "table" then cfg.learned = {} end
   if type(cfg.speed) ~= "table" then cfg.speed = {} end
   if type(cfg.factories) ~= "table" then cfg.factories = {} end
@@ -152,9 +150,7 @@ local function loadCfg()
   if type(cfg.enrichExtra) ~= "table" then cfg.enrichExtra = {} end
 end
 local function saveCfg()
-  local f = fs.open(CONFIG .. ".new", "w"); f.write(textutils.serialize(cfg)); f.close()
-  if fs.exists(CONFIG) then fs.delete(CONFIG) end
-  fs.move(CONFIG .. ".new", CONFIG)
+  FX.ts.save(CONFIG, cfg)
 end
 
 ---------------------------------------------------------------------------
@@ -1147,6 +1143,7 @@ local function startTraining()
   local s = trainSlots
   if not s.inp then return false, "Put the raw item in the trainer's TOP slot first." end
   train = { state = "starting", input = s.inp.name, startCount = s.inp.count, startedAt = os.clock() }
+  FX.ts.sync(cfg, saveCfg, train)
   redraw()
   return true
 end
@@ -1156,6 +1153,7 @@ local function trainStep()
   local s = readOne(cfg.trainer)
   if not s then trainSlots, trainSeen = {}, false; return end
   trainSlots, trainSeen = s, true
+  FX.ts.sync(cfg, saveCfg, train)
 
   -- After a training: put the leftovers and the cooked item back in storage
   if train.giveBack then
@@ -2814,4 +2812,12 @@ loadCfg()
 buildBook()
 loadSmeltRules()
 findFurnaces()
+do
+  local t = FX.ts.recover(cfg)
+  if t then
+    train = t
+    FX.notify(("Restarted mid-training: %s goes back into storage, nothing learned from that run."):format(pretty(t.input or "?")), K.orange)
+  end
+  if FX.cfgNote then saveCfg(); FX.notify(FX.cfgNote, K.orange) end
+end
 parallel.waitForAny(workLoop, trainLoop, netLoop, uiLoop)

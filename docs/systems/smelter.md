@@ -30,3 +30,9 @@ Settings come back when the trial ends, is cancelled (`factory remove`, `probe s
 
 ## Tests
 `tests/scenarios/smelter_drip.lua` runs the real smelter and storage against `tests/sim/factory.lua` (a mock Mekanism factory with a hopper).
+
+## Training: saving and power cuts (`trainsafe.lua`)
+- `learn` saves `smelter.cfg` the moment the output is seen. The file is written as `.new` then swapped in (`.bak` keeps the previous one). On boot it loads `smelter.cfg`, else `.new`, else `.bak`; a file that exists but can't be parsed is moved to `smelter.cfg.bad` and never overwritten by an empty config. The screen says when a fallback was used.
+- `cfg.training = { input }` is set while the trainer holds something the program put there (a run, the hand-back to storage, an auto dust check) and cleared when it is empty again. If it is still set at boot, the run is discarded: the trainer is emptied into storage and the screen says so. Nothing is learned from a half run (a recipe is only saved whole, when the output appears).
+- Factory enrichment results (`cfg.enrich`) go through the same save; the drip trial's own recovery is above.
+- Tests: `tests/scenarios/smelter_train.lua`.
