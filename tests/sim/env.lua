@@ -413,6 +413,10 @@ function Env.build(world, c)
   end
   function peripheral.getNames() return c:peripheralNames() end
   function peripheral.isPresent(n) return c:resolve(n) ~= nil end
+  local function staleOf(n)
+    local st = c.stale and c.stale[n]
+    if st and world.now < st.untilT then return st end
+  end
   function peripheral.getType(n)
     local d = c:resolve(n)
     if d then return table.unpack(d.types) end
@@ -490,9 +494,17 @@ function Env.build(world, c)
     if n then c.openModems[n] = nil else c.openModems = {} end
   end
   -- like CC: open only while a modem is still there (a chunk controller swapped onto its side isn't one)
-  local function stillModem(n) local d = c.sides[n]; return d ~= nil and d.isModem == true end
+  local function stillModem(n)
+    local d = c.sides[n]
+    if staleOf(n) then world.staleHits = (world.staleHits or 0) + 1 end
+    if staleOf(n) and not (d and d.isModem) then   -- getType still says modem, the call finds none
+      error("No such method isOpen", 3)
+    end
+    return d ~= nil and d.isModem == true
+  end
   function rednet.isOpen(n)
     if n then return c.openModems[n] == true and stillModem(n) end
+    for side in pairs(c.stale or {}) do if staleOf(side) then stillModem(side) end end   -- CC asks every "modem"
     for side in pairs(c.openModems) do if stillModem(side) then return true end end
     return false
   end

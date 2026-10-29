@@ -77,13 +77,13 @@ end
 -- A Foreman that doesn't know my dock yet tries one (r.probe): I answer whether its fuel is in mine. A wrong
 -- one he takes back and tries the next, so every try (and dock_wait: another miner's turn) gives me more time.
 function askDock(needBucket, wantFuel)
-  if not rednet.isOpen() then return nil end
+  if not radioUp() then return nil end
   local me, seq = os.getComputerID(), os.epoch("utc")
   dockReply = nil
   local deadline, nextSend, seen = os.clock() + ASK_FOR, 0, nil
   while os.clock() < deadline do
     if os.clock() >= nextSend then
-      rednet.broadcast({ type = "dock_req", id = me, seq = seq, bucket = needBucket, fuel = wantFuel }, PROTOCOL)
+      radioSend({ type = "dock_req", id = me, seq = seq, bucket = needBucket, fuel = wantFuel }, PROTOCOL)
       nextSend = os.clock() + 3
     end
     local r = dockReply
@@ -96,7 +96,7 @@ function askDock(needBucket, wantFuel)
       elseif r.probe ~= seen then
         seen = r.probe
         local mine = inMyDock(r.got)
-        rednet.broadcast({ type = mine and "dock_mine" or "dock_wrong", id = me, seq = seq, dock = r.dock }, PROTOCOL)
+        radioSend({ type = mine and "dock_mine" or "dock_wrong", id = me, seq = seq, dock = r.dock }, PROTOCOL)
         if mine then return r end
         setStatus("docked", ("%s is finding my dock"):format((MODE.boss:gsub("^t", "T"))))
         deadline = os.clock() + 30
@@ -159,7 +159,7 @@ function takeSupplies()
   core.fuel.refuelFromInventory(fuelLimit())   -- the rest of what he asked for (coal ...), as much as fits
   local ok = unloadAll()
   face(0)
-  if rednet.isOpen() then rednet.broadcast({ type = "dock_done", id = os.getComputerID() }, PROTOCOL) end
+  if radioUp() then radioSend({ type = "dock_done", id = os.getComputerID() }, PROTOCOL) end
   return ok
 end
 

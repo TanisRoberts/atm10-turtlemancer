@@ -220,3 +220,31 @@ T.test("miner: many chunk swaps while the radio is busy never lose his modem or 
   T.eq(dock:count("advancedperipherals:chunk_controller") + dock:count("computercraft:wireless_modem_advanced"), 0, "no gear in the dock")
   T.truthy((f.env._G.lastStatus.swaps or 0) >= 9, "swapped in every chunk")
 end)
+
+T.test("miner: a chunk swap landing while the radio loop waits in receive never crashes him (issue 96)", function()
+  -- a slow swap (each equip a few ticks, like the game): the radio loop's 0.2 s nap ends with the modem still off
+  local cost = require("sim.turtle").cost
+  local old = { cost.equipLeft, cost.equipRight }
+  cost.equipLeft, cost.equipRight = 0.2, 0.2
+  -- the radio loop wakes on a 1 s timer; start the run at twelve offsets so a swap lands inside it somewhere
+  local hits = 0
+  for i = 0, 11 do
+    local w = cc.world()
+    w.gpsOn = true
+    w:fill(-24, 58, -24, 39, 63, 39, "minecraft:stone")
+    local dock = MS.barrel()
+    dock:give("minecraft:coal", 64)
+    w:setBlock(1, 64, 0, "minecraft:barrel", dock)
+    local t = MS.turtle(w, { fuel = 5000, items = { [16] = { "advancedperipherals:chunk_controller", 1 } } })
+    local f = MS.foreman(w)
+    MS.setup(w, t)
+    w:run(10 + i * 0.09)
+    MS.order(f, { minY = 61, maxY = 63, c2 = 1 })
+    w:run(400)
+    T.running(t)
+    T.eq(t:output():find("No such method", 1, true), nil, "offset " .. i .. ": " .. t:output())
+    T.truthy(f.env._G.lastStatus ~= nil, "still reporting")
+    hits = hits + (w.staleHits or 0)
+  end
+  cost.equipLeft, cost.equipRight = old[1], old[2]
+end)

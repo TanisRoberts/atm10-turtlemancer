@@ -153,6 +153,44 @@ local function openRadio()
   return modem ~= nil and pcall(rednet.open, peripheral.getName(modem))
 end
 
+local function netHandle(msg, me)
+  if type(msg) == "table" and msg.type == "assigned" and msg.id == me and not S.num and tonumber(msg.num) then
+    S.num = tonumber(msg.num)
+    -- An older Foreman only knows Canary-NN: my name comes from my dimension either way
+    local lbl = type(msg.label) == "string" and msg.label or ""
+    os.setComputerLabel(lbl:sub(1, #MODE.name + 1) == MODE.name .. "-" and lbl or myLabel(S.num))
+    print(("%s named me %s."):format((MODE.boss:gsub("^t", "T")), os.getComputerLabel()))
+    save()
+  elseif type(msg) == "table" and (msg.type == "dock_ready" or msg.type == "dock_wait") and msg.id == me then
+    dockReply = msg
+  elseif type(msg) == "table" and msg.type == "cmd" and msg.to == me and cmdForMe(msg) then
+    ctrl = msg
+    if MODE.nether and type(msg.junk) == "table" then
+      S.junk = msg.junk; setJunk(S.junk); valuableCache = {}
+    end
+    local hA, fA = tonumber(msg.hungryAt), tonumber(msg.fullAt)
+    if MODE.nether and hA and fA and hA >= 1 and fA <= 99 and hA < fA then S.hungryAt, S.fullAt = hA, fA
+    elseif not MODE.nether and fA and fA >= 10 and fA <= 99 then S.fullAt = fA end
+    if type(msg.capped) == "table" then
+      local set = {}
+      for _, n in ipairs(msg.capped) do set[n] = true end
+      S.capped = set
+    end
+  end
+end
+
+-- Radio calls for the net loop and the dock talk: never while a chunk swap has the modem off, and a radio error
+-- (a side whose peripheral just changed has no `isOpen`) is a miss, never the end of the miner.
+function radioUp()
+  if core.chunk.busy then return false end
+  local ok, open = pcall(rednet.isOpen)
+  return ok and open == true and not core.chunk.busy
+end
+function radioSend(msg, protocol)
+  if core.chunk.busy then return false end
+  return pcall(rednet.broadcast, msg, protocol)
+end
+
 function netLoop()
   local misses = 0
   if not openRadio() then
@@ -161,47 +199,34 @@ function netLoop()
   local me = os.getComputerID()
   local lastSend = -100
   while true do
-    -- (a chunk swap takes the modem off for a moment: that doesn't count, and only a few misses in a row do)
-    if core.chunk.busy then os.sleep(0.2)
-    elseif rednet.isOpen() or openRadio() then misses, deaf, listening = 0, false, true
-    else
-      misses = misses + 1
-      if misses >= 5 then deaf, listening = true, false end
+    local ok, err = pcall(function()
+      -- (a chunk swap takes the modem off for a moment: that doesn't count, and only a few misses in a row do)
+      while core.chunk.busy do os.sleep(0.1) end
+      if radioUp() or openRadio() then misses, deaf, listening = 0, false, true
+      else
+        misses = misses + 1
+        if misses >= 5 then deaf, listening = true, false end
+        os.sleep(1)
+      end
+      local msg = nil
+      if radioUp() then
+        local rok, _, m = pcall(rednet.receive, PROTOCOL, 1)
+        if rok and not core.chunk.busy then msg = m end
+      end
+      netHandle(msg, me)
+      if os.clock() - lastSend >= STATUS_EVERY and radioUp() then
+        if not S.num then
+          -- No number yet: ask the Foreman (a label like Canary-04 is offered back, e.g. after a reset)
+          radioSend({ type = "register", id = me, want = labelNum(), label = os.getComputerLabel(),
+            name = MODE.name }, PROTOCOL)
+        end
+        radioSend(statusMsg(), PROTOCOL)
+        lastSend = os.clock()
+      end
+    end)
+    if not ok then   -- logged, then tried again; the miner goes on mining
+      print("Radio error: " .. tostring(err))
       os.sleep(1)
-    end
-    local _, msg = nil, nil
-    if rednet.isOpen() then _, msg = rednet.receive(PROTOCOL, 1) end
-    if type(msg) == "table" and msg.type == "assigned" and msg.id == me and not S.num and tonumber(msg.num) then
-      S.num = tonumber(msg.num)
-      -- An older Foreman only knows Canary-NN: my name comes from my dimension either way
-      local lbl = type(msg.label) == "string" and msg.label or ""
-      os.setComputerLabel(lbl:sub(1, #MODE.name + 1) == MODE.name .. "-" and lbl or myLabel(S.num))
-      print(("%s named me %s."):format((MODE.boss:gsub("^t", "T")), os.getComputerLabel()))
-      save()
-    elseif type(msg) == "table" and (msg.type == "dock_ready" or msg.type == "dock_wait") and msg.id == me then
-      dockReply = msg
-    elseif type(msg) == "table" and msg.type == "cmd" and msg.to == me and cmdForMe(msg) then
-      ctrl = msg
-      if MODE.nether and type(msg.junk) == "table" then
-        S.junk = msg.junk; setJunk(S.junk); valuableCache = {}
-      end
-      local hA, fA = tonumber(msg.hungryAt), tonumber(msg.fullAt)
-      if MODE.nether and hA and fA and hA >= 1 and fA <= 99 and hA < fA then S.hungryAt, S.fullAt = hA, fA
-      elseif not MODE.nether and fA and fA >= 10 and fA <= 99 then S.fullAt = fA end
-      if type(msg.capped) == "table" then
-        local set = {}
-        for _, n in ipairs(msg.capped) do set[n] = true end
-        S.capped = set
-      end
-    end
-    if os.clock() - lastSend >= STATUS_EVERY and rednet.isOpen() then
-      if not S.num then
-        -- No number yet: ask the Foreman (a label like Canary-04 is offered back, e.g. after a reset)
-        rednet.broadcast({ type = "register", id = me, want = labelNum(), label = os.getComputerLabel(),
-          name = MODE.name }, PROTOCOL)
-      end
-      rednet.broadcast(statusMsg(), PROTOCOL)
-      lastSend = os.clock()
     end
   end
 end

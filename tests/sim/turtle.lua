@@ -58,6 +58,13 @@ function Turtle.attach(world, c, opts)
   function b:equip(side, name)
     self.up[side] = name
     local dev = name and upgradeDevice(name)
+    -- like CC: the computer's view of a side lags the swap by a game tick. Until then rednet.isOpen still finds
+    -- a "modem" there by its type, while the methods are already the new upgrade's: "No such method isOpen".
+    local old = c.sides[side]
+    if old and world.now then
+      c.stale = c.stale or {}
+      c.stale[side] = { types = old.types, untilT = world.now + 0.05 }
+    end
     if dev then c:attach(side, dev) elseif c.sides[side] then c:detach(side) end
   end
   b:equip("left", opts.left)

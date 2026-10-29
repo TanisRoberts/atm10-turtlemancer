@@ -56,15 +56,18 @@ function D.report(o)
   o = o or {}
   local p = D.known
   if not p then return nil, "no dock position" end
-  if not rednet.isOpen() then return nil, "no modem" end
+  if core.chunk and core.chunk.busy then return nil, "modem off" end   -- mid chunk swap
+  local up, open = pcall(rednet.isOpen)   -- a side whose peripheral just changed has no isOpen: no modem for now
+  if not (up and open) then return nil, "no modem" end
   local me = os.getComputerID()
   local msg = { type = "dock_report", id = me, label = os.getComputerLabel(), role = o.role,
                 x = p.x, y = p.y, z = p.z, dir = p.dir }
   for _ = 1, o.tries or 2 do
-    rednet.broadcast(msg, BASE)
+    if not pcall(rednet.broadcast, msg, BASE) then return nil, "modem off" end
     local deadline = os.clock() + (o.timeout or 2)
     while os.clock() < deadline do
-      local _, reply = rednet.receive(BASE, math.max(0.1, deadline - os.clock()))
+      local rok, _, reply = pcall(rednet.receive, BASE, math.max(0.1, deadline - os.clock()))
+      if not rok then return nil, "modem off" end
       if type(reply) == "table" and reply.type == "dock_ack" and reply.id == me then
         D.reportedAt = os.epoch("utc")
         return reply
