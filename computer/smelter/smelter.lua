@@ -32,8 +32,8 @@
 -- Add one on the Factories page (or: factory add <machine> <feed> <out>). Storage fills the feed
 -- barrel, treats the out barrel like an input chest, and never stores anything in either.
 -- Raw ore with a factory route goes to the factories (whole batches: what a drip trial used, per process) instead of the
--- furnaces, and its dust is smelted. A new ore is tried once: 3 per process into the feed, eject off
--- so I can read what comes out (raw tin 9 -> tin dust 12), eject back on. The dust is then checked in
+-- furnaces, and its dust is smelted. A new ore is tried once with a drip trial (drip.lua): one item at a
+-- time until a process starts, eject off so I can read what comes out, eject back on. The dust is then checked in
 -- the training furnace (it has to smelt into the same thing), and from then on that ore is enriched.
 -- If every factory is down (gone, no power, stuck) for 5 minutes, ore goes to the furnaces again.
 
