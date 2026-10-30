@@ -1,48 +1,47 @@
 -- assignui.lua  --  the "/assign" screen, shared by storage and the Nether Foreman. Loaded with dofile().
+-- Built only from the UI kit (shared/ui*.lua, docs/systems/ui.md); design: docs/design/storage.md.
 --
--- Which inventory on the wired cable does what. List -> click one to edit (job, nickname, delete);
+-- Which inventory on the wired cable does what. List -> tap one to edit (job, nickname, delete);
 -- + Add -> pick by network name (typing narrows the list down) or by dropping one item in.
 -- Everything that isn't on the list is left to the program (storage: it's storage).
+-- It runs its own kit loop on the computer's own screen and returns when Done/Back is pressed.
 --
 -- The program hands over its jobs and data with A.run(o):
 --   o.title         "ASSIGNED STORAGE"
---   o.types         { { key, label, short, tag, col, about }, ... } (3 per row on the edit page)
+--   o.types         { { key, label, short, tag, col, about }, ... }  (col: a colour; shown as its kit role)
 --   o.typeOf(n)     -> job key or nil          o.assign(n, key) -> the inventory it bumped (single jobs)
 --   o.unassign(n)   o.names = { [network name] = nickname } (edited in place)
 --   o.inventories() -> every inventory name    o.candidate(n) -> may be offered under + Add
 --   o.auto(n)       -> job key for an unassigned inventory the program treats as having a job anyway
 --                      (storage: drawers found by name). Listed with "(by name)", can't be deleted.
---   o.single[key]   -> the inventory holding a one-only job (for the "Replaces X" warning)
+--   o.single(key)   -> the inventory holding a one-only job (for the "Replaces X" warning)
 --   o.defaultKey(n) -> the job a new pick starts on
 --   o.warn(e, d)    -> optional extra warning line (e = edit state, d = { text, count, missing })
 --   o.problem()     -> optional warning for the list page ("No OUTPUT yet ...")
---   o.extra         -> optional extra setting for one job: { key, init(n) -> state,
---                      show(state) -> label, text,  click(n, state, plain) [plain = a cleared
---                      screen for typed input is ready],  plain = true/false,  save(n, state) }
+--   o.extra         -> optional extra setting for one job: { key, init(n) -> state, show(state) -> label, text,
+--                      click(n, state) [on a cleared plain screen when plain = true, for typed input],
+--                      plain = true/false, save(n, state) }
 --   o.depots        -> optional "keep this container filled with one thing" jobs, a list of
 --                      { key, kind = "Depot", title = "DEPOT", about, what = "item",
 --                        tank = true/false (its containers are tanks, not inventories),
 --                        items(n) -> { { name, label, count }, ... } offered under "pick the item",
---                        get(n) -> id or nil,  set(n, id) }. With them, + Add asks which kind (or
---                      "Other job") first, and a depot goes container -> item -> summary.
---   o.rules        -> storage's depot rules engine (storage_rules.lua) for the rule pages (assignrules.lua): R.preview,
---                      R.count, R.tags(), R.mods(), R.describe, R.fill, R.modOf. A depot with `rule = true` holds a rule
---                      instead of one item: getRule(n) -> { item, tag, mod, enchanted, priority } or nil,
---                      setRule(n, rule, priority); its `items(n)` still feeds the Item pick list.
+--                        get(n) -> id or nil,  set(n, id) }. With them, + Add asks which kind (or "Other job")
+--                      first, and a depot goes container -> item -> summary.
+--   o.rules         -> storage's depot rules engine (storage_rules.lua) for the rule pages (assignrules.lua).
+--                      A depot with `rule = true` holds a rule instead of one item: getRule(n), setRule(n, rule, priority).
 --   o.describe(n)   -> optional { text, count, size } for a container that has no item list (a tank)
 --   o.hold()/o.release()  pause / resume the program's own moving while "Find it" watches
 --   o.beforeSave()  wait until the program's worker is idle;  o.afterSave()  save + rescan
 --   o.itemTotals()  -> { [inventory] = item count }
 --   o.call(n, method, ...)   peripheral.call wrapped in pcall
 --   o.emptyText     shown when nothing is assigned
+--   o.view          optional kit view of the computer's screen to draw on (the caller keeps it afterwards);
+--                   without it a view is made and its palette put back at the end.
+
+local ui = require("ui")
+local fit = ui.text.fit
 
 local A = {}
-
-local C = {
-  bg = colours.black, bar = colours.grey, fg = colours.white, dim = colours.lightGrey,
-  accent = colours.cyan, stripe = colours.grey, warn = colours.orange, good = colours.lime,
-}
-A.C = C
 
 local function fmt(n)
   if n >= 1e6 then return ("%.1fM"):format(n / 1e6) end
@@ -54,19 +53,19 @@ local function prettyName(id)
   return (s:gsub("^%l", string.upper))
 end
 local function shortName(n) return (n:gsub("^minecraft:", "")) end
-local function cut(text, n)
-  if n <= 0 then return "" end
-  if #text <= n then return text end
-  if n <= 2 then return text:sub(1, n) end
-  return text:sub(1, n - 2) .. ".."
-end
 -- Network names keep their end (the number is what tells barrels apart): "..storage_controller_0"
 local function cutName(n, width)
   local text = shortName(n)
   if #text <= width then return text end
+  if width <= 2 then return text:sub(-width) end
   return ".." .. text:sub(-(width - 2))
 end
-A.shortName, A.cut, A.prettyName, A.fmt = shortName, cut, prettyName, fmt
+A.shortName, A.cut, A.prettyName, A.fmt = shortName, fit, prettyName, fmt
+
+local ROLE = { [colours.lime] = "good", [colours.orange] = "warn", [colours.cyan] = "info", [colours.red] = "bad",
+  [colours.yellow] = "gold", [colours.lightBlue] = "idle", [colours.blue] = "water", [colours.purple] = "busy",
+  [colours.magenta] = "mark", [colours.pink] = "soft", [colours.brown] = "soil", [colours.green] = "good2",
+  [colours.white] = "fg", [colours.lightGrey] = "dim", [colours.grey] = "bar" }
 
 local function runBatched(fns, size)
   size = size or 32
@@ -75,10 +74,61 @@ local function runBatched(fns, size)
   end
 end
 
+local WATCH_S = 30
+
+-- Button row on the footer line, beside Back (and the pager): `list` is a v:buttons list. When it does not fit one
+-- row the buttons go on the rows above and the content gets less room. `o`: back (a Back pill is drawn), pager (leave
+-- room for it), input (rows used by a search bar under the content). Returns { bottom = last content row, draw = fn }
+-- (call draw after v:footer).
+local function plan(v, list, o)
+  o = o or {}
+  local inp = o.input or 0
+  local base = v.H - 1 - inp
+  local x0 = o.back and ((v.wc == "regular" or v.wc == "wide") and 10 or 5) or 2
+  local maxx = v.W - 1 - (o.pager and 12 or 0)
+  local p = { bottom = base }
+  if #list == 0 then p.draw = function() end; return p end
+  local function width(b)
+    local n = #v:_label(b)
+    if b.confirm then n = math.max(n, #(b.label or ""), 5) end
+    return n + (v.colour and 2 or 4)
+  end
+  local total = -1
+  for _, b in ipairs(list) do total = total + width(b) + 1 end
+  if x0 + total - 1 <= maxx then
+    p.draw = function() v:buttons(x0, v.H, list, { maxx = maxx }) end
+    return p
+  end
+  local rows, cx = 1, 2
+  for _, b in ipairs(list) do
+    local w = width(b)
+    if cx > 2 and cx + w - 1 > v.W - 1 then rows = rows + 1; cx = 2 end
+    cx = cx + w + 1
+  end
+  local top = v.H - 1 - inp - (rows - 1)
+  p.bottom = top - 1
+  p.draw = function() v:buttons(2, top, list) end
+  return p
+end
+A.plan = plan
+
+local function wrapText(text, w, maxLines)
+  local out, line = {}, ""
+  for word in tostring(text):gmatch("%S+") do
+    if line == "" then line = word
+    elseif #line + 1 + #word <= w then line = line .. " " .. word
+    else out[#out + 1] = line; line = word end
+  end
+  if line ~= "" then out[#out + 1] = line end
+  while maxLines and #out > maxLines do out[#out] = nil end
+  return out
+end
+
 function A.run(o)
-  local w, h = term.getSize()
-  local st = { page = "list", filter = "", pg = 1 }
-  local hits, desc = {}, {}
+  local v = o.view or ui.view(term.current())
+  local ownView = o.view == nil
+  local st = { page = "list", f = ui.field{ hint = "search by name or contents", max = 40 } }
+  local desc = {}
   local TYPE_BY = {}
   for _, t in ipairs(o.types) do TYPE_BY[t.key] = t end
   local call = o.call
@@ -98,9 +148,17 @@ function A.run(o)
     end
     return out
   end
-  local RU   -- the depot rule pages (assignrules.lua), when the program has a rules engine
+  local RU
   local function ruleDepot(key) local d = DEPOT_BY[key]; return RU and d and d.rule and d or nil end
   local function curDepot() return DEPOT_BY[st.itemBack == "edit" and st.edit and st.edit.key or st.depotFlow] end
+  local say = function(text, tone) ui.say(text, tone or "good") end
+
+  -- Show a page: a fresh search box, first page of the list, nothing selected or focused
+  local function go(page)
+    st.page = page
+    st.f.text = ""
+    v.page, v.sel, v.focus, v.armed = 1, nil, nil, nil
+  end
 
   -- What's in each inventory, for the lists (cached while the screen is open)
   local function describe(list)
@@ -168,57 +226,11 @@ function A.run(o)
   end
 
   local function matches(n)
-    if st.filter == "" then return true end
-    local q, d = st.filter:lower(), desc[n]
+    local q = st.f.text:lower()
+    if q == "" then return true end
+    local d = desc[n]
     return n:lower():find(q, 1, true) ~= nil or (names[n] or ""):lower():find(q, 1, true) ~= nil
       or (d ~= nil and d.text:lower():find(q, 1, true) ~= nil)
-  end
-
-  -- Drawing
-  local function put(x, y, text, fg, bg)
-    term.setCursorPos(x, y)
-    term.setBackgroundColour(bg or C.bg)
-    term.setTextColour(fg or C.fg)
-    term.write(text)
-  end
-  local function btn(x, y, label, active, fn, colour)
-    put(x, y, " " .. label .. " ", active and colours.black or C.fg, active and (colour or C.accent) or C.bar)
-    hits[#hits + 1] = { x1 = x, x2 = x + #label + 1, y = y, fn = fn }
-    return x + #label + 3
-  end
-  local function region(x1, x2, y, fn) hits[#hits + 1] = { x1 = x1, x2 = x2, y = y, fn = fn } end
-  local function titleBar(left, right)
-    term.setCursorPos(1, 1); term.setBackgroundColour(C.bar); term.clearLine()
-    put(1, 1, left, C.accent, C.bar)
-    if right then put(math.max(#left + 2, w - #right + 1), 1, right, C.dim, C.bar) end
-  end
-  local function say(msg, col) st.note, st.noteCol, st.noteUntil = msg, col or C.good, os.clock() + 5 end
-  local function line2(default, col)
-    if st.note and os.clock() < st.noteUntil then put(2, 2, cut(st.note, w - 2), st.noteCol)
-    else put(2, 2, cut(default, w - 2), col or C.dim) end
-  end
-  local function searchBar()
-    term.setCursorPos(1, h); term.setBackgroundColour(C.bar); term.clearLine()
-    put(1, h, " Search: ", C.dim, C.bar)
-    local room = w - 13
-    local shownText = #st.filter > room and st.filter:sub(-room) or st.filter
-    put(10, h, shownText, C.fg, C.bar)
-    if st.filter ~= "" then
-      put(w - 2, h, " x ", C.dim, C.bar)
-      region(w - 2, w, h, function() st.filter, st.pg = "", 1 end)
-    end
-    term.setCursorPos(10 + #shownText, h); term.setTextColour(C.fg); term.setCursorBlink(true)
-  end
-  local function pager(y, total, rows)
-    local pages = math.max(1, math.ceil(total / rows))
-    st.pg = math.min(math.max(st.pg, 1), pages)
-    if pages > 1 then
-      local label = ("%d/%d"):format(st.pg, pages)
-      local px = w - #label - 11
-      btn(px, y, "<", st.pg > 1, function() st.pg = st.pg - 1 end)
-      put(px + 4, y, label, C.dim)
-      btn(w - 4, y, ">", st.pg < pages, function() st.pg = st.pg + 1 end)
-    end
   end
 
   local function openEdit(n, isNew)
@@ -228,93 +240,99 @@ function A.run(o)
     local autoKey = not key and o.auto and o.auto(n) or nil
     st.edit = { name = n, orig = key, auto = autoKey ~= nil, autoKey = autoKey, nick = names[n] or "", isNew = isNew,
       key = key or autoKey or o.defaultKey(n) }
+    st.edit.nickF = ui.field{ hint = "optional", max = 24, text = st.edit.nick }
     if o.extra then st.edit.extra = o.extra.init(n) end
     if ruleDepot(key) then
       local r = DEPOT_BY[key].getRule(n) or {}
       local function copy(l) return l and { table.unpack(l) } end
       st.edit.rule = { item = copy(r.item), tag = copy(r.tag), mod = copy(r.mod), enchanted = r.enchanted }
-      st.edit.prio = tostring(r.priority or 0)
+      st.edit.prioF = ui.field{ max = 4, text = tostring(r.priority or 0) }
     elseif DEPOT_BY[key] then st.edit.depot = DEPOT_BY[key].get(n) end
-    st.page, st.note = "edit", nil
+    go("edit")
   end
 
-  -- Wait for one inventory to gain exactly one item (the one you drop in). The program holds off
-  -- its own moving meanwhile.
-  local function findByItem()
+  ---------------------------------------------------------------------------
+  -- "Find it": drop one item in. The program holds off its own moving meanwhile. kind "inv": one inventory
+  -- gains exactly one item; "box": a slot of one container gains an item. done(result) gets the name / slot or nil.
+  ---------------------------------------------------------------------------
+  local function startWatch(w)
     o.hold()
-    local function screen(lines, col)
-      term.setCursorBlink(false)
-      term.setBackgroundColour(C.bg); term.clear()
-      titleBar(" " .. o.title, "find it ")
-      for i, l in ipairs(lines) do put(2, 2 + i, cut(l, w - 2), i == 1 and (col or C.fg) or C.dim) end
-      put(2, h, "Backspace or click: cancel", C.dim)
+    w.stop = os.clock() + WATCH_S
+    w.next = os.clock() + 1
+    if w.kind == "inv" then w.before = o.itemTotals()
+    else
+      w.before = {}
+      for s, it in pairs(call(w.box, "list") or {}) do w.before[s] = it end
     end
-    local before, found, gone = o.itemTotals(), nil, os.clock() + 60
-    local note = nil
-    while os.clock() < gone and not found do
-      screen({ note or "Drop ONE item into the barrel you mean.",
-        "Nothing gets moved while I watch every inventory.",
-        ("Waiting... %ds"):format(math.ceil(gone - os.clock())) }, note and C.warn or C.fg)
-      local t, cancel = os.startTimer(1), false
-      while true do
-        local e, a = os.pullEvent()
-        if e == "timer" and a == t then break end
-        if (e == "key" and a == keys.backspace) or e == "mouse_click" then cancel = true; break end
-      end
-      if cancel then break end
+    st.watch, st.watchBack = w, st.page
+    go("watch")
+  end
+  local function endWatch(result)
+    local w = st.watch
+    st.watch = nil
+    o.release()
+    go(st.watchBack)
+    w.done(result)
+  end
+  local function pollWatch()
+    local w = st.watch
+    if not w or os.clock() < w.next - 0.05 then return end
+    w.next = os.clock() + 1
+    local found
+    if w.kind == "inv" then
       local after = o.itemTotals()
       local one = {}
-      for n, c in pairs(after) do if c - (before[n] or 0) == 1 then one[#one + 1] = n end end
+      for n, c in pairs(after) do if c - (w.before[n] or 0) == 1 then one[#one + 1] = n end end
       if #one == 1 then found = one[1]
-      elseif #one > 1 then note = "Two gained one item. Try again, just one."; before = after
-      else before = after end   -- a hopper filling something else doesn't count
+      elseif #one > 1 then w.note = "Two gained one item. Try again, just one."; w.before = after
+      else w.before = after end   -- a hopper filling something else doesn't count
+    else
+      for s, it in pairs(call(w.box, "list") or {}) do
+        local b = w.before[s]
+        if not b or b.name ~= it.name or it.count > b.count then found = s end
+      end
     end
-    o.release()
-    return found
+    if found then endWatch(found)
+    elseif os.clock() >= w.stop then endWatch(nil) end
   end
 
-  -- Wait for a slot of ONE inventory to gain an item (the example you drop in). Other inventories
-  -- changing doesn't matter. Returns the slot, or nil on timeout / cancel.
-  local function findInContainer(n)
-    o.hold()
-    local before = {}
-    for s, it in pairs(call(n, "list") or {}) do before[s] = it end
-    local slot, gone = nil, os.clock() + 60
-    while os.clock() < gone and not slot do
-      term.setCursorBlink(false)
-      term.setBackgroundColour(C.bg); term.clear()
-      titleBar(" " .. o.title, "find it ")
-      put(2, 3, cut("Drop ONE item into the depot.", w - 2), C.fg)
-      put(2, 4, cut("Nothing gets moved while I watch it.", w - 2), C.dim)
-      put(2, 5, cut(("Waiting... %ds"):format(math.ceil(gone - os.clock())), w - 2), C.dim)
-      put(2, h, "Backspace or click: cancel", C.dim)
-      local t, cancel = os.startTimer(1), false
-      while true do
-        local e, a = os.pullEvent()
-        if e == "timer" and a == t then break end
-        if (e == "key" and a == keys.backspace) or e == "mouse_click" then cancel = true; break end
-      end
-      if cancel then break end
-      for s, it in pairs(call(n, "list") or {}) do
-        local b = before[s]
-        if not b or b.name ~= it.name or it.count > b.count then slot = s end
-      end
+  local function drawWatch()
+    local w = st.watch
+    v:header(w.title or "FIND IT", { state = "watching", color = "busy" })
+    local y = v:spinner_line(2, 4, w.note or w.line1)
+    local t = wrapText(w.line2, v.W - 4)
+    for i, l in ipairs(t) do v:put(4, y + i - 1, l, "dim", "bg") end
+    y = y + #t
+    v:put(4, y, ("%d s left."):format(math.max(0, math.ceil(w.stop - os.clock()))), "dim", "bg")
+    v:footer({ back = function() endWatch(nil) end })
+  end
+
+  -- A container was picked under + Add: a depot goes on to pick its item, anything else to the job page
+  local function chosen(n)
+    if st.depotFlow and ruleDepot(st.depotFlow) then
+      openEdit(n, true)
+      st.edit.key, st.edit.flow, st.edit.rule = st.depotFlow, true, {}
+      st.edit.prioF = ui.field{ max = 4, text = "0" }
+      RU.open()
+    elseif st.depotFlow then
+      st.depotName, st.itemBack = n, "pick"
+      go("item")
+    else
+      openEdit(n, true)
     end
-    o.release()
-    return slot
   end
 
   RU = o.rules and dofile("assignrules.lua")({
-    o = o, st = st, C = C, names = names, call = call,
-    size = function() return w, h end,
-    put = put, btn = btn, region = region, titleBar = titleBar, line2 = line2, searchBar = searchBar, pager = pager,
-    say = say, cut = cut, fmt = fmt, prettyName = prettyName, shortName = shortName, findByItem = findByItem, findInContainer = findInContainer,
-    depotOf = function(key) return DEPOT_BY[key] end,
+    o = o, st = st, ui = ui, v = v, names = names, call = call, go = go, plan = plan, wrapText = wrapText,
+    say = say, fmt = fmt, prettyName = prettyName, shortName = shortName,
+    startWatch = startWatch, depotOf = function(key) return DEPOT_BY[key] end,
   })
-  local function backToList(msg, col)
-    if msg then say(msg, col) end
+
+  local function backToList(msg, tone)
+    if msg then say(msg, tone) end
     desc = {}
-    st.page, st.edit, st.filter, st.pg = "list", nil, "", 1
+    st.edit = nil
+    go("list")
   end
 
   local function save()
@@ -323,15 +341,17 @@ function A.run(o)
     if ruleDepot(e.key) then
       if not RU.hasRule(e.rule) then RU.open(); return end
     elseif dp and not e.depot then
-      st.itemBack, st.depotName, st.filter, st.pg, st.page = "edit", e.name, "", 1, "item"
+      st.itemBack, st.depotName = "edit", e.name
+      go("item")
       return
     end
     o.beforeSave()
+    e.nick = e.nickF.text
     local bumped
     if e.key ~= e.orig then bumped = o.assign(e.name, e.key) end
     if bumped == e.name then bumped = nil end
     if o.extra and e.key == o.extra.key then o.extra.save(e.name, e.extra) end
-    if ruleDepot(e.key) then dp.setRule(e.name, e.rule, tonumber(e.prio) or 0)
+    if ruleDepot(e.key) then dp.setRule(e.name, e.rule, tonumber(e.prioF.text) or 0)
     elseif dp then dp.set(e.name, e.depot) end
     names[e.name] = e.nick ~= "" and e.nick or nil
     o.afterSave()
@@ -345,10 +365,25 @@ function A.run(o)
     o.unassign(e.name)
     names[e.name] = nil
     o.afterSave()
-    backToList(shortName(e.name) .. " has no job now.", C.warn)
+    backToList(shortName(e.name) .. " has no job now.", "warn")
   end
 
+  ---------------------------------------------------------------------------
   -- Pages
+  ---------------------------------------------------------------------------
+  local function search(hint)
+    st.f.hint = hint
+    v:search(st.f, { hint = hint })
+  end
+
+  -- Name, job and nickname columns for a list row at this width
+  local function columns(W)
+    if W >= 57 then return 20, 14 end
+    if W >= 51 then return 14, 9 end
+    if W >= 39 then return 12, 6 end
+    return 11, 6
+  end
+
   local function drawList()
     local all = assigned()
     local list = {}
@@ -356,112 +391,60 @@ function A.run(o)
     describe(list)
     local shown = {}
     for _, r in ipairs(all) do if matches(r.name) then shown[#shown + 1] = r end end
-    st.shown = shown
-    titleBar(" " .. o.title, ("%d set "):format(#all))
+    v:header(o.title, { state = (#all == 1 and "1 inventory" or ("%d inventories"):format(#all)), color = "dim" })
+    local W = v.W
+    local nw, jw = columns(W)
     local problem = o.problem and o.problem()
-    if problem and not (st.note and os.clock() < st.noteUntil) then line2(problem, C.warn)
-    else line2(#shown == 1 and st.filter ~= "" and "Enter edits it." or (o.hint or "Click one to change it.")) end
-    local nw = math.max(10, math.floor((w - 10) / 2))
-    put(2, 3, "Job", C.dim); put(10, 3, "Network name", C.dim); put(11 + nw, 3, "Nickname / in it", C.dim)
-    local top, rows = 4, math.max(1, h - 5)
-    pager(h - 1, #shown, rows)
-    if #shown == 0 then
-      put(2, top, cut(#all == 0 and (o.emptyText or "Nothing assigned yet. + Add") or "Nothing matches.", w - 2), C.dim)
+    local top = 3
+    if problem then v:alert(2, 3, W - 2, problem, "warn"); top = 4
+    elseif v.H >= 14 then v:put(2, 3, fit(o.hint or "Tap one to change it. The rest is storage.", W - 2), "dim", "bg"); top = 4 end
+    if v.H >= 14 then
+      v:put(v.wc == "narrow" and 2 or 3, top, fit("Network name", nw), "dim", "bg")
+      v:put((v.wc == "narrow" and 2 or 3) + nw + 1, top, "Job", "dim", "bg")
+      if W >= 39 then v:put((v.wc == "narrow" and 2 or 3) + nw + 1 + jw + 1, top, "Nickname / in it", "dim", "bg") end
+      top = top + 1
     end
-    for i = 1, rows do
-      local r = shown[(st.pg - 1) * rows + i]
-      if not r then break end
-      local y, t, d = top + i - 1, TYPE_BY[r.key], desc[r.name] or { text = "" }
-      local bg = i % 2 == 0 and C.stripe or C.bg
-      term.setCursorPos(1, y); term.setBackgroundColour(bg); term.clearLine()
-      put(2, y, t.tag, t.col, bg)
-      put(10, y, cutName(r.name, nw), C.fg, bg)
-      local info, col = d.text, C.dim
-      if d.missing then info, col = "missing", C.warn
-      elseif names[r.name] then info, col = names[r.name], C.fg
+    local rows = {}
+    for _, r in ipairs(shown) do
+      local t, d = TYPE_BY[r.key], desc[r.name] or { text = "", count = 0 }
+      local info = d.text
+      if d.missing then info = "missing"
+      elseif names[r.name] then info = names[r.name]
       elseif r.auto then info = "(by name) " .. info end
-      put(11 + nw, y, cut(info, w - 11 - nw), col, bg)
-      local name = r.name
-      region(1, w, y, function() openEdit(name, false) end)
+      local job = #t.label <= jw and t.label or t.short
+      local line = fit(cutName(r.name, nw), nw)
+      line = line .. (" "):rep(nw - #line + 1) .. fit(job, jw)
+      if W >= 39 then line = line .. (" "):rep(jw - #job + 1) .. info end
+      rows[#rows + 1] = { name = line, value = d.missing and "-" or fmt(d.count or 0), state = ROLE[t.col] or "info",
+        tone = d.missing and "warn" or "info", id = r.name }
     end
-    local x = btn(2, h - 1, "+ Add", true, function()
-      st.page, st.filter, st.pg, st.note, st.depotFlow = hasDepots and "kind" or "pick", "", 1, nil, false
-    end)
-    btn(x, h - 1, "Done", false, function() st.done = true end)
-    searchBar()
-  end
-
-  -- A container was picked under + Add: a depot goes on to pick its item, anything else to the job page
-  local function chosen(n)
-    if st.depotFlow and ruleDepot(st.depotFlow) then
-      openEdit(n, true)
-      st.edit.key, st.edit.flow, st.edit.rule, st.edit.prio = st.depotFlow, true, {}, "0"
-      RU.open()
-    elseif st.depotFlow then
-      st.depotName, st.itemBack, st.filter, st.pg, st.page = n, "pick", "", 1, "item"
-    else
-      openEdit(n, true)
+    if #shown == 0 then
+      v:put(2, top, fit(#all == 0 and (o.emptyText or "Nothing assigned yet. + Add") or "Nothing matches.", W - 2), "dim", "bg")
     end
+    local pl = plan(v, { { label = "+ Add", style = "primary", id = "add", fn = function()
+      st.depotFlow = false
+      go(hasDepots and "kind" or "pick")
+    end } }, { back = true, pager = true, input = 1 })
+    v:list(rows, { top = top, input = v.H - 1 - pl.bottom, once = true,
+      on = function(row) openEdit(row.id, false) end })
+    v:footer({ back = function() ui.quit() end })
+    pl.draw()
+    search("search by name or contents")
   end
 
   local function drawKind()
-    titleBar(" ADD", "what kind? ")
-    line2("A depot keeps a container filled with one thing.")
-    local y = 4
+    v:header("ADD", { state = "what kind?", color = "dim" })
+    v:put(2, 3, fit("A depot keeps a container filled with one thing.", v.W - 2), "dim", "bg")
+    local rows = {}
     for _, d in ipairs(o.depots) do
-      put(2, y, d.kind, C.fg); put(16, y, cut(d.about, w - 16), C.dim)
-      local key = d.key
-      btn(2, y + 1, d.kind, true, function() st.depotFlow, st.page, st.filter, st.pg = key, "pick", "", 1 end, colours.lightBlue)
-      y = y + 3
+      rows[#rows + 1] = { name = d.kind .. (v.W >= 39 and ("  " .. d.about) or ""), id = d.key, state = "idle" }
     end
-    put(2, y, "Other", C.fg); put(16, y, "input, output, dock, fuel, drawers...", C.dim)
-    btn(2, y + 1, "Other job", false, function() st.depotFlow, st.page, st.filter, st.pg = false, "pick", "", 1 end)
-    btn(2, h - 1, "Back", false, function() st.page = "list" end)
-  end
-
-  local function drawItem()
-    local dp = curDepot()
-    local cands = dp.items(st.depotName)
-    local shown = {}
-    local q = st.filter:lower()
-    for _, it in ipairs(cands) do
-      if q == "" or it.name:lower():find(q, 1, true) or (it.label or ""):lower():find(q, 1, true) then
-        shown[#shown + 1] = it
-      end
-    end
-    st.shown = shown
-    local flow = st.itemBack == "pick"
-    titleBar(flow and (" ADD " .. dp.title) or (" " .. dp.title .. " " .. dp.what:upper()), flow and "step 2 of 3 " or nil)
-    if #shown == 1 and st.filter ~= "" then line2("Enter (or click) picks " .. (shown[1].label or prettyName(shown[1].name)), C.good)
-    else line2("Which " .. dp.what .. " should " .. cut(shortName(st.depotName), w - 32) .. " hold? Type to narrow it down.") end
-    local top, rows = 3, math.max(1, h - 4)
-    pager(h - 1, #shown, rows)
-    if #shown == 0 then put(2, top, cut("Nothing matches. None of that " .. dp.what .. " is around.", w - 2), C.dim) end
-    for i = 1, rows do
-      local it = shown[(st.pg - 1) * rows + i]
-      if not it then break end
-      local y = top + i - 1
-      local only = #shown == 1 and st.filter ~= ""
-      local bg = only and C.accent or (i % 2 == 0 and C.stripe or C.bg)
-      term.setCursorPos(1, y); term.setBackgroundColour(bg); term.clearLine()
-      local label = it.label or prettyName(it.name)
-      put(2, y, cut(label, w - 12), only and colours.black or C.fg, bg)
-      local cnt = fmt(it.count or 0)
-      put(w - #cnt, y, cnt, only and colours.black or C.dim, bg)
-      region(1, w, y, function()
-        if st.itemBack == "edit" and st.edit then
-          st.edit.depot, st.page = it.name, "edit"
-        else
-          openEdit(st.depotName, true)
-          st.edit.key, st.edit.depot, st.edit.flow = dp.key, it.name, true
-        end
-        st.filter, st.pg = "", 1
-      end)
-    end
-    btn(2, h - 1, "Back", false, function()
-      st.page, st.filter, st.pg = st.itemBack == "edit" and "edit" or "pick", "", 1
-    end)
-    searchBar()
+    rows[#rows + 1] = { name = "Other job" .. (v.W >= 39 and "  input, output, dock, fuel, drawers..." or ""), id = false }
+    v:list(rows, { top = 5, once = true, on = function(row)
+      st.depotFlow = row.id
+      go("pick")
+    end })
+    v:footer({ back = function() go("list") end })
   end
 
   local function drawPick()
@@ -469,102 +452,107 @@ function A.run(o)
     describe(cands)
     local shown = {}
     for _, n in ipairs(cands) do if matches(n) then shown[#shown + 1] = n end end
-    st.shown = shown
-    titleBar(st.depotFlow and (" ADD " .. DEPOT_BY[st.depotFlow].title) or " ADD", st.depotFlow and "step 1 of 3 " or "step 1 of 2 ")
-    if #shown == 1 and st.filter ~= "" then line2("Enter (or click) picks " .. shortName(shown[1]), C.good)
-    else line2("Type part of its name to narrow it down, or:") end
-    btn(2, 3, "Find it: drop one item in", false, function()
-      local n = findByItem()
-      if not n then say("Didn't see an item go in. Try again?", C.warn)
-      elseif o.typeOf(n) then st.depotFlow = false; openEdit(n, false); say("That one has a job already: here it is.", C.warn)
-      else chosen(n) end
-    end)
-    local top, rows = 4, math.max(1, h - 5)
-    pager(h - 1, #shown, rows)
+    local dp = st.depotFlow and DEPOT_BY[st.depotFlow]
+    v:header(dp and ("ADD " .. dp.title) or "ADD AN INVENTORY", { state = dp and "step 1 of 3" or "step 1 of 2", color = "dim" })
+    v:put(2, 3, fit("Type part of its name to narrow it down, or drop one item in.", v.W - 2), "dim", "bg")
+    local nw = math.max(10, math.floor((v.W - 6) / 2))
+    local rows = {}
+    for _, n in ipairs(shown) do
+      local d = desc[n] or { text = "" }
+      rows[#rows + 1] = { name = fit(cutName(n, nw), nw) .. (" "):rep(nw - #cutName(n, nw) + 1) .. (names[n] or d.text), id = n }
+    end
     if #shown == 0 then
-      local dp = st.depotFlow and DEPOT_BY[st.depotFlow]
+      local msg
       if #cands == 0 and dp and dp.diagnose then
-        put(2, top, cut("No " .. dp.what .. " containers found. What the cable shows:", w - 2), C.warn)
+        v:put(2, 5, fit("No " .. dp.what .. " containers found. What the cable shows:", v.W - 2), "warn", "bg")
         for i, l in ipairs(dp.diagnose()) do
-          if top + i >= h - 1 then break end
-          put(2, top + i, cut(l, w - 2), C.dim)
+          if 5 + i >= v.H - 3 then break end
+          v:put(2, 5 + i, fit(l, v.W - 2), "dim", "bg")
         end
       else
-        put(2, top, cut(#cands == 0 and "Every inventory on the cable has a job already." or "Nothing without a job matches.", w - 2), C.dim)
+        msg = #cands == 0 and "Every inventory on the cable has a job already." or "Nothing without a job matches."
+        v:put(2, 5, fit(msg, v.W - 2), "dim", "bg")
       end
     end
-    local nw = math.max(10, math.floor((w - 4) / 2))
-    for i = 1, rows do
-      local n = shown[(st.pg - 1) * rows + i]
-      if not n then break end
-      local y, d = top + i - 1, desc[n] or { text = "" }
-      local only = #shown == 1 and st.filter ~= ""
-      local bg = only and C.accent or (i % 2 == 0 and C.stripe or C.bg)
-      term.setCursorPos(1, y); term.setBackgroundColour(bg); term.clearLine()
-      put(2, y, cutName(n, nw), only and colours.black or C.fg, bg)
-      put(3 + nw, y, cut(names[n] or d.text, w - 3 - nw), only and colours.black or C.dim, bg)
-      region(1, w, y, function() chosen(n) end)
+    local pl = plan(v, { { label = "Find it: drop one item in", short = "Find it", id = "find", fn = function()
+      startWatch({ kind = "inv", title = "ADD AN INVENTORY",
+        line1 = "Find it: drop ONE item into the barrel you mean.",
+        line2 = "Nothing gets moved while I watch every inventory.",
+        done = function(n)
+          if not n then say("Didn't see an item go in. Try again?", "warn")
+          elseif o.typeOf(n) then st.depotFlow = false; openEdit(n, false); say("That one has a job already: here it is.", "warn")
+          else chosen(n) end
+        end })
+    end } }, { back = true, pager = true, input = 1 })
+    v:list(rows, { top = 5, input = v.H - 1 - pl.bottom, once = true, on = function(row) chosen(row.id) end })
+    v:footer({ back = function() go(hasDepots and "kind" or "list") end })
+    pl.draw()
+    search("type part of its name")
+  end
+
+  local function drawItem()
+    local dp = curDepot()
+    local q = st.f.text:lower()
+    local shown = {}
+    for _, it in ipairs(dp.items(st.depotName)) do
+      if q == "" or it.name:lower():find(q, 1, true) or (it.label or ""):lower():find(q, 1, true) then
+        shown[#shown + 1] = it
+      end
     end
-    btn(2, h - 1, "Back", false, function()
-      st.page, st.filter, st.pg = hasDepots and "kind" or "list", "", 1
-    end)
-    searchBar()
+    local flow = st.itemBack == "pick"
+    v:header(flow and ("ADD " .. dp.title) or (dp.title .. " " .. dp.what:upper()), { state = flow and "step 2 of 3" or nil, color = "dim" })
+    v:put(2, 3, fit("Which " .. dp.what .. " should " .. shortName(st.depotName) .. " hold? Type to narrow it down.", v.W - 2), "dim", "bg")
+    local rows = {}
+    for _, it in ipairs(shown) do rows[#rows + 1] = { name = it.label or prettyName(it.name), value = fmt(it.count or 0), id = it.name } end
+    if #shown == 0 then v:put(2, 5, fit("Nothing matches. None of that " .. dp.what .. " is around.", v.W - 2), "dim", "bg") end
+    v:list(rows, { top = 4, input = true, once = true, on = function(row)
+      if st.itemBack == "edit" and st.edit then
+        st.edit.depot = row.id
+        go("edit")
+      else
+        openEdit(st.depotName, true)
+        st.edit.key, st.edit.depot, st.edit.flow = dp.key, row.id, true
+      end
+    end })
+    v:footer({ back = function() go(st.itemBack == "edit" and "edit" or "pick") end })
+    search("type to narrow it down")
   end
 
   local function drawEdit()
     local e = st.edit
-    local t = TYPE_BY[e.key]
     local d = desc[e.name] or { text = "?" }
-    titleBar(e.isNew and (e.flow and (" ADD " .. DEPOT_BY[e.key].title) or " ADD") or " EDIT",
-      e.isNew and (e.flow and "step 3 of 3 " or "step 2 of 2 ") or nil)
-    line2(e.isNew and "Pick its job, then Save." or e.auto and "Found by its name. Give it a job, or Ignore it."
-      or "Change its job or nickname, or Delete it.")
-    put(2, 3, "Name", C.dim);     put(12, 3, cut(e.name, w - 12), C.fg)
-    put(2, 4, "In it", C.dim);    put(12, 4, cut(d.text, w - 12), d.missing and C.warn or C.fg)
-    put(2, 5, "Nickname", C.dim)
-    local fw = w - 12
-    local shownNick = #e.nick > fw - 1 and e.nick:sub(-(fw - 1)) or e.nick
-    if e.focus == true then
-      put(12, 5, shownNick .. (" "):rep(fw - #shownNick), colours.black, colours.white)
-    else
-      local txt = cut(e.nick ~= "" and e.nick or "click to name it (optional)", fw)
-      put(12, 5, txt .. (" "):rep(fw - #txt), e.nick ~= "" and C.fg or C.dim, C.bar)
-    end
-    region(12, w, 5, function() e.focus = true end)
-    put(2, 7, "Job", C.dim)
-    local per = 3
-    local bw = math.floor((w - 1) / per) - 1
+    v:header(e.isNew and (e.flow and ("ADD " .. DEPOT_BY[e.key].title) or "ADD") or ("EDIT: " .. shortName(e.name)),
+      { state = e.isNew and (e.flow and "step 3 of 3" or "step 2 of 2") or nil, color = "dim" })
     local types = typesFor(e.name)
     local ok = false
     for _, ty in ipairs(types) do if ty.key == e.key then ok = true end end
     if not ok then e.key = types[1].key end
-    t = TYPE_BY[e.key]
-    for i, ty in ipairs(types) do
-      local col, row = (i - 1) % per, math.floor((i - 1) / per)
-      local x, y = 2 + col * (bw + 1), 8 + row
-      local label = #ty.label <= bw - 1 and ty.label or ty.short
-      local sel = ty.key == e.key
-      local pad = bw - #label
-      put(x, y, cut((" "):rep(math.floor(pad / 2)) .. label .. (" "):rep(pad - math.floor(pad / 2)), bw),
-        sel and colours.black or C.fg, sel and ty.col or C.bar)
-      local key = ty.key
-      region(x, x + bw - 1, y, function() e.key = key; e.delArm = false end)
+    local t = TYPE_BY[e.key]
+    local W = v.W
+    local acts = { { label = "Save", style = "primary", id = "save", fn = save } }
+    if e.orig then
+      acts[2] = { label = "Delete", id = "delete", confirm = true, style = "danger", fn = delete }
     end
-    local y = 8 + math.ceil(#types / per) + 1
-    -- About the chosen job, wrapped over two lines
-    local about, lines = t.about, {}
-    while #about > 0 and #lines < 2 do
-      local piece = about
-      if #piece > w - 2 then
-        local cutAt = piece:sub(1, w - 2):match("^.*() ") or (w - 2)
-        piece = about:sub(1, cutAt - 1)
-      end
-      lines[#lines + 1] = piece
-      about = about:sub(#piece + 1):gsub("^ +", "")
+    local toForm = e.isNew and ruleDepot(e.key) and RU.hasRule(e.rule)
+    local pl = plan(v, acts, { back = true })
+    local bottom = pl.bottom
+    local y = 3
+    local function line(text, tone)
+      if y <= bottom then v:put(2, y, fit(text, W - 2), tone or "dim", "bg"); y = y + 1 end
     end
-    if not ruleDepot(e.key) then   -- a rule depot needs the room for its own rows
-      for i, l in ipairs(lines) do put(2, y + i - 1, l, t.col) end
-      y = y + 2
+    line(e.isNew and "Pick its job, then Save." or e.auto and "Found by its name. Give it a job, or Ignore it."
+      or "Change its job or nickname, or Delete it.")
+    if v.H >= 16 then
+      v:kv(2, y, W - 2, "Name", e.name); y = y + 1
+      v:kv(2, y, W - 2, "In it", d.text, d.missing and "warn" or nil); y = y + 1
+    end
+    y = y + (v.H >= 16 and 1 or 0)
+    local opts = {}
+    for _, ty in ipairs(types) do opts[#opts + 1] = { id = ty.key, label = ty.label, short = ty.short } end
+    local _, last = v:switch(2, y, opts, e.key, function(id) e.key = id end, { id = "job", maxx = W - 1 })
+    y = last + 1
+    if y <= bottom and not ruleDepot(e.key) and v.H >= 20 then
+      for _, l in ipairs(wrapText(t.about, W - 2, 2)) do line(l, ROLE[t.col]) end
     end
     -- What saving this will do
     local warn
@@ -576,133 +564,71 @@ function A.run(o)
     elseif o.warn then
       warn = o.warn(e, d)
     end
-    if warn and y < h - 1 then put(2, y, cut(warn, w - 2), C.warn); y = y + 1 end
-    if ruleDepot(e.key) and y < h - 1 then
+    if warn and y <= bottom then v:alert(2, y, W - 2, warn, "warn"); y = y + 1 end
+    if ruleDepot(e.key) and y <= bottom then
       e.rule = e.rule or {}
-      y = RU.editRows(e, y)
-    elseif DEPOT_BY[e.key] and y < h - 1 then
+      e.prioF = e.prioF or ui.field{ max = 4, text = "0" }
+      y = RU.editRows(e, y, bottom)
+    elseif DEPOT_BY[e.key] and y <= bottom then
       local dp = DEPOT_BY[e.key]
-      local x = btn(2, y, e.depot and "Change" or ("Pick " .. dp.what), false, function()
-        st.itemBack, st.depotName, st.filter, st.pg, st.page = "edit", e.name, "", 1, "item"
-      end)
-      put(x, y, cut(e.depot and ("Keeps " .. prettyName(e.depot)) or ("Which " .. dp.what .. " should it hold?"), w - x), e.depot and C.fg or C.warn)
+      local x = v:buttons(2, y, { { label = e.depot and "Change" or ("Pick " .. dp.what), id = "pickitem", fn = function()
+        st.itemBack, st.depotName = "edit", e.name
+        go("item")
+      end } })
+      v:put(x + 1, y, fit(e.depot and ("Keeps " .. prettyName(e.depot)) or ("Which " .. dp.what .. " should it hold?"), W - x - 1),
+        e.depot and "fg" or "warn", "bg")
       y = y + 1
     end
-    if o.extra and e.key == o.extra.key and y < h - 1 then
+    if o.extra and e.key == o.extra.key and y <= bottom then
       local label, text = o.extra.show(e.extra)
-      local x = btn(2, y, label, false, function() e.extraClick = true end)
-      put(x, y, cut(text or "", w - x), C.dim)
+      local x = v:buttons(2, y, { { label = label, id = "extra", fn = function() e.extraClick = true end } })
+      v:put(x + 1, y, fit(text or "", W - x - 1), "dim", "bg")
+      y = y + 1
     end
-    -- Buttons
-    local x = btn(2, h - 1, "Save", true, save, colours.lime)
-    local toForm = e.isNew and ruleDepot(e.key) and RU.hasRule(e.rule)
-    x = btn(x, h - 1, toForm and "Back" or "Cancel", false, function()
-      if toForm then RU.open() else st.page, st.edit = e.isNew and "pick" or "list", nil end
-    end)
-    if e.orig then
-      btn(x, h - 1, e.delArm and "Sure? Delete" or "Delete", e.delArm, function()
-        if e.delArm then delete() else e.delArm = true end
-      end, colours.red)
+    if y + (v.H >= 16 and 1 or 0) <= bottom then
+      if v.H >= 16 then y = y + 1 end
+      v:field(2, y, "Nickname", math.max(8, W - 12), e.nickF)
     end
-    put(2, h, cut(e.focus == "prio" and "Typing the priority. Enter: done"
-      or e.focus and "Typing the nickname. Enter: done" or "Enter: save   Tab: nickname   Backspace: back", w - 2), C.dim)
-    if e.focus == true then
-      term.setCursorPos(12 + #shownNick, 5); term.setTextColour(colours.black); term.setCursorBlink(true)
-    elseif e.focus == "prio" and e.prioY then
-      term.setCursorPos(12 + #(e.prio or ""), e.prioY); term.setTextColour(colours.black); term.setCursorBlink(true)
-    end
+    v:footer({ back = function()
+      if toForm then RU.open() else if e.isNew then go("pick") else backToList() end end
+    end })
+    pl.draw()
+  end
+
+  ---------------------------------------------------------------------------
+  -- The loop
+  ---------------------------------------------------------------------------
+  local PAGES = { list = drawList, kind = drawKind, pick = drawPick, item = drawItem, edit = drawEdit, watch = drawWatch }
+  if RU then
+    PAGES.rule, PAGES.rpick, PAGES.rlike = RU.drawForm, RU.drawPick, RU.drawLike
+  end
+  local lastErr
+  local function draw(view)
+    local ok, err = pcall(PAGES[st.page] or drawList)
+    if not ok and err ~= lastErr then lastErr = err; ui.say("Screen error: " .. tostring(err), "bad") end
   end
 
   describe(unassigned())   -- one read of everything up front: searching by contents works straight away
-  while not st.done do
-    w, h = term.getSize()
-    hits = {}
-    term.setCursorBlink(false)
-    term.setBackgroundColour(C.bg); term.setTextColour(C.fg); term.clear()
-    if st.page == "list" then drawList() elseif st.page == "pick" then drawPick()
-    elseif st.page == "kind" then drawKind() elseif st.page == "item" then drawItem()
-    elseif st.page == "rule" then RU.drawForm() elseif st.page == "rpick" then RU.drawPick()
-    elseif st.page == "rlike" then RU.drawLike() else drawEdit() end
-    local redraw = false
-    while not redraw do
-      local ev, a, b, c = os.pullEvent()
-      redraw = true
-      local e = st.edit
-      if ev == "mouse_click" then
-        if e then e.focus = false end
-        for _, r in ipairs(hits) do
-          if c == r.y and b >= r.x1 and b <= r.x2 then r.fn(); break end
-        end
-      elseif ev == "mouse_scroll" then
-        st.pg = st.pg + a
-      elseif ev == "char" or ev == "paste" then
-        local text = ev == "paste" and a:gsub("[\r\n]", "") or a
-        if st.page == "edit" then
-          if e.focus == "prio" then
-            local digits = text:gsub("%D", "")
-            e.prio = (e.prio .. digits):sub(1, 4)
-            if digits == "" then redraw = false end
-          elseif e.focus then e.nick = (e.nick .. text):sub(1, 24) else redraw = false end
-        else
-          st.filter, st.pg = st.filter .. text, 1
-        end
-      elseif ev == "key" then
-        if a == keys.backspace then
-          if st.page == "edit" then
-            if e.focus == "prio" then e.prio = e.prio:sub(1, -2)
-            elseif e.focus then e.nick = e.nick:sub(1, -2)
-            elseif e.isNew and ruleDepot(e.key) and RU.hasRule(e.rule) then RU.open()
-            else st.page, st.edit = e.isNew and "pick" or "list", nil end
-          elseif st.page == "rule" then RU.back()
-          elseif st.page == "rlike" then st.page = "rule"
-          elseif st.filter ~= "" then st.filter, st.pg = st.filter:sub(1, -2), 1
-          elseif st.page == "rpick" then st.page = "rule"
-          elseif st.page == "item" then st.page = st.itemBack == "edit" and "edit" or "pick"
-          elseif st.page == "pick" then st.page = hasDepots and "kind" or "list"
-          elseif st.page == "kind" then st.page = "list" end
-        elseif a == keys.delete and st.page ~= "edit" then
-          st.filter, st.pg = "", 1
-        elseif a == keys.enter or a == keys.numPadEnter then
-          if st.page == "edit" then
-            if e.focus then e.focus = false else save() end
-          elseif (st.page == "rpick" or st.page == "rule") and RU.enter() then
-            st.filter, st.pg = "", 1
-          elseif st.page == "rule" or st.page == "rlike" or st.page == "rpick" then redraw = false
-          elseif st.page == "item" and st.shown and #st.shown == 1 and st.filter ~= "" then
-            local it, dp = st.shown[1], curDepot()
-            if st.itemBack == "edit" and st.edit then st.edit.depot, st.page = it.name, "edit"
-            else
-              openEdit(st.depotName, true)
-              st.edit.key, st.edit.depot, st.edit.flow = dp.key, it.name, true
-            end
-            st.filter, st.pg = "", 1
-          elseif st.shown and #st.shown == 1 and st.filter ~= "" and st.page ~= "kind" then
-            local only = st.shown[1]
-            local n = type(only) == "table" and only.name or only
-            if st.page == "pick" then chosen(n) else openEdit(n, false) end
-          else redraw = false end
-        elseif a == keys.tab and st.page == "edit" then
-          e.focus = not e.focus
-        elseif a == keys.up or a == keys.pageUp then st.pg = st.pg - 1
-        elseif a == keys.down or a == keys.pageDown then st.pg = st.pg + 1
-        else redraw = false end
-      elseif ev == "term_resize" then
-        redraw = true
-      else
-        redraw = false
+  v:invalidate()
+  -- A kit loop of our own. ui.quit() ends it (and any other kit loop running in parallel, which its owner restarts).
+  local function onEvent(ev)
+    pollWatch()
+    local e = st.edit
+    if e and e.extraClick then
+      e.extraClick = false
+      if o.extra.plain then   -- a typed setting: a plain screen for a moment
+        term.setCursorBlink(false)
+        term.setBackgroundColour(colours.black); term.setTextColour(colours.white)
+        term.clear(); term.setCursorPos(1, 1)
       end
-      if st.edit and st.edit.extraClick then
-        st.edit.extraClick = false
-        if o.extra.plain then   -- a typed setting: plain screen for a moment
-          term.setCursorBlink(false)
-          term.setBackgroundColour(colours.black); term.setTextColour(colours.white)
-          term.clear(); term.setCursorPos(1, 1)
-        end
-        o.extra.click(st.edit.name, st.edit.extra)
-      end
+      o.extra.click(e.name, e.extra)
+      v:invalidate()
     end
   end
-  term.setCursorBlink(false)
+  ui.run({ v }, draw, { tick = 1, on_event = onEvent })
+  if st.watch then o.release() end
+  if ownView then v:close() end
+  v:invalidate()
 end
 
 return A

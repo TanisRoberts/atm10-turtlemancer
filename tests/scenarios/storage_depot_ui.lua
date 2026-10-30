@@ -37,6 +37,12 @@ local function tap(w, c, text)
   w:run(1)
 end
 
+local function openField(w, c, name)            -- the Item, Tag or Mod row on the rule form
+  local x, y = c.screen:find(name .. " ")
+  assert(x, "no '" .. name .. "' row:\n" .. c.screen:text())
+  c:click(14, y); w:run(1)
+end
+
 local function addDepot(w, c, container)
   c:type("/assign"); c:key(257)
   w:run(2)
@@ -50,7 +56,7 @@ end
 T.test("storage: /assign rule form: Tag + Enchanted + priority, live preview, Save, then only enchanted gear comes over", function()
   local w, c, inv = base{}
   addDepot(w, c, "barrel_4")
-  c:click(14, 5); w:run(1)                      -- Tag
+  openField(w, c, "Tag")
   T.contains(c.screen, "c:enchantables")
   T.contains(c.screen, "DEPOT TAG")
   c:type("ench"); w:run(1)
@@ -72,7 +78,7 @@ T.test("storage: /assign rule form: Tag + Enchanted + priority, live preview, Sa
   T.contains(c.screen, "Saved")
   local d = c:readTable("storage.cfg").depots[B(4)]
   T.eq(d.tag[1], "c:enchantables"); T.eq(d.enchanted, true); T.eq(d.priority, 7); T.eq(d.item, nil)
-  tap(w, c, "Done")
+  tap(w, c, "Back")
   T.waitFor(w, function() return inv[4]:count("minecraft:diamond_sword") == 1 end, 60, "depot never filled")
   w:run(10)
   T.eq(inv[4]:count("minecraft:iron_sword"), 0, "plain sword stays in storage")
@@ -90,13 +96,13 @@ T.test("storage: /assign rule form: Next stays off until a condition is set; Any
   local nx = c.screen:find("Next")
   c:click(nx, select(2, c.screen:find("Next"))); w:run(1)
   T.contains(c.screen, "step 2 of 3", "a disabled Next does nothing")
-  c:click(14, 6); w:run(1)                      -- Mod
+  openField(w, c, "Mod")
   T.contains(c.screen, "minecraft")
   c:type("minec"); w:run(1)
   c:key(257); w:run(1)                          -- ticks the only match
   tap(w, c, "Done")
   T.contains(c.screen, "Matches now")
-  c:click(14, 6); w:run(1)
+  openField(w, c, "Mod")
   tap(w, c, "Any")                              -- clears the Mod again
   T.contains(c.screen, "Set at least one")
 end)
@@ -105,7 +111,7 @@ T.test("storage: /assign shows, edits and removes an existing rule depot", funct
   local w, c, inv = base{ [B(4)] = { tag = "c:enchantables", enchanted = true, priority = 3, added = 1 } }
   c:type("/assign"); c:key(257)
   w:run(2)
-  tap(w, c, "DEPOT ")
+  tap(w, c, "barrel_4")
   T.contains(c.screen, "Holds"); T.contains(c.screen, "Tag c:enchantables, enchanted")
   T.contains(c.screen, "Matches")
   tap(w, c, "Tag c:enchantables")                -- Holds opens the form
@@ -118,10 +124,10 @@ T.test("storage: /assign shows, edits and removes an existing rule depot", funct
   T.contains(c.screen, "Saved")
   local d = c:readTable("storage.cfg").depots[B(4)]
   T.eq(d.enchanted, false); T.eq(d.priority, 3, "priority kept"); T.eq(d.added, 1, "added kept")
-  tap(w, c, "DEPOT ")
-  local dx, dy = c.screen:find("Cancel   Delete")   -- the Delete button, not the words in the hint line
-  c:click(dx + 10, dy); w:run(1)
-  tap(w, c, "Sure? Delete")
+  tap(w, c, "Depot  ")
+  local dx, dy = c.screen:find("Save   Delete")  -- the Delete button, not the words in the hint line
+  c:click(dx + 8, dy); w:run(1)
+  tap(w, c, "Sure?")
   T.eq(c:readTable("storage.cfg").depots[B(4)], nil)
   T.running(c)
 end)
@@ -130,7 +136,7 @@ T.test("storage: /assign rule overlaps are named on the summary", function()
   local w, c, inv = base({ [B(3)] = { tag = "c:enchantables", enchanted = true, priority = 0, added = 1 } },
     function(inv) for _ = 1, 27 do inv[3]:give("minecraft:dirt", 64) end end)   -- full: the winner keeps nothing new
   addDepot(w, c, "barrel_4")
-  c:click(14, 5); w:run(1)
+  openField(w, c, "Tag")
   c:type("ench"); w:run(1)
   c:key(257); w:run(1)
   tap(w, c, "Done")
@@ -149,8 +155,8 @@ T.test("storage: /assign Something like this: drop one example in, tick lines, U
   T.contains(c.screen, "SOMETHING LIKE THIS")
   T.contains(c.screen, "Diamond Sword")
   T.contains(c.screen, "c:enchantables")
-  c:click(3, 6); w:run(1)                       -- tick Enchanted
-  c:click(3, 7); w:run(1)                       -- tick the tag
+  tap(w, c, "Enchanted")                         -- tick Enchanted
+  tap(w, c, "c:enchantables")                    -- tick the tag
   tap(w, c, "Use these")
   T.contains(c.screen, "minecraft:diamond_sword")
   T.contains(c.screen, "c:enchantables")
@@ -179,7 +185,7 @@ end)
 T.test("storage: /assign pick list ticks several values, Done returns to the form showing them", function()
   local w, c, inv = base{}
   addDepot(w, c, "barrel_4")
-  c:click(14, 6); w:run(1)                      -- Mod
+  openField(w, c, "Mod")
   T.contains(c.screen, "DEPOT MOD")
   c:type("minec"); w:run(1)
   c:key(257); w:run(1)                          -- ticks minecraft
@@ -187,7 +193,7 @@ T.test("storage: /assign pick list ticks several values, Done returns to the for
   tap(w, c, "Done")
   T.contains(c.screen, "minecraft")
   T.contains(c.screen, "Matches now")
-  c:click(14, 6); w:run(1)
+  openField(w, c, "Mod")
   tap(w, c, "minecraft")                        -- untick
   T.contains(c.screen, "tap to tick")
   tap(w, c, "minecraft")                        -- tick again

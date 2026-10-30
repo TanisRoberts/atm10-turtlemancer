@@ -79,7 +79,7 @@ v:search(st.field, { commands = cmds:commands() })
 - Unknown command: "Unknown command /x." and the list of usage lines. `/help` lists them; `/help goto` gives one. A screen can replace `/help` by adding its own.
 - Results go to `ui.say` (one line, so keep them short) unless `slash.new{ say = }` says otherwise. `cmds:run(line)` returns `ok, text, tone` and shows nothing.
 - `cmds:commands()` is the list the kit's command bar takes (`v:search`): typing `/` shows it, Tab completes, Enter runs. The kit's bar needs the computer's own screen: a monitor has no keyboard, so draw `v:search` only when `not v.side`. `v:tiles` takes `input = 2` to leave room for a search row below a button row.
-- Storage keeps its own parser until its UI-kit rebuild (#21). The Farmhand, the Operator and the smelter use it (each system doc lists its commands). A line printed to the terminal behind the kit scrolls it: call `v:invalidate()` on every view afterwards.
+- Storage, the Farmhand, the Operator and the smelter use it (each system doc lists its commands). A line printed to the terminal behind the kit scrolls it: call `v:invalidate()` on every view afterwards.
 
 ## Tests
 

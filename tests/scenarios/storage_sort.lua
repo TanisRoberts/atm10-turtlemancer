@@ -44,7 +44,7 @@ T.test("storage: monitor lists items and a tap on Stack then an item sends it to
   T.waitFor(w, function() return inv[0]:isEmpty() end, 60)
   w:run(10)
   T.contains(mon, "Iron Ingot"); T.contains(mon, "Cobblestone")
-  T.contains(mon, "2 items")
+  T.contains(mon, "slots")
   mon:touch(mon:find("Stack"), 24)             -- the Stack button
   w:run(1)
   mon:touch(3, select(2, mon:find("Iron Ingot")))

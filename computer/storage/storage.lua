@@ -1414,298 +1414,25 @@ local function isLocked()
 end
 
 ---------------------------------------------------------------------------
--- Screens: the monitor wall and the computer's own screen share one item-list design.
--- Each screen ("view") has its own search, page and buttons.
+-- Screens (storage_screens.lua, built from the UI kit): the monitor wall and the computer's own screen share one
+-- item-list design. This file hands over what they show; the "/" commands are added further down.
 ---------------------------------------------------------------------------
-local takeMode = 3            -- 1 = x1, 2 = x16, 3 = one stack (shared: same buttons on both screens)
-local TAKE     = { { "x1", 1 }, { "x16", 16 }, { "Stack", "stack" } }
-local uiBusy   = false        -- a command (/setup...) is using the computer's screen
-
-local COMMANDS = {
-  { "/assign",   "inputs, output, docks, fuel...: add/edit/delete" },
-  { "/setup",    "assign chests with marker items" },
-  { "/rescan",   "re-read every chest now" },
-  { "/drawers",  "what storage sees in the drawers" },
-  { "/tidy",     "biggest piles into biggest drawers" },
-  { "/fuelinfo", "Canary fuel barrels and fuel stock" },
-  { "/lock",     "lock the monitor (padlock screen)" },
-  { "/unlock",   "lift a /lock" },
-}
-
-local mon
-local monView  = { kind = "monitor", filter = "", page = 1, hits = {} }
-
--- (Re)find the monitor: only one touching the computer (screens out on the cable belong to other
--- computers). Re-found when the wall re-forms or a monitor is added/removed.
-local function findMonitor()
-  mon = nil
-  for _, side in ipairs(rs.getSides()) do
-    if not mon and peripheral.hasType(side, "monitor") then
-      local m = peripheral.wrap(side)
-      local ok, w = pcall(m.getSize)
-      if ok and w then mon = m end
-    end
-  end
-  monView.dev, monView.touch, monView.hits = mon, mon and mon.isColour() or false, {}
-  -- No setTextScale here: changing it fires monitor_resize, which calls this again. draw() sets it.
-end
-findMonitor()
-local termView = { dev = term, kind = "term", touch = term.isColour(), filter = "", page = 1, hits = {} }
-
-local C = {
-  bg = colours.black, bar = colours.grey, fg = colours.white, dim = colours.lightGrey,
-  accent = colours.cyan, stripe = colours.grey, warn = colours.orange, good = colours.lime,
-}
-
-local function shown(v)
-  if v.filter == "" then return items end
-  local q, out = v.filter:lower(), {}
-  for _, e in ipairs(items) do
-    if e.label:lower():find(q, 1, true) or e.name:find(q, 1, true) then out[#out + 1] = e end
-  end
-  return out
-end
-
-local function commandMatches(v)
-  local out = {}
-  for _, c in ipairs(COMMANDS) do
-    if c[1]:sub(1, #v.filter) == v.filter:lower() then out[#out + 1] = c end
-  end
-  return out
-end
-
-local function fmt(n)
-  if n >= 1e6 then return ("%.1fM"):format(n / 1e6) end
-  if n >= 1e4 then return ("%dk"):format(math.floor(n / 1e3)) end
-  return tostring(n)
-end
-
-local function amountFor(e)
-  local t = TAKE[takeMode][2]
-  return t == "stack" and (e.max or 64) or t
-end
-
-local function say(v, msg, colour)
-  v.notice, v.noticeColour, v.noticeUntil = msg, colour or C.good, os.clock() + 4
-end
-
-local function take(v, e)
-  if not cfg.output then say(v, "No output chest yet: /assign on the computer", C.warn); return end
-  local n, full = retrieve(e.key, amountFor(e))
-  buildItems()
-  say(v, n > 0 and ("Sent %d %s%s"):format(n, e.label, full and " (output full)" or "") or "Output chest is full",
-    n > 0 and C.good or C.warn)
-end
-
-local function region(v, x1, x2, y, action) v.hits[#v.hits + 1] = { x1 = x1, x2 = x2, y = y, action = action } end
-
-local function button(v, x, y, label, active, action)
-  local d = v.dev
-  d.setCursorPos(x, y)
-  d.setBackgroundColour(active and C.accent or C.bar)
-  d.setTextColour(active and colours.black or C.fg)
-  d.write(" " .. label .. " ")
-  region(v, x, x + #label + 1, y, action)
-  return x + #label + 3
-end
-
-local runCommand -- defined further down (needs the terminal)
-
-local function drawView(v)
-  local d = v.dev
-  if not d then return end
-  if v.kind == "monitor" then d.setTextScale(TEXT_SCALE) end
-  local w, h = d.getSize()
-  if not w then -- the screen went away (see findMonitor)
-    if v.kind == "monitor" then findMonitor() end
-    return
-  end
-  local isTerm = v.kind == "term"
-  v.hits = {}
-  d.setCursorBlink(false)
-  d.setBackgroundColour(C.bg); d.clear()
-
-  -- Header
-  d.setCursorPos(1, 1); d.setBackgroundColour(C.bar); d.clearLine()
-  d.setTextColour(C.accent); d.write(" STORAGE")
-  local pct = stats.total > 0 and math.floor(stats.used / stats.total * 100) or 0
-  local right = ("%d items  %d/%d slots  %d%% "):format(stats.kinds, stats.used, stats.total, pct)
-  if #cfg.fuels > 0 then right = ("Fuel %d%%  "):format(math.floor(fuelUnits / canaryFuelTarget() * 100)) .. right end
-  if #right > w - 9 then right = ("%d/%d slots %d%% "):format(stats.used, stats.total, pct) end
-  if isTerm and isLocked() and #right + 9 <= w - 9 then right = "MONITOR LOCKED  " .. right end
-  d.setTextColour(pct >= 90 and C.warn or C.dim)
-  d.setCursorPos(math.max(1, w - #right + 1), 1); d.write(right)
-
-  -- Notice / hint line
-  d.setBackgroundColour(C.bg)
-  d.setCursorPos(2, 2)
-  if v.notice and os.clock() < v.noticeUntil then
-    d.setTextColour(v.noticeColour or C.good); d.write(v.notice:sub(1, w - 2))
-  elseif not isTerm and v.filter ~= "" then
-    d.setTextColour(C.fg); d.write(("Search: %s"):format(v.filter):sub(1, w - 10))
-    d.setCursorPos(w - 8, 2)
-    d.setBackgroundColour(C.bar); d.write(" Clear ")
-    region(v, w - 8, w - 2, 2, function() v.filter = ""; v.page = 1 end)
-  else
-    d.setTextColour(C.dim)
-    local hint = isTerm and (v.touch and "Click an item to send it to the output chest" or "Type to search, Enter sends the top item")
-      or (v.touch and "Tap an item to send it to the output chest" or "Search on the storage computer")
-    d.write(hint:sub(1, w - 2))
-  end
-
-  -- Row 3: sort switch, and on the computer screen the take buttons too
-  if v.touch then
-    d.setCursorPos(2, 3); d.setBackgroundColour(C.bg); d.setTextColour(C.dim); d.write("Sort")
-    local sx = button(v, 7, 3, "Qty", cfg.sort ~= "az", function() cfg.sort = "qty"; saveCfg(); buildItems(); v.page = 1 end)
-    button(v, sx - 1, 3, "A-Z", cfg.sort == "az", function() cfg.sort = "az"; saveCfg(); buildItems(); v.page = 1 end)
-    if isTerm then
-      local tw = 0
-      for _, t in ipairs(TAKE) do tw = tw + #t[1] + 3 end
-      local x = w - tw + 1
-      for i, t in ipairs(TAKE) do x = button(v, x, 3, t[1], takeMode == i, function() takeMode = i end) end
-    end
-  end
-
-  -- List: items, or commands while the search starts with "/"
-  local cmdMode = isTerm and v.filter:sub(1, 1) == "/"
-  local list = cmdMode and commandMatches(v) or shown(v)
-  local top = 4
-  local bottom = isTerm and h - 2 or h - 2
-  local rows = math.max(1, bottom - top + 1)
-  local pages = math.max(1, math.ceil(#list / rows))
-  v.page = math.min(math.max(v.page, 1), pages)
-  v.first = list[(v.page - 1) * rows + 1]
-  v.cmdMode = cmdMode
-  if #list == 0 then
-    d.setCursorPos(2, top); d.setTextColour(C.dim); d.setBackgroundColour(C.bg)
-    d.write((cmdMode and "No command starts with that." or v.filter ~= "" and "Nothing matches."
-      or "Empty. Drop items in the input chest."):sub(1, w - 2))
-  end
-  for i = 1, rows do
-    local e = list[(v.page - 1) * rows + i]
-    if not e then break end
-    local y = top + i - 1
-    d.setCursorPos(1, y)
-    d.setBackgroundColour(i % 2 == 0 and C.stripe or C.bg); d.clearLine()
-    if cmdMode then
-      d.setTextColour(C.accent); d.setCursorPos(2, y); d.write(e[1])
-      d.setTextColour(C.dim); d.setCursorPos(13, y); d.write(e[2]:sub(1, w - 14))
-      region(v, 1, w, y, function() runCommand(e[1]) end)
-    else
-      local count = fmt(e.count)
-      d.setTextColour(C.fg)
-      d.setCursorPos(2, y); d.write(e.label:sub(1, w - #count - 4))
-      d.setTextColour(C.accent)
-      d.setCursorPos(w - #count, y); d.write(count)
-      region(v, 1, w, y, function() take(v, e) end)
-    end
-  end
-
-  -- Paging (+ take buttons on the monitor) on the second-to-last row (terminal) or last row (monitor)
-  local y = isTerm and h - 1 or h
-  d.setCursorPos(1, y); d.setBackgroundColour(C.bg); d.clearLine()
-  local x = 2
-  if not isTerm and v.touch then
-    for i, t in ipairs(TAKE) do x = button(v, x, y, t[1], takeMode == i, function() takeMode = i end) end
-  elseif isTerm then
-    d.setTextColour(C.dim); d.setCursorPos(2, y)
-    local tip = v.touch and "Enter: send top   / commands" or "Enter: send top  Arrows: page  / commands"
-    d.write(tip:sub(1, math.max(0, w - 16)))
-    x = math.min(w, 2 + #tip + 1)
-  end
-  local label = ("%d/%d"):format(v.page, pages)
-  local px = w - #label - 11
-  if px > x or (isTerm and pages > 1) then
-    px = math.max(px, 1)
-    button(v, px, y, "<", v.page > 1, function() v.page = v.page - 1 end)
-    d.setBackgroundColour(C.bg); d.setTextColour(C.dim)
-    d.setCursorPos(px + 4, y); d.write(label)
-    button(v, w - 4, y, ">", v.page < pages, function() v.page = v.page + 1 end)
-  end
-
-  -- Search bar (computer screen only), with the typing cursor
-  if isTerm then
-    d.setCursorPos(1, h); d.setBackgroundColour(C.bar); d.clearLine()
-    d.setTextColour(C.dim); d.write(" Search: ")
-    local room = w - 10 - (v.filter ~= "" and 4 or 0)
-    local shownText = #v.filter > room and v.filter:sub(-room) or v.filter
-    d.setTextColour(C.fg); d.write(shownText)
-    local cx = 10 + #shownText
-    if v.filter ~= "" then
-      d.setCursorPos(w - 2, h); d.setTextColour(C.dim); d.write(" x ")
-      region(v, w - 2, w, h, function() v.filter = ""; v.page = 1 end)
-    end
-    d.setCursorPos(cx, h)
-    d.setTextColour(C.fg)
-    d.setCursorBlink(true)
-  end
-end
-
--- The padlock. Drawn at the biggest text scale it fits (worked out from the current size, so the
--- scale is only set once per lock: every scale change fires a monitor_resize).
-local LOCK_ART = {
-  "   .-----.   ",
-  "  / .---. \\  ",
-  "  | |   | |  ",
-  "  | |   | |  ",
-  ".-'-'---'-'-.",
-  "|           |",
-  "|    .-.    |",
-  "|    '-'    |",
-  "|     |     |",
-  "|     |     |",
-  "'-----------'",
-}
-local LOCK_W, LOCK_H = 13, #LOCK_ART + 4
-
-local function drawLock(d, why)
-  local cur = d.getTextScale and d.getTextScale() or TEXT_SCALE
-  local w, h = d.getSize()
-  local scale = 0.5
-  for _, sc in ipairs({ 3, 2.5, 2, 1.5, 1, 0.5 }) do
-    if math.floor(w * cur / sc) >= LOCK_W + 2 and math.floor(h * cur / sc) >= LOCK_H + 1 then scale = sc; break end
-  end
-  if scale ~= cur then d.setTextScale(scale) end
-  w, h = d.getSize()
-  monView.hits = {}
-  d.setCursorBlink(false)
-  d.setBackgroundColour(colours.black); d.clear()
-  local function centre(y, text, colour)
-    if y < 1 or y > h then return end
-    d.setCursorPos(math.max(1, math.floor((w - #text) / 2) + 1), y)
-    d.setTextColour(colour); d.write(text)
-  end
-  if h < LOCK_H or w < LOCK_W then           -- tiny monitor: just the word
-    centre(math.floor(h / 2) + 1, "LOCKED", colours.red)
-    return
-  end
-  local top = math.floor((h - LOCK_H) / 2) + 1
-  local x = math.floor((w - LOCK_W) / 2) + 1
-  for i, line in ipairs(LOCK_ART) do
-    d.setCursorPos(x, top + i - 1)
-    d.setTextColour(i <= 4 and colours.lightGrey or colours.yellow)
-    d.write(line)
-  end
-  centre(top + #LOCK_ART + 1, "L O C K E D", colours.red)
-  centre(top + #LOCK_ART + 3, why == "manual" and "locked from the computer" or "owner away", colours.grey)
-end
-
-local function draw()
-  -- A broken screen must never stop the sorting, so each one is drawn on its own
-  if mon then
-    local locked, why = isLocked()
-    local ok
-    if locked then ok = pcall(drawLock, mon, why) else ok = pcall(drawView, monView) end
-    if not ok then findMonitor() end
-  end
-  if not uiBusy then
-    local ok, err = pcall(drawView, termView)
-    if not ok then
-      term.setBackgroundColour(colours.black); term.setTextColour(colours.red)
-      term.setCursorPos(1, 1); term.clearLine(); term.write(("Screen error: " .. tostring(err)):sub(1, 51))
-    end
-  end
-end
+local Scr = dofile("storage_screens.lua")({
+  TEXT_SCALE = TEXT_SCALE,
+  cfg = function() return cfg end, saveCfg = saveCfg, buildItems = buildItems,
+  items = function() return items end, stats = function() return stats end,
+  isLocked = isLocked,
+  fuelPercent = function()
+    if #cfg.fuels == 0 then return nil end
+    return math.floor(fuelUnits / canaryFuelTarget() * 100)
+  end,
+  send = function(key, amount)           -- send an item to the output chest
+    local n, full = retrieve(key, amount)
+    buildItems()
+    return n, full
+  end,
+})
+local function draw() os.queueEvent("storage_screen") end   -- the screens redraw on any event; this just wakes them
 
 ---------------------------------------------------------------------------
 -- Loops
@@ -1939,33 +1666,6 @@ local function netLoop()
   end
 end
 
-local function clickIn(v, x, y)
-  for _, r in ipairs(v.hits) do
-    if y == r.y and x >= r.x1 and x <= r.x2 then
-      r.action()
-      return true
-    end
-  end
-end
-
-local function touchLoop()
-  while true do
-    local e, side, x, y = os.pullEvent()
-    if e == "monitor_touch" then
-      if monView.touch and mon and not isLocked() and side == peripheral.getName(mon) and clickIn(monView, x, y) then draw() end
-    elseif e == "peripheral" or e == "peripheral_detach" or e == "monitor_resize" then
-      findMonitor(); draw()
-    end
-  end
-end
-
--- Commands take over the computer's screen for a moment (they print and ask questions)
-local function waitEnter()
-  print()
-  write("Press Enter to go back.")
-  read()
-end
-
 -- A dock's keep list ("<item> <count>" lines besides its coal, e.g. the neural lab's matrices).
 -- Edits `keep` ({ [item id] = count }) in place.
 local function editDockKeep(keep)
@@ -2017,6 +1717,7 @@ local AUI = dofile("assignui.lua")
 
 local function assignScreen()
   AUI.run({
+    view = Scr.view(),
     title = "ASSIGNED STORAGE",
     hint = "Click one to change it. The rest is storage.",
     emptyText = "Nothing assigned yet. + Add, or /setup (markers).",
@@ -2163,197 +1864,157 @@ local function assignScreen()
   })
 end
 
-local ALIASES = { ["/addinput"] = "/assign", ["/fuel"] = "/assign", ["/dock"] = "/assign",
-  ["/pocket"] = "/assign", ["/inputs"] = "/assign" }   -- the old commands: all of that lives in /assign now
+---------------------------------------------------------------------------
+-- The "/" commands: typed in the search bar (the kit's command bar), with or without the slash, plus /help.
+-- Reports open as report pages; /assign and /setup take the computer's screen for a while.
+---------------------------------------------------------------------------
+local cmds = Scr.cmds
 
-function runCommand(cmd)
-  cmd = cmd:lower():match("^%s*(%S+)") or ""
-  cmd = ALIASES[cmd] or cmd
-  local found
-  for _, c in ipairs(COMMANDS) do if c[1] == cmd then found = c[1] end end
-  if not found then
-    local m = commandMatches(termView)
-    if #m == 1 then found = m[1][1] end
-  end
-  if not found then say(termView, "Unknown command. Type / to see them all.", C.warn); return end
-  uiBusy = true
-  termView.filter, termView.page = "", 1
-  term.setCursorBlink(false)
-  term.setBackgroundColour(colours.black); term.setTextColour(colours.white)
-  term.clear(); term.setCursorPos(1, 1)
-  local ok, err = pcall(function()
-    if found == "/setup" then
-      setup(); scanAll(); buildItems()
-    elseif found == "/drawers" then
-      print("Rescanning..."); scanAll(); buildItems()
-      local any = false
-      for _, n in ipairs(storage) do
-        if isDrawer(n) then
-          any = true
-          local list = cache[n] or {}
-          local used, totals, order = 0, {}, {}
-          for _, it in pairs(list) do
-            used = used + 1
-            if not totals[it.name] then order[#order + 1] = it.name; totals[it.name] = 0 end
-            totals[it.name] = totals[it.name] + it.count
-          end
-          table.sort(order, function(a, b) return totals[a] > totals[b] end)
-          print(("%s: %d slots, %d in use"):format(n, sizes[n] or 0, used))
-          if (sizes[n] or 0) == 0 then
-            printError("  No slots: no drawers are linked to it (Linking Tool).")
-          end
-          for i = 1, math.min(6, #order) do print(("  %6d %s"):format(totals[order[i]], order[i])) end
-          if #order > 6 then print(("  ...and %d more"):format(#order - 6)) end
-        end
+local function drawerReport()
+  local rows = {}
+  for _, n in ipairs(storage) do
+    if isDrawer(n) then
+      local list = cache[n] or {}
+      local used, totals, order = 0, {}, {}
+      for _, it in pairs(list) do
+        used = used + 1
+        if not totals[it.name] then order[#order + 1] = it.name; totals[it.name] = 0 end
+        totals[it.name] = totals[it.name] + it.count
       end
-      if not any then printError("No drawers or drawer controller found on the cable.") end
-      print("Items held here get stored here first.")
-      waitEnter()
-    elseif found == "/tidy" then
-      -- Sorting waits while the drawers are reshuffled
-      picking = true
-      while workerBusy do os.sleep(0.2) end
-      print("Rescanning (and re-reading drawer sizes)...")
-      limits = {}
-      scanAll()
-      for _, n in ipairs(storage) do if isDrawer(n) then readSizes(n) end end
-      buildItems()
-      print("Biggest piles into the biggest drawers. This can take a")
-      print("few minutes the first time; sorting waits until it's done.")
-      local _, py = term.getCursorPos()
-      local res = rebalanceDrawers(function(text)
-        term.setCursorPos(1, py); term.clearLine(); write(text)
-      end)
-      print()
-      picking = false
-      scanAll()
-      buildItems()
-      os.queueEvent("storage_work")
-      print(("Moved %d stacks."):format(res.moved))
-      local order, total = {}, 0
-      for name, c in pairs(res.evicted) do order[#order + 1] = name; total = total + c end
-      if total > 0 then
-        table.sort(order, function(x, y) return res.evicted[x] > res.evicted[y] end)
-        print(("Moved %d items out to barrels (smallest piles):"):format(total))
-        for i = 1, math.min(5, #order) do print(("  %6d %s"):format(res.evicted[order[i]], order[i])) end
-        if #order > 5 then print(("  ...and %d more kinds"):format(#order - 5)) end
-      end
-      if res.moved == 0 then print("Nothing to move: the drawers already hold the biggest piles.") end
-      if res.locked > 0 then
-        printError(("%d drawer(s) are locked to another item: unlock them and /tidy again."):format(res.locked))
-      end
-      if res.blocked > 0 then
-        printError(("%d drawer(s) still hold the wrong item: barrels too full to swap. /tidy again after freeing space."):format(res.blocked))
-      end
-      if res.waiting > 0 then
-        print(("%d kinds still in barrels (no drawer left for them)."):format(res.waiting))
-      end
-      waitEnter()
-    elseif found == "/fuelinfo" then
-      print("Rescanning..."); scanAll(); buildItems()
-      local target = canaryFuelTarget()
-      print(("Each Canary fuel barrel is kept at %d fuel"):format(target))
-      print("(one stack of coal's worth; extra goes back to storage).")
-      if not minerFuelLimit then
-        printError("Storage hasn't heard a Canary: it needs a wireless or ender modem on it.")
-      end
-      local value = {}
-      for _, fv in ipairs(FUEL_VALUES) do value[fv[1]] = fv[2] end
-      if #cfg.fuels == 0 then printError("No fuel barrels set: /assign one as Canary fuel.") end
-      for _, b in ipairs(cfg.fuels) do
-        local have, parts = 0, {}
-        for _, it in pairs(call(b, "list") or {}) do
-          have = have + (value[it.name] or 0) * it.count
-          parts[it.name] = (parts[it.name] or 0) + it.count
-        end
-        local txt = {}
-        for name, c in pairs(parts) do txt[#txt + 1] = c .. " " .. name:gsub("^minecraft:", "") end
-        print(("%s: %d fuel (%d%%)"):format(b, have, math.floor(have / target * 100)))
-        print("  " .. (#txt > 0 and table.concat(txt, ", ") or "empty"))
-      end
-      DOCKS.info(print)
-      print("In storage (best first):")
-      for _, fv in ipairs(FUEL_VALUES) do
-        local c = byName[fv[1]] or 0
-        local keep = SMELTER_RESERVE[fv[1]]
-        print(("  %5d %s%s"):format(c, fv[1]:gsub("^minecraft:", ""), keep and (" (last " .. keep .. " kept for the smelter)") or ""))
-      end
-      waitEnter()
-    elseif found == "/rescan" then
-      print("Rescanning..."); scanAll(); buildItems()
-      say(termView, "Rescanned.")
-    elseif found == "/assign" then
-      assignScreen()
-    elseif found == "/lock" then
-      cfg.manualLock = true; saveCfg()
-      say(termView, "Monitor locked. /unlock to open it again.", C.warn)
-    elseif found == "/unlock" then
-      cfg.manualLock = false; saveCfg()
-      if isLocked() then
-        say(termView, "Unlocked, but the butler says you're away so it stays locked (AUTO_LOCK).", C.warn)
-      else
-        say(termView, "Monitor unlocked.")
-      end
+      table.sort(order, function(a, b) return totals[a] > totals[b] end)
+      rows[#rows + 1] = { section = n }
+      rows[#rows + 1] = { key = "Slots", value = ("%d, %d in use"):format(sizes[n] or 0, used) }
+      if (sizes[n] or 0) == 0 then rows[#rows + 1] = { alert = "No slots: no drawers are linked to it (Linking Tool)." } end
+      for i = 1, math.min(6, #order) do rows[#rows + 1] = { key = order[i], value = Scr.commas(totals[order[i]]) } end
+      if #order > 6 then rows[#rows + 1] = { text = ("...and %d more"):format(#order - 6), tone = "dim" } end
     end
-  end)
-  uiBusy = false
-  picking = false   -- in case a command stopped halfway through picking a chest
-  if not ok then say(termView, "Error: " .. tostring(err), C.warn) end
-  draw()
+  end
+  if #rows == 0 then rows[1] = { alert = "No drawers or drawer controller found on the cable.", tone = "bad" } end
+  rows[#rows + 1] = { blank = true }
+  rows[#rows + 1] = { text = "Items held here get stored here first.", tone = "dim" }
+  return rows
 end
 
--- The computer's own screen: type to filter, click (advanced) or Enter to take, scroll/arrows to page
-local function terminalLoop()
-  local v = termView
-  draw()
-  while true do
-    local e, a, b, c = os.pullEvent()
-    local redraw = true
-    if uiBusy then
-      redraw = false
-    elseif e == "char" then
-      v.filter, v.page = v.filter .. a, 1
-    elseif e == "paste" then
-      v.filter, v.page = v.filter .. a:gsub("[\r\n]", ""), 1
-    elseif e == "key" then
-      if a == keys.backspace then
-        v.filter, v.page = v.filter:sub(1, -2), 1
-      elseif a == keys.delete then
-        v.filter, v.page = "", 1
-      elseif a == keys.enter or a == keys.numPadEnter then
-        if v.filter:sub(1, 1) == "/" then
-          runCommand(v.filter)
-        elseif v.first then
-          take(v, v.first)
-        end
-      elseif a == keys.up or a == keys.pageUp then
-        v.page = v.page - 1
-      elseif a == keys.down or a == keys.pageDown then
-        v.page = v.page + 1
-      else
-        redraw = false
-      end
-    elseif e == "mouse_click" then
-      redraw = clickIn(v, b, c) or false
-    elseif e == "mouse_scroll" then
-      v.page = v.page + a
-    elseif e == "term_resize" then
-      redraw = true
-    else
-      redraw = false
-    end
-    if redraw and not uiBusy then draw() end
+local function tidyReport(res)
+  local rows = { { key = "Moved", value = res.moved .. " stacks" } }
+  local order, total = {}, 0
+  for name, c in pairs(res.evicted) do order[#order + 1] = name; total = total + c end
+  if total > 0 then
+    table.sort(order, function(x, y) return res.evicted[x] > res.evicted[y] end)
+    rows[#rows + 1] = { section = ("Moved %d items out to barrels (smallest piles)"):format(total) }
+    for i = 1, math.min(5, #order) do rows[#rows + 1] = { key = order[i], value = Scr.commas(res.evicted[order[i]]) } end
+    if #order > 5 then rows[#rows + 1] = { text = ("...and %d more kinds"):format(#order - 5), tone = "dim" } end
   end
+  if res.moved == 0 then rows[#rows + 1] = { text = "Nothing to move: the drawers already hold the biggest piles.", tone = "dim" } end
+  if res.locked > 0 then
+    rows[#rows + 1] = { alert = ("%d drawer(s) are locked to another item: unlock them and /tidy again."):format(res.locked) }
+  end
+  if res.blocked > 0 then
+    rows[#rows + 1] = { alert = ("%d drawer(s) still hold the wrong item: barrels too full to swap. /tidy again after freeing space."):format(res.blocked) }
+  end
+  if res.waiting > 0 then rows[#rows + 1] = { text = ("%d kinds still in barrels (no drawer left for them)."):format(res.waiting), tone = "dim" } end
+  return rows
 end
+
+local function fuelReport()
+  local target = canaryFuelTarget()
+  local rows = { { key = "Each barrel is kept at", value = ("%s fuel"):format(Scr.commas(target)) } }
+  if not minerFuelLimit then
+    rows[#rows + 1] = { alert = "No Canary heard: storage needs a wireless modem.", tone = "bad" }
+  end
+  local value = {}
+  for _, fv in ipairs(FUEL_VALUES) do value[fv[1]] = fv[2] end
+  if #cfg.fuels == 0 then rows[#rows + 1] = { alert = "No fuel barrels set: /assign one as Canary fuel." } end
+  for _, b in ipairs(cfg.fuels) do
+    local have, parts = 0, {}
+    for _, it in pairs(call(b, "list") or {}) do
+      have = have + (value[it.name] or 0) * it.count
+      parts[it.name] = (parts[it.name] or 0) + it.count
+    end
+    local txt = {}
+    for name, c in pairs(parts) do txt[#txt + 1] = c .. " " .. name:gsub("^minecraft:", "") end
+    rows[#rows + 1] = { section = cfg.names[b] or b }
+    rows[#rows + 1] = { key = "Fuel", value = ("%d (%d%%)"):format(have, math.floor(have / target * 100)) }
+    rows[#rows + 1] = { text = #txt > 0 and table.concat(txt, ", ") or "empty", tone = "dim" }
+  end
+  local lines = {}
+  DOCKS.info(function(...) lines[#lines + 1] = table.concat({ ... }, " ") end)
+  if #lines > 0 then
+    rows[#rows + 1] = { section = "Docks" }
+    for _, l in ipairs(lines) do rows[#rows + 1] = { text = l, tone = "dim" } end
+  end
+  rows[#rows + 1] = { section = "In storage (best first)" }
+  for _, fv in ipairs(FUEL_VALUES) do
+    local c = byName[fv[1]] or 0
+    local keep = SMELTER_RESERVE[fv[1]]
+    rows[#rows + 1] = { key = fv[1]:gsub("^minecraft:", "") .. (keep and (" (last " .. keep .. " kept for the smelter)") or ""),
+      value = Scr.commas(c) }
+  end
+  return rows
+end
+
+-- A command that works on the cable: sorting waits meanwhile, the screen shows what it is doing
+local function rescan(title, line)
+  Scr.progress(title, line)
+  scanAll(); buildItems()
+end
+
+cmds:add({ name = "assign", help = "inputs, output, docks, fuel...: add/edit/delete",
+  run = function() Scr.later(assignScreen); return true end })
+cmds:add({ name = "setup", help = "assign chests with marker items",
+  run = function() Scr.plain(function() setup(); scanAll(); buildItems() end); return true end })
+cmds:add({ name = "rescan", help = "re-read every chest now",
+  run = function() rescan("RESCAN", "Rescanning..."); Scr.idle(); return true, "Rescanned." end })
+cmds:add({ name = "drawers", help = "what storage sees in the drawers",
+  run = function()
+    rescan("DRAWERS", "Rescanning...")
+    Scr.report({ title = "DRAWERS", rows = drawerReport() })
+    return true
+  end })
+cmds:add({ name = "tidy", help = "biggest piles into biggest drawers",
+  run = function()
+    -- Sorting waits while the drawers are reshuffled
+    picking = true
+    while workerBusy do os.sleep(0.2) end
+    Scr.progress("TIDY", "Rescanning (and re-reading drawer sizes)...")
+    limits = {}
+    scanAll()
+    for _, n in ipairs(storage) do if isDrawer(n) then readSizes(n) end end
+    buildItems()
+    local res = rebalanceDrawers(function(text)
+      Scr.progress("TIDY", "Biggest piles into the biggest drawers.", { "This can take a few minutes the first time;", "sorting waits until it's done.", text })
+    end)
+    picking = false
+    scanAll()
+    buildItems()
+    os.queueEvent("storage_work")
+    Scr.report({ title = "TIDY", rows = tidyReport(res) })
+    return true
+  end })
+cmds:add({ name = "fuelinfo", help = "Canary fuel barrels and fuel stock",
+  run = function()
+    rescan("FUEL INFO", "Rescanning...")
+    Scr.report({ title = "FUEL INFO", right = #cfg.fuels .. (#cfg.fuels == 1 and " fuel barrel" or " fuel barrels"), rows = fuelReport() })
+    return true
+  end })
+cmds:add({ name = "lock", help = "lock the monitor (padlock screen)",
+  run = function() cfg.manualLock = true; saveCfg(); return true, "Monitor locked. /unlock to open it again.", "warn" end })
+cmds:add({ name = "unlock", help = "lift a /lock",
+  run = function()
+    cfg.manualLock = false; saveCfg()
+    if isLocked() then return true, "Unlocked, but the butler says you're away so it stays locked (AUTO_LOCK).", "warn" end
+    return true, "Monitor unlocked."
+  end })
+Scr.addViewCommands()
+-- The old commands: all of that lives in /assign now
+for _, old in ipairs({ "addinput", "fuel", "dock", "pocket", "inputs" }) do Scr.alias(old, "assign") end
 
 ---------------------------------------------------------------------------
 -- Start
 ---------------------------------------------------------------------------
 loadCfg()
 print("Scanning storage...")
-scanAll(); buildItems(); draw()
+scanAll(); buildItems()
 local firstRun = #cfg.inputs == 0 and not cfg.output
-parallel.waitForAny(workerLoop, touchLoop, function()
-  if firstRun then runCommand("/assign") end   -- brand-new storage: start on the assign screen
-  terminalLoop()
-end, netLoop)
+if firstRun then Scr.pending = assignScreen end   -- brand-new storage: start on the assign screen
+parallel.waitForAny(workerLoop, Scr.loop, netLoop)

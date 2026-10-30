@@ -117,9 +117,9 @@ T.test("md foreman: the barrel jobs on /assign include the factory's two and Ove
   e.c:type("/assign"); e.c:key(257)
   e.w:run(1)
   T.contains(e.c.screen, "MD BARRELS")
-  T.contains(e.c.screen, "FACT IN")
-  T.contains(e.c.screen, "FACT OUT")
-  T.contains(e.c.screen, "OVERFLOW")
+  T.contains(e.c.screen, "Fact in")
+  T.contains(e.c.screen, "Fact out")
+  T.contains(e.c.screen, "Overflow")
 end)
 
 T.test("md foreman: the Rules page has the dock top-up and no junk list", function()
@@ -280,16 +280,16 @@ T.test("md foreman: /assign answers at once even with full docks and barrels it 
   T.contains(c.screen, "MD BARRELS")
   local x, y = c.screen:find("barrel_1")
   c:click(x, y); w:run(1)
-  local function button(text)   -- the buttons are on the second-last row
-    local row = c.screen.h - 1
+  local function button(text)   -- the buttons are on the last row
+    local row = c.screen.h
     return c.screen:line(row):find(text, 1, true), row
   end
   x, y = button("Delete"); c:click(x, y); w:run(1)
-  T.contains(c.screen, "Sure? Delete")
-  x, y = button("Sure? Delete"); c:click(x, y); w:run(2)
+  T.contains(c.screen, "Sure?")
+  x, y = button("Sure?"); c:click(x, y); w:run(2)
   T.contains(c.screen, "has no job now")
   x, y = c.screen:find("barrel_2"); c:click(x, y); w:run(1)
-  x, y = button("Cancel"); c:click(x, y); w:run(2)
+  c:click(2, c.screen.h); w:run(2)                  -- Back
   T.contains(c.screen, "MD BARRELS", "back on the list, not stuck")
   T.running(c)
 end)
