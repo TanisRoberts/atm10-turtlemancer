@@ -15,9 +15,9 @@
 -- No furnace on the cable (or FURNACE=no)? Dry rubber goes to the dock instead and the smelter turns
 -- it into plastic with a "plastic all" line in smelt.txt.
 --
--- Optional: a monitor touching the computer (tap PAUSE/RUN on it), a wireless/ender modem so the
+-- Optional: a monitor touching the computer (tap Pause/Run on it), a wireless/ender modem so the
 -- mainframe shows it on the board, raises alerts and answers "island plastic".
--- Terminal: status | list | pause | resume | help.   Settings: plastic.env (live, like butler.env).
+-- Terminal: the same dashboard with a command bar (/status /list /pause /resume /help, slash optional).   Settings: plastic.env (live, like butler.env).
 --
 -- How a tap works (IF source, 1.21): it fills its 1,000 mB tank from the log behind it, 3x faster
 -- with power. Every pull has a 1% chance to wear the log; after ~8 wears it turns into a stripped
@@ -197,12 +197,11 @@ local function scan()
   F = f
 end
 
--- Only a monitor touching the computer (screens on a cable belong to other computers)
-local mon
+-- Only a monitor touching the computer (screens on a cable belong to other computers). The kit's view gets its
+-- peripheral name, so this is the one place that looks.
 local function findMonitor()
-  mon = nil
   for _, side in ipairs(rs.getSides()) do
-    if not mon and peripheral.hasType(side, "monitor") then mon = peripheral.wrap(side); mon.setTextScale(0.5) end
+    if peripheral.hasType(side, "monitor") then return peripheral.wrap(side), side end
   end
 end
 
@@ -489,108 +488,6 @@ local function statusLines()
 end
 
 ---------------------------------------------------------------------------
--- Monitor
----------------------------------------------------------------------------
-local button = nil   -- { x1, x2, y }
-
-local function bar(m, x, y, w, frac, col)
-  local fill = math.max(0, math.min(w, math.floor(w * frac + 0.5)))
-  m.setCursorPos(x, y)
-  m.setBackgroundColour(col); m.write((" "):rep(fill))
-  m.setBackgroundColour(colours.grey); m.write((" "):rep(w - fill))
-  m.setBackgroundColour(colours.black)
-end
-
-local function draw()
-  if not mon then return end
-  local w, h = mon.getSize()
-  if not w then findMonitor(); return end
-  mon.setBackgroundColour(colours.black); mon.clear()
-  mon.setCursorPos(1, 1); mon.setBackgroundColour(colours.grey); mon.clearLine()
-  local st = stateWord()
-  local label = cfg.paused and " RUN " or " PAUSE "
-  local bx = w - #label + 1
-  mon.setTextColour(colours.white); mon.write((w >= 24 and " PLASTIC FACTORY" or " PLASTIC"):sub(1, bx - 1))
-  mon.setCursorPos(bx, 1)
-  mon.setBackgroundColour(cfg.paused and colours.green or colours.orange); mon.setTextColour(colours.black)
-  mon.write(label)
-  button = { x1 = bx, x2 = w, y = 1 }
-  mon.setBackgroundColour(colours.black)
-
-  local y = 3
-  local function line(text, col)
-    if y > h then return end
-    mon.setCursorPos(2, y); mon.setTextColour(col or colours.lightGrey)
-    mon.write(tostring(text):sub(1, w - 2)); y = y + 1
-  end
-  local stCol = st == "running" and colours.lime or st == "paused" and colours.orange or colours.yellow
-  line(st:upper() .. "  " .. note, stCol)
-  local r = latexRate()
-  line(("Made %d plastic%s"):format(cfg.plastic,
-    r and ("  ~%.1f/h"):format(r * 60 / PER_RUBBER_LATEX) or ""), colours.white)
-
-  -- Small screen: one line per thing, problems first
-  if h < 16 then
-    for _, msg in pairs(problems) do line((msg:gsub("^Plastic factory: ", "")), colours.red) end
-    for _, u in ipairs(F.units) do
-      local s = unitState[u] or {}
-      line(("Unit %s L%d W%d%s"):format(shortNum(u), pct(s.latex or 0, UNIT_CAP), pct(s.water or 0, UNIT_CAP),
-        s.cap and (" P" .. pct(s.energy or 0, s.cap)) or ""), colours.white)
-    end
-    local dry = 0
-    for _, t in ipairs(F.taps) do if (tapState[t] or {}).stalled then dry = dry + 1 end end
-    line(("Taps %d ok%s"):format(#F.taps - dry, dry > 0 and (", " .. dry .. " DRY") or ""), dry > 0 and colours.red or colours.lime)
-    local cooking = 0
-    for _, fz in ipairs(F.furnaces) do cooking = cooking + ((furnState[fz] or {}).cooking or 0) end
-    line(#F.furnaces > 0 and ("Furnace: %d cooking"):format(cooking) or "No furnace")
-    line(F.dock and ("Dock fuel %d"):format(dockFuel) or "No dock", F.dock and colours.lightGrey or colours.yellow)
-    return
-  end
-  y = y + 1
-
-  local bw = math.max(4, w - 14)
-  for _, u in ipairs(F.units) do
-    local s = unitState[u] or {}
-    line("Latex unit " .. shortNum(u), colours.white)
-    if y <= h then mon.setCursorPos(2, y); mon.setTextColour(colours.lightGrey); mon.write("latex "); bar(mon, 9, y, bw, (s.latex or 0) / UNIT_CAP, colours.lightGrey); y = y + 1 end
-    if y <= h then mon.setCursorPos(2, y); mon.setTextColour(colours.lightGrey); mon.write("water "); bar(mon, 9, y, bw, (s.water or 0) / UNIT_CAP, colours.blue); y = y + 1 end
-    if s.cap and y <= h then
-      mon.setCursorPos(2, y); mon.setTextColour(colours.lightGrey); mon.write("power ")
-      bar(mon, 9, y, bw, (s.energy or 0) / s.cap, (s.energy or 0) > 0 and colours.red or colours.grey); y = y + 1
-    end
-  end
-  if #F.units == 0 then line("No latex unit on the cable", colours.yellow) end
-  y = y + 1
-
-  -- Taps: one compact cell each, as many per row as fit
-  if #F.taps > 0 and y <= h then
-    mon.setCursorPos(2, y); mon.setTextColour(colours.white); mon.write("Taps"); y = y + 1
-    local cellW = 10
-    local per = math.max(1, math.floor((w - 1) / cellW))
-    for i, t in ipairs(F.taps) do
-      local s = tapState[t] or {}
-      local cx = 2 + ((i - 1) % per) * cellW
-      if (i - 1) % per == 0 and i > 1 then y = y + 1 end
-      if y > h then break end
-      mon.setCursorPos(cx, y)
-      mon.setTextColour(s.stalled and colours.red or s.full and colours.orange or colours.lime)
-      mon.write(("#%s %s"):format(shortNum(t), s.stalled and "DRY" or s.full and "full" or "ok"):sub(1, cellW - 1))
-    end
-    y = y + 2
-  end
-
-  for _, fz in ipairs(F.furnaces) do
-    local s = furnState[fz] or {}
-    line(("Furnace %s: %d cooking, fuel %d"):format(shortNum(fz), s.cooking or 0, s.fuel or 0))
-  end
-  if #F.furnaces == 0 then line("No furnace: rubber -> dock -> smelter") end
-  line(F.dock and ("Dock: fuel for %d, %d plastic out"):format(dockFuel, dockPlastic) or "Dock: none", F.dock and colours.lightGrey or colours.yellow)
-  for _, msg in pairs(problems) do
-    line((msg:gsub("^Plastic factory: ", "")), colours.red)
-  end
-end
-
----------------------------------------------------------------------------
 -- Loops
 ---------------------------------------------------------------------------
 local function workLoop()
@@ -598,7 +495,7 @@ local function workLoop()
     local ok, err = pcall(pass)
     if not ok then note = "Error: " .. tostring(err); problem("error", true, "Plastic factory error: " .. tostring(err))
     else problem("error", false) end
-    pcall(draw)
+    os.queueEvent("plastic_draw")
     os.sleep(math.max(1, E.TICK or 2))
   end
 end
@@ -607,18 +504,7 @@ local function setPaused(p)
   cfg.paused = p
   saveCfg(true)
   note = p and "Paused" or "Running"
-  pcall(draw)
-end
-
-local function eventLoop()
-  while true do
-    local ev, a, b, c = os.pullEvent()
-    if ev == "monitor_touch" and mon and peripheral.getName(mon) == a then
-      if button and c == button.y and b >= button.x1 and b <= button.x2 then setPaused(not cfg.paused) end
-    elseif ev == "peripheral" or ev == "peripheral_detach" or ev == "monitor_resize" then
-      findMonitor(); pcall(draw)
-    end
-  end
+  os.queueEvent("plastic_draw")
 end
 
 local netOn = false
@@ -637,43 +523,16 @@ local function netLoop()
   end
 end
 
-local function help()
-  print("status    what's going on")
-  print("list      what I found on my cable")
-  print("pause     stop moving things (machines keep their contents)")
-  print("resume    carry on")
-  print("Settings: plastic.env (edit plastic.env)")
-end
-
-local function terminalLoop()
-  term.clear(); term.setCursorPos(1, 1)
-  print("Plastic factory online.")
-  help()
-  while true do
-    print()
-    write("plastic> ")
-    local q = read():lower()
-    if q:match("^%s*list") then
-      scan()
-      print("Taps:     " .. (#F.taps > 0 and table.concat(F.taps, ", ") or "none"))
-      print("Units:    " .. (#F.units > 0 and table.concat(F.units, ", ") or "none"))
-      print("Water:    " .. (#F.water > 0 and table.concat(F.water, ", ") or "none"))
-      print("Buffers:  " .. (#F.buffers > 0 and table.concat(F.buffers, ", ") or "none"))
-      print("Furnaces: " .. (#F.furnaces > 0 and table.concat(F.furnaces, ", ") or "none"))
-      print("Dock:     " .. tostring(F.dock or "none"))
-      if F.dockNote then printError(F.dockNote) end
-    elseif q:match("^%s*pause") or q:match("^%s*stop") then
-      setPaused(true); print("Paused.")
-    elseif q:match("^%s*resume") or q:match("^%s*go") or q:match("^%s*run") then
-      setPaused(false); print("Running.")
-    elseif q:match("^%s*status") or q:match("^%s*$") then
-      for _, l in ipairs(statusLines()) do print(l) end
-      for _, msg in pairs(problems) do printError(msg) end
-    else
-      help()
-    end
-  end
-end
+-- The screens (plastic_screens.lua): the dashboard on the computer and the monitor, and the typed commands
+local screens = require("plastic_screens")({
+  snap = function()
+    local r = latexRate()
+    return { cfg = cfg, F = F, tapState = tapState, unitState = unitState, furnState = furnState, problems = problems,
+             note = note, dockFuel = dockFuel, dockPlastic = dockPlastic, state = stateWord(),
+             rate = r and r * 60 / PER_RUBBER_LATEX or nil, furnaceOn = yes("FURNACE") }
+  end,
+  lines = statusLines, setPaused = setPaused, scan = scan, findMonitor = findMonitor, unitCap = UNIT_CAP,
+})
 
 -- Talk on every modem (a wireless/ender one reaches the mainframe; it's optional)
 peripheral.find("modem", function(name, m)
@@ -682,7 +541,6 @@ peripheral.find("modem", function(name, m)
 end)
 readEnv()
 loadCfg()
-findMonitor()
 scan()
 note = cfg.paused and "Paused" or "Starting"
-parallel.waitForAny(workLoop, eventLoop, netLoop, terminalLoop)
+parallel.waitForAny(workLoop, netLoop, screens.run)

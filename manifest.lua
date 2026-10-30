@@ -146,7 +146,7 @@ local M = {
             .. "into the Latex Processing Unit, tops up its water, smelts the dry rubber and puts the "
             .. "plastic in a dock barrel that storage empties and keeps fuelled (/dock on storage).",
           run = "plastic",
-          files = { "computer/plastic/plastic.lua", "shared/screens.lua", "shared/ui.lua", "shared/ui_widgets.lua", "shared/ui_parts.lua", "shared/ui_motion.lua" },
+          files = { "computer/plastic/plastic.lua", "computer/plastic/plastic_screens.lua", "shared/slash.lua", "shared/screens.lua", "shared/ui.lua", "shared/ui_widgets.lua", "shared/ui_parts.lua", "shared/ui_motion.lua" },
         },
         neural = {
           name = "Neural lab",
