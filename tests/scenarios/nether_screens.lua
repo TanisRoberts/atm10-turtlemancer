@@ -172,7 +172,7 @@ T.test("nether screens: Barrels opens the shared assign screen on the computer a
   tapOn(e, e.s, "Barrels", true)
   T.contains(e.s, "NETHER BARRELS")
   T.contains(e.s, "barrel_0")
-  tapOn(e, e.s, "Done", true)
+  tapOn(e, e.s, "Back", true)
   T.contains(e.s, "Presets")
   T.contains(e.s, "Firecrest-01", "back on the overview, and the kit draws again")
   e.w:run(3)

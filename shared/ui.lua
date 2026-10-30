@@ -527,7 +527,8 @@ function ui.quit() quit = true end
 function ui.run(views, draw, opts)
   opts = opts or {}
   if views.t then views = { views } end
-  quit = false
+  quit = false          -- a loop started inside another one (the Nether's /assign) leaves the outer one running
+  local outerQuit = false
   local shift = false
   local timer
   local MIN = opts.min_interval or 0.25
@@ -581,6 +582,7 @@ function ui.run(views, draw, opts)
       rearm()
     end
   end
+  quit = outerQuit
 end
 
 -- Part 2 (tabs and paging footer, tiles, bars, fields, lists, map) lives in ui_widgets.lua and extends View;
