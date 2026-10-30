@@ -156,7 +156,7 @@ local M = {
             .. "enough of what its fab makes (neural.txt), learns new columns and fab changes by "
             .. "itself. Dock barrel shared with storage. Needs a wireless or ender modem.",
           run = "neural",
-          files = { "computer/neural/neural.lua", "shared/screens.lua", "shared/ui.lua", "shared/ui_widgets.lua", "shared/ui_parts.lua", "shared/ui_motion.lua" },
+          files = { "computer/neural/neural.lua", "computer/neural/neural_screens.lua", "shared/slash.lua", "shared/screens.lua", "shared/ui.lua", "shared/ui_widgets.lua", "shared/ui_parts.lua", "shared/ui_motion.lua" },
         },
         art = {
           name = "Art controller",

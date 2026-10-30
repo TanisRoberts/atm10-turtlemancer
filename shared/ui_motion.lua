@@ -57,6 +57,9 @@ local COLOURS = { working = "good", building = "good", farming = "good2", smelti
                   waiting = "warn", returning = "info", rebooting = "busy" }
 local STILL = { docked = { "=", "idle" }, done = { "+", "idle" }, idle = { "-", "dim" }, stale = { "?", "bar" },
                 lost = { "!", "bad" }, error = { "!", "bad" }, stopped = { "!", "bad" }, ok = { "+", "good" } }
+-- A screen with state words of its own adds them: ui.glyphs.still["at target"] = { "o", "warn" } (a still glyph and
+-- its colour role), ui.glyphs.class["training"] = "working" (a moving one).
+ui.glyphs = { class = CLASS, still = STILL }
 
 local begin = View.begin
 function View:begin()

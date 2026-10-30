@@ -98,7 +98,7 @@ Everything for plastic in one building, run by one computer (role **Plastic fact
 - **Taps wear out the log:** each pull has a 1% chance to wear it; about 8 wears turn it into a stripped log (still gives 1 mB a pull), then air. A tap that stops giving latex shows **DRY** and raises an alert: put a new log behind it.
 - With a wireless/ender modem it's on the mainframe's board, raises alerts, and answers `island plastic` (`island plastic pause | go`).
 - No furnace (or `FURNACE=no` in `plastic.env`)? Dry rubber goes to the dock instead; add `plastic all` to `smelt.txt` and the smelter makes it.
-- Terminal: `status`, `list` (what it found on the cable), `pause`, `resume`. Settings in `plastic.env` (same rules as `butler.env`): `DOCK` (if there's more than one chest on the cable), `FURNACE`, `STALL_AFTER`, `WATER_LOW`, `TICK`.
+- Terminal commands (slash optional, `/help` lists them): `/status`, `/list` (what it found on the cable), `/pause`, `/resume`, `/home`. Settings in `plastic.env` (same rules as `butler.env`): `DOCK` (if there's more than one chest on the cable), `FURNACE`, `STALL_AFTER`, `WATER_LOW`, `TICK`.
 - If a machine's tanks or slots don't show up, open it and check its side settings (the coloured face buttons): the face with the modem must not be switched off.
 
 ## Neural lab (Hostile Neural Networks)
@@ -121,11 +121,11 @@ A wall of **columns**, one per mob: a **Simulation Chamber** on top, **its Loot 
 - `neural.txt`: how many of each item to keep, e.g. `blaze_rod 512`, `ender_pearl 256`, `end_crystal off`. Items with no line: `DEFAULT_KEEP` (256). A column runs until storage has that many, then stops, and starts again under 90% (`RESTART_AT`).
 - **On** = it drips matrices into the chamber one at a time and feeds predictions to its fab two at a time. **Off** = it stops adding them; the chamber finishes its run and idles (idle machines use no power).
 - **Switched a fab's drop?** A running column notices on its next batch. For a stopped one, tap **CHECK** on its card: it sends one banked prediction through. It also checks by itself after 15 min, then less and less often while nothing changes (up to every 4 h); each check is one batch.
-- **New columns are picked up by themselves.** Chambers, fabs and lamps are paired in the order they were connected, and a pair sticks (a replaced fab joins the chamber that lost one). Wrong pair? `PAIRS=` in `neural.env`, e.g. `PAIRS=3:5:2` (chamber 3, fab 5, lamp 2; `pairs` on the terminal shows the numbers).
-- **Power:** solar first. The Furnator gets charcoal/coal while your cells, or **any one chamber**, are under 30% (`FUEL_BELOW`): power doesn't spread evenly, so the chamber furthest from the generators can starve while the rest are full. The monitor then names it (`Sim #2 0%`). Under 10% (`LOW_POWER`) only the column furthest below its target runs.
+- **New columns are picked up by themselves.** Chambers, fabs and lamps are paired in the order they were connected, and a pair sticks (a replaced fab joins the chamber that lost one). Wrong pair? `PAIRS=` in `neural.env`, e.g. `PAIRS=3:5:2` (chamber 3, fab 5, lamp 2; `/pairs` on the terminal shows the numbers).
+- **Power:** solar first. The Furnator gets charcoal/coal while your cells, or **any one chamber**, are under 30% (`FUEL_BELOW`): power doesn't spread evenly, so the chamber furthest from the generators can starve while the rest are full. The header then names it (`sim #2 0%`). Under 10% (`LOW_POWER`) only the column furthest below its target runs.
 - Leave the chamber on **Inference** and both redstone settings on **Ignored**. A chamber on Training uses matrices and makes nothing: the lab flags it.
-- **Monitor:** overview cards (state, item stock/target, accuracy, CHECK). Tap a column for its page: target **-** / **+** (edits `neural.txt`), **AUTO / ON / OFF**, CHECK, stats. **PAUSE / RUN** in the corner.
-- **Terminal:** `status`, `list`, `pairs`, `check <n>`, `on <n>`, `off <n>`, `auto <n>`, `pause`, `resume`.
+- **Screens** (monitor and terminal, `docs/systems/neural.md`): a tile per column (state, item stock/target, accuracy, CHECK). Tap a column for its page: target stepper (edits `neural.txt`), **AUTO / ON / OFF**, CHECK, stats. **Pause / Run** and **Check all** on the bottom row.
+- **Terminal commands** (slash optional, `/help` lists them): `/status`, `/list`, `/pairs`, `/column <n>`, `/check <n>`, `/on <n>`, `/off <n>`, `/auto <n>`, `/target <n> <count>`, `/pause`, `/resume`, `/home`.
 - **Alerts** (mainframe): out of matrices, no power, chamber stuck or on Training, fab with no drop picked, dock full, no counts from storage. Chat: `island neural`, `island neural pause | go`.
 - **Tip:** level a model with the Deep Learner (kills) rather than Training mode (one matrix per run). With the mod's default numbers that's about 100 kills from blank to Self Aware.
 

@@ -1,6 +1,6 @@
 # UI kit (`shared/ui.lua`)
 
-Design: `docs/design/ui-kit.md`. Devices keep shared files flat, so a program says `local ui = require("ui")` and lists `shared/ui.lua` in its manifest role. The Farmhand is the first user (see `docs/systems/farmhand.md`); the other controllers move over in the kit's migration order.
+Design: `docs/design/ui-kit.md`. Devices keep shared files flat, so a program says `local ui = require("ui")` and lists `shared/ui.lua` in its manifest role. The Farmhand is the first user (see `docs/systems/farmhand.md`), then the smelter, the neural lab and the plastic factory (`docs/systems/neural.md`, `plastic.md`); the other controllers move over in the kit's migration order.
 
 ## Part 1 (#2): `shared/ui.lua`
 
@@ -52,6 +52,7 @@ Loaded by `ui.lua` last; every role that uses the kit lists it. Design: `docs/de
 - `v:glyph(x, y, state, { rate, stale, since })`: one character in the state's colour (working `\ | / |`, building, farming, smelting, waiting, returning, rebooting; still `=` docked, `+` done, `-` idle, `?` stale, `!` lost/error). Still when `ui.anim == "off"`, on a terminal without colour, for `stale`, and past 24 moving glyphs a view. `since` (an `os.clock()` time) makes an error pulse red/white for 3 seconds. `v:glyphChar(state, o)` gives the character and colour role without drawing.
 - `v:spinner(x, y, state)`: the waiting glyph at 4 a second. `v:indeterminate(x, y, w)`: a track with a 6-cell block bouncing one cell a beat; still on `calm` and `off`. `v:spinner_line` (part 3) uses the spinner.
 - Tiles and the header put a glyph two cells before the state word (a tile whose name would be cut to make room leaves the glyph out). A `busy` button keeps its label and puts the rebooting glyph before it.
+- A screen with state words of its own adds their glyphs: `ui.glyphs.still["at target"] = { "o", "warn" }` (a still character and its colour role) or `ui.glyphs.class["training"] = "working"` (a moving one). The neural lab does this.
 - A view that drew something moving sets `v.animated` and `v.animRate`; `ui.run` then wakes for the next beat, and sleeps again when nothing moves. A beat writes one `blit` per changed row.
 
 ## Typed commands (#70): `shared/slash.lua`

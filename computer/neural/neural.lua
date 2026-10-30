@@ -32,7 +32,8 @@
 --
 -- Needs a wireless/ender modem too: it gets item counts from storage's broadcast and reports to
 -- the mainframe (board row, alerts, "island neural"). Monitor touching the computer: tap a column
--- for its page. Terminal: status | list | pairs | check <n> | on/off/auto <n> | pause | resume.
+-- for its page. Terminal: the same screens with a command bar (/status /list /pairs /check <n> /on|off|auto <n>
+-- /target <n> <count> /column <n> /pause /resume /help, slash optional).
 
 local ENV_FILE   = "neural.env"
 local RULES_FILE = "neural.txt"
@@ -362,12 +363,10 @@ local function pairUp()
   for c in pairs(cfg.train) do if not present[c] then cfg.train[c] = nil end end
 end
 
--- Only a monitor touching the computer
-local mon
+-- Only a monitor touching the computer. The kit's view gets its peripheral name, so this is the one place that looks.
 local function findMonitor()
-  mon = nil
   for _, side in ipairs(rs.getSides()) do
-    if not mon and peripheral.hasType(side, "monitor") then mon = peripheral.wrap(side); mon.setTextScale(0.5) end
+    if peripheral.hasType(side, "monitor") then return peripheral.wrap(side), side end
   end
 end
 
@@ -744,12 +743,6 @@ local function stateOf(p, now)
   return "AT TARGET", false, false
 end
 
-local STATE_COL = {
-  RUNNING = colours.lime, LEARNING = colours.cyan, CHECKING = colours.cyan, ["AT TARGET"] = colours.lightBlue,
-  OFF = colours.lightGrey, PAUSED = colours.orange, ["WAIT POWER"] = colours.yellow,
-  TRAINING = colours.purple, ["TRAIN WAIT"] = colours.magenta,
-}
-
 ---------------------------------------------------------------------------
 -- One pass
 ---------------------------------------------------------------------------
@@ -1019,29 +1012,8 @@ local function lampLoop()
 end
 
 ---------------------------------------------------------------------------
--- Monitor
+-- What the screens and the typed commands can do (screens: neural_screens.lua)
 ---------------------------------------------------------------------------
-local hits = {}
-local view = { page = nil, list = 1 }   -- page = chamber name, or nil for the overview
-
-local function hit(x1, x2, y1, y2, fn) hits[#hits + 1] = { x1 = x1, x2 = x2, y1 = y1, y2 = y2 or y1, fn = fn } end
-
-local function bar(m, x, y, w, frac, col)
-  if w <= 0 then return end
-  local fill = math.max(0, math.min(w, math.floor(w * frac + 0.5)))
-  m.setCursorPos(x, y)
-  m.setBackgroundColour(col); m.write((" "):rep(fill))
-  m.setBackgroundColour(colours.grey); m.write((" "):rep(w - fill))
-  m.setBackgroundColour(colours.black)
-end
-
-local function btn(m, x, y, label, bg, fn)
-  m.setCursorPos(x, y); m.setBackgroundColour(bg); m.setTextColour(colours.black); m.write(label)
-  m.setBackgroundColour(colours.black)
-  hit(x, x + #label - 1, y, y, fn)
-  return x + #label + 1
-end
-
 local function setPaused(v)
   cfg.paused = v; dirty = true; saveCfg(true)
   note = v and "Paused" or "Running"
@@ -1058,190 +1030,6 @@ local function check(c)
   os.queueEvent("neural_work")
 end
 
-local function header(m, w, title, back)
-  m.setCursorPos(1, 1); m.setBackgroundColour(colours.grey); m.clearLine()
-  m.setTextColour(colours.white)
-  if back then
-    m.setBackgroundColour(colours.lightGrey); m.setTextColour(colours.black); m.write(" < ")
-    hit(1, 3, 1, 1, function() view.page = nil end)
-    m.setBackgroundColour(colours.grey); m.setTextColour(colours.white)
-  end
-  m.write(" " .. title:sub(1, math.max(0, w - 12)))
-  local label = cfg.paused and " RUN " or " PAUSE "
-  local bx = w - #label + 1
-  m.setCursorPos(bx, 1)
-  m.setBackgroundColour(cfg.paused and colours.green or colours.orange); m.setTextColour(colours.black)
-  m.write(label)
-  hit(bx, w, 1, 1, function() setPaused(not cfg.paused) end)
-  m.setBackgroundColour(colours.black)
-end
-
-local function powerLine(m, w, y)
-  m.setCursorPos(2, y); m.setTextColour(colours.lightGrey)
-  local txt = "Power " .. (power.pct and (power.pct .. "%") or "?") .. " "
-  if power.lowSim and power.lowSim < (E.FUEL_BELOW or 30) and (not power.pct or power.lowSim < power.pct) then
-    txt = ("Sim #%d %d%% "):format(colNum(power.lowSimName), power.lowSim)   -- one chamber is starving: say which
-  elseif power.cellPct and power.simPct and power.simPct + 10 < power.cellPct then
-    txt = ("Sims %d%% "):format(power.simPct)   -- the chambers are the bottleneck: say so
-  end
-  m.write(txt)
-  local tail = #L.furnators > 0 and (" Furnator " .. furnatorFuel) or ""
-  local bw = math.max(0, w - 2 - #txt - #tail - 1)
-  local frac = (power.pct or 0) / 100
-  bar(m, 2 + #txt, y, bw, frac, (power.pct or 0) < (E.LOW_POWER or 10) and colours.red or colours.lime)
-  m.setCursorPos(2 + #txt + bw, y); m.setTextColour(colours.lightGrey); m.write(tail)
-end
-
-local function drawOverview(m, w, h)
-  header(m, w, w >= 30 and "NEURAL LAB" or "NEURAL", false)
-  powerLine(m, w, 2)
-  m.setCursorPos(2, 3); m.setTextColour(colours.lightGrey)
-  m.write((L.direct and ("Matrices %d in storage"):format(dockMatrices) or ("Matrices %d here%s"):format(dockMatrices,
-    storageItems and (", " .. (tonumber(storageItems[MATRIX]) or 0) .. " stored") or "")):sub(1, w - 2))
-  m.setCursorPos(2, 4); m.setTextColour(next(problems) and colours.yellow or colours.white)
-  m.write(note:sub(1, w - 2))
-  -- The most useful problem, in words (the cards only have room for a state)
-  local first
-  for _, k in ipairs({ "ops", "dock", "dockfull", "counts", "fuel", "matrices", "error" }) do
-    if problems[k] then first = problems[k]; break end
-  end
-  if not first then for _, v in pairs(problems) do first = v; break end end
-  if first then
-    m.setCursorPos(2, 5); m.setTextColour(colours.red)
-    m.write((first:gsub("^Neural lab:? ?", "")):sub(1, w - 2))
-  end
-
-  local top = 6
-  if #L.chambers == 0 then
-    m.setCursorPos(2, top); m.setTextColour(colours.yellow)
-    m.write(("No chambers on the cable yet."):sub(1, w - 2))
-    return
-  end
-  -- As many cards per row as fit at 17+ characters each (a long wall needs a dense overview)
-  local perRow = math.max(1, math.floor((w - 1) / 18))
-  local cardW = math.min(24, math.max(12, math.floor((w - 1) / perRow) - 1))
-  local cardH = 5
-  local rowsFit = math.max(1, math.floor((h - top) / cardH))
-  local perPage = perRow * rowsFit
-  local pages = math.max(1, math.ceil(#L.chambers / perPage))
-  if view.list > pages then view.list = pages end
-  local first = (view.list - 1) * perPage + 1
-  for i = first, math.min(#L.chambers, first + perPage - 1) do
-    local c = L.chambers[i]
-    local p = P[c] or {}
-    local k = i - first
-    local x = 2 + (k % perRow) * (cardW + 1)
-    local y = top + math.floor(k / perRow) * cardH
-    local s = p.state or "?"
-    local col = STATE_COL[s] or colours.red
-    m.setCursorPos(x, y); m.setTextColour(colours.white)
-    m.write(("#%d %s"):format(i, p.mob or "empty"):sub(1, cardW))
-    m.setCursorPos(x, y + 1); m.setTextColour(col); m.write(s:sub(1, cardW))
-    m.setCursorPos(x, y + 2); m.setTextColour(colours.lightGrey); m.write(stockText(p):sub(1, cardW))
-    local foot = p.training and ("runs %d"):format((cfg.stats[c] or {}).runs or 0) or accText(cfg.stats[c])
-    m.setCursorPos(x, y + 3); m.setTextColour(colours.grey); m.write(foot:sub(1, cardW - 8))
-    hit(x, x + cardW - 1, y, y + 2, function() view.page = c end)
-    if p.mob and (p.f or not p.training) then
-      btn(m, x + cardW - 7, y + 3, " CHECK ", colours.cyan, function() check(c) end)
-    end
-  end
-  if pages > 1 then
-    local y = h
-    m.setCursorPos(2, y); m.setTextColour(colours.lightGrey)
-    btn(m, 2, y, " < ", colours.lightGrey, function() view.list = math.max(1, view.list - 1) end)
-    m.setCursorPos(6, y); m.setTextColour(colours.white); m.write(("%d/%d"):format(view.list, pages))
-    btn(m, 12, y, " > ", colours.lightGrey, function() view.list = math.min(pages, view.list + 1) end)
-  end
-end
-
-local function drawPage(m, w, h, c)
-  local p = P[c]
-  if not p then view.page = nil; return drawOverview(m, w, h) end
-  local i = colNum(c)
-  header(m, w, ("#%d %s"):format(i, p.mob or "empty"), true)
-  local y = 3
-  local function line(text, col)
-    if y > h then return end
-    m.setCursorPos(2, y); m.setTextColour(col or colours.lightGrey); m.write(tostring(text):sub(1, w - 2)); y = y + 1
-  end
-  local s = p.state or "?"
-  line(s, STATE_COL[s] or colours.red)
-  if p.training then
-    line("Training: levels the model", colours.purple)
-    line("Then Inference (its screen)", colours.grey)
-    line("when it's Self Aware", colours.grey)
-    line(("Keeps %d matrices spare"):format(math.floor(E.TRAIN_KEEP or 64)), colours.grey)
-  elseif not p.f then
-    line("No fab yet", colours.white)
-    line("Set it to Training and", colours.grey)
-    line("I'll feed it to level up", colours.grey)
-  end
-  if p.f then
-    if p.item then
-      line("Fab makes: " .. shortName(p.item), colours.white)
-    else
-      line("Fab makes: not seen yet", colours.white)
-    end
-    if p.switched and os.clock() - p.switched.at < 120 then
-      line(("Switched from %s"):format(shortName(p.switched.from)), colours.cyan)
-    end
-    line("Pick it in the fab's screen", colours.grey)
-  end
-  y = y + 1
-  if p.item then
-    local cap = p.cap or 0
-    line(("Stock %s / %s"):format(p.stock and tostring(p.stock) or "?", cap == 0 and "off" or tostring(cap)), colours.white)
-    if y <= h then
-      bar(m, 2, y, math.max(4, w - 4), cap > 0 and math.min(1, (p.stock or 0) / cap) or 0, colours.lightBlue); y = y + 1
-    end
-    if y <= h then
-      m.setCursorPos(2, y); m.setTextColour(colours.lightGrey); m.write("Target ")
-      local x = 9
-      local step = cap >= 256 and 64 or 16
-      x = btn(m, x, y, " - ", colours.lightGrey, function() setRule(p.item, math.max(0, cap - step)) end)
-      m.setCursorPos(x, y); m.setTextColour(colours.white)
-      local t = cap == 0 and "off" or tostring(cap)
-      m.write(t); x = x + #t + 1
-      btn(m, x, y, " + ", colours.lightGrey, function() setRule(p.item, cap + step) end)
-      y = y + 2
-    end
-  end
-  if y <= h then
-    m.setCursorPos(2, y); m.setTextColour(colours.lightGrey); m.write("Mode ")
-    local x = 7
-    local cur = cfg.force[c]
-    x = btn(m, x, y, " AUTO ", cur == nil and colours.lime or colours.lightGrey, function() setForce(c, nil) end)
-    x = btn(m, x, y, " ON ", cur == "on" and colours.lime or colours.lightGrey, function() setForce(c, "on") end)
-    x = btn(m, x, y, " OFF ", cur == "off" and colours.orange or colours.lightGrey, function() setForce(c, "off") end)
-    if p.mob and (p.f or not p.training) then
-      if x + 7 > w then y = y + 2; x = 7 end   -- narrow screen: CHECK on its own row
-      btn(m, x, y, " CHECK ", colours.cyan, function() check(c) end)
-    end
-    y = y + 2
-  end
-  local st = cfg.stats[c] or {}
-  line(("Runs %d, preds %d, %s"):format(st.runs or 0, st.preds or 0, accText(st)))
-  line(("Made %d, banked %d, in fab %d"):format(st.made or 0, p.bank or 0, p.fin or 0))
-  line(("Matrices %d, C%d%% F%d%%"):format(p.matrices or 0,
-    (p.cCap or 0) > 0 and math.floor(p.cEnergy / p.cCap * 100) or 0, (p.fCap or 0) > 0 and math.floor(p.fEnergy / p.fCap * 100) or 0))
-  y = y + 1
-  line(c, colours.grey)
-  line(p.f or "no fab paired", colours.grey)
-  line(p.l or "no lamp", colours.grey)
-  for k, msg in pairs(problems) do
-    if k:match("^[^:]+:(.*)$") == c then line((msg:gsub("^Neural lab column %d+ %b(): ", "")), colours.red) end
-  end
-end
-
-local function draw()
-  if not mon then return end
-  local w, h = mon.getSize()
-  if not w then findMonitor(); return end
-  hits = {}
-  mon.setBackgroundColour(colours.black); mon.clear()
-  if view.page then drawPage(mon, w, h, view.page) else drawOverview(mon, w, h) end
-end
-
 ---------------------------------------------------------------------------
 -- Loops
 ---------------------------------------------------------------------------
@@ -1250,28 +1038,11 @@ local function workLoop()
     local ok, err = pcall(pass)
     if not ok then note = "Error: " .. tostring(err); problem("error", true, "Neural lab error: " .. tostring(err))
     else problem("error", false) end
-    pcall(draw)
+    os.queueEvent("neural_draw")
     local t = os.startTimer(math.max(1, E.TICK or 2))
     while true do
       local ev, a = os.pullEvent()
       if (ev == "timer" and a == t) or ev == "neural_work" then break end
-    end
-  end
-end
-
-local function eventLoop()
-  while true do
-    local ev, a, b, c = os.pullEvent()
-    if ev == "monitor_touch" and mon and peripheral.getName(mon) == a then
-      for _, hz in ipairs(hits) do
-        if b >= hz.x1 and b <= hz.x2 and c >= hz.y1 and c <= hz.y2 then pcall(hz.fn); break end
-      end
-      pcall(draw)
-    elseif ev == "peripheral" or ev == "peripheral_detach" then
-      findMonitor()
-      os.queueEvent("neural_work")   -- a new column (or a removed one): pick it up now
-    elseif ev == "monitor_resize" then
-      findMonitor(); pcall(draw)
     end
   end
 end
@@ -1332,65 +1103,15 @@ local function netLoop()
   end
 end
 
-local function help()
-  print("status          what's going on")
-  print("list            what I found on my cable")
-  print("pairs           which fab and lamp go with each chamber")
-  print("check <n>       send one prediction through column n's fab")
-  print("                (no fab: feed one matrix to see if it's on Training)")
-  print("on|off|auto <n> force column n on / off, or back to its target")
-  print("pause | resume")
-  print("Settings: neural.env  Targets: neural.txt")
-end
-
-local function terminalLoop()
-  term.clear(); term.setCursorPos(1, 1)
-  print("Neural lab online.")
-  help()
-  while true do
-    print()
-    write("neural> ")
-    local q = read():lower()
-    local cmd, arg = q:match("^%s*(%a+)%s*(%d*)")
-    local n = tonumber(arg)
-    local c = n and L.chambers[n]
-    if cmd == "list" then
-      scan()
-      print("Chambers:  " .. (#L.chambers > 0 and table.concat(L.chambers, ", ") or "none"))
-      print("Fabs:      " .. (#L.fabs > 0 and table.concat(L.fabs, ", ") or "none"))
-      print("Lamps:     " .. (#L.lamps > 0 and table.concat(L.lamps, ", ") or "none"))
-      print("Furnators: " .. (#L.furnators > 0 and table.concat(L.furnators, ", ") or "none"))
-      print("Power:     " .. (#L.cells > 0 and table.concat(L.cells, ", ") or "none (using the machines' own)"))
-      print("Drops to:  " .. (L.direct and ("storage's input chest " .. tostring(L.out)) or tostring(L.dock or "no dock")))
-      if L.dockNote then printError(L.dockNote) end
-    elseif cmd == "pairs" then
-      for i, ch in ipairs(L.chambers) do
-        local lk = cfg.links[ch] or {}
-        print(("#%d %s"):format(i, ch))
-        print(("   fab %s, lamp %s"):format(tostring(lk.f or "none"), tostring(lk.l or "none")))
-      end
-      print("Wrong? PAIRS= in neural.env, e.g. PAIRS=3:5:2")
-    elseif cmd == "check" and c then
-      check(c); print("Checking column " .. n .. ".")
-    elseif (cmd == "on" or cmd == "off") and c then
-      setForce(c, cmd); print(("Column %d forced %s."):format(n, cmd))
-    elseif cmd == "auto" and c then
-      setForce(c, nil); print(("Column %d back on its target."):format(n))
-    elseif cmd == "pause" or cmd == "stop" then
-      setPaused(true); print("Paused.")
-    elseif cmd == "resume" or cmd == "go" or cmd == "run" then
-      setPaused(false); print("Running.")
-    elseif cmd == "status" or q:match("^%s*$") then
-      for _, l in ipairs(statusLines()) do print(l) end
-      for _, msg in pairs(problems) do printError(msg) end
-    else
-      if (cmd == "check" or cmd == "on" or cmd == "off" or cmd == "auto") and not c then
-        printError("Which column? e.g. " .. cmd .. " 1")
-      end
-      help()
-    end
-  end
-end
+-- The screens (neural_screens.lua): overview, column pages, reports and the typed commands
+local screens = require("neural_screens")({
+  snap = function()
+    return { L = L, P = P, cfg = cfg, E = E, problems = problems, power = power, note = note, state = stateWord(),
+             dockMatrices = dockMatrices, storageItems = storageItems, furnatorFuel = furnatorFuel }
+  end,
+  lines = statusLines, stockText = stockText, accText = accText, shortName = shortName, pathOf = pathOf,
+  setPaused = setPaused, setForce = setForce, check = check, setRule = setRule, scan = scan, findMonitor = findMonitor,
+})
 
 -- A wireless/ender modem reaches storage and the mainframe (the wired one is the lab cable)
 peripheral.find("modem", function(name, m)
@@ -1400,7 +1121,6 @@ end)
 readEnv()
 readRules()
 loadCfg()
-findMonitor()
 scan()
 note = cfg.paused and "Paused" or "Starting"
-parallel.waitForAny(workLoop, eventLoop, netLoop, lampLoop, terminalLoop)
+parallel.waitForAny(workLoop, netLoop, lampLoop, screens.run)
