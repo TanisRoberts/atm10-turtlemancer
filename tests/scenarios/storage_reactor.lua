@@ -69,7 +69,7 @@ T.test("reactor fuel: topped up after the reactor takes some, and nothing is pul
   c:type("/tidy"); c:key(257); w:run(20)
   c:type("/rescan"); c:key(257); w:run(20)
   T.eq(chest:count(INGOT), 64)
-  T.eq(inv[2]:count(INGOT), 136, "the store kept the rest")
+  T.eq(inv[2]:count(INGOT), 106, "200 - 64 - the 30 refilled")
 end)
 
 T.test("reactor fuel: more in the chest than keep is left alone, never taken back", function()
