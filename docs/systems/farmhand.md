@@ -27,3 +27,7 @@ Each view (the computer's own screen and a monitor, which may differ in size) ke
 ## Tests
 
 `tests/scenarios/farmhand_screens.lua` runs the real Farmhand with stand-in turtles (`tests/demo/farm_stub.lua`) at 57x24 (monitor) and 51x19, 39x13 and 26x20: tiles and colours, orders to one and to all, settings and the gold pending value, Info/Haul, Forget, Found, a big farm with pan and Follow, separate pages per view, no modem, a reboot, no colour.
+
+## Typed commands
+
+On the computer's own screen (not a monitor), with or without the `/`: `/status` (turtles, how many are working, who needs you) and `/help [command]`. The bar is on the overview; typing `/` lists them (`shared/slash.lua`, `docs/systems/ui.md`).

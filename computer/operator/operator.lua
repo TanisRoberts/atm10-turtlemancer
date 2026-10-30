@@ -345,7 +345,8 @@ local function onEvent(ev, a, b, c3)
   end
 end
 
-local ctx = { ctl = ctl, E = E }
+local cmds = require("opcmd")(ctl)
+local ctx = { ctl = ctl, E = E, commands = cmds:commands() }
 ui.run(views, function(v)
   ctx.rec, ctx.now = st.rec, os.clock()
   local ok, err = pcall(screen.draw, v, ctx)

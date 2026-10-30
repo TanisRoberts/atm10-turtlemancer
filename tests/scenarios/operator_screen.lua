@@ -312,3 +312,32 @@ T.test("operator screen: a monitor can pick a port from the list (no typing ther
   touch(world, m, "out_1", 0); touch(world, m, "out_1", 0)
   T.eq(c:readTable("operator.cfg").units["BigReactors-Reactor_0"].output, "out_1")
 end)
+
+T.test("operator screen: typed commands, with and without the slash; a monitor has no command bar", function()
+  local world, c, m, ra, rb = build(51, 19, { 51, 19 })
+  local KEYS = ENV.keys
+  local s = c.screen
+  T.contains(s:line(18), "/ = commands")
+  T.absent(m:text(), "/ = commands", "the wall monitor has no keyboard")
+  local function run(line) c:type(line); world:run(0.3); c:key(KEYS.enter); world:run(0.5) end
+  c:type("/"); world:run(0.3)
+  for _, name in ipairs({ "/status", "/on", "/off", "/auto", "/level", "/help" }) do T.contains(s:text(), name) end
+  c:key(KEYS.backspace); world:run(0.3)
+  run("/help")
+  T.contains(s:line(2), "/status"); T.contains(s:line(2), "/on")
+  run("status")
+  T.contains(s:line(2), "of 2 reactors on")
+  run("/off reactor-1")
+  T.waitFor(world, function() return not ra.on end, 10, "/off ignored")
+  T.contains(s:line(2), "Reactor-1: OFF")
+  run("on 1")
+  T.waitFor(world, function() return ra.on end, 10, "on ignored")
+  run("/auto")
+  T.eq(c:readTable("operator.cfg").units["BigReactors-Reactor_1"].mode, "auto")
+  run("/level 55 2")
+  T.contains(s:line(2), "Reactor-2: level 55% held")
+  run("/level abc")
+  T.contains(s:line(2), "not a whole number")
+  run("/on 9")
+  T.contains(s:line(2), "No reactor '9'")
+end)

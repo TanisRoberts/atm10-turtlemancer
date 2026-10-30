@@ -61,6 +61,8 @@ Protocol `tanis-operator`, a `{type="operator", units={...}, plant={...}}` broad
 - **Alerts** (same mechanism as the rest, `island alerts` to subscribe): `Reactor silent` (no heartbeat for `OPERATOR_SILENT_AFTER`, 60 s), `Fuel supply low` (Storage reports fewer than `URANIUM_LOW`, 16 ingots), `waste not clearing` and `not answering` / `not on the cable`, each naming the reactor. Both numbers are in `island.env` on the mainframe.
 - **Chat**: `island operator [reactor] on|off|auto|status` (reactor as `reactor-1`, `1` or `reactor 1`; none = every reactor; `status` is the default). `status` replies with one line. An order goes out as `{type="operator_cmd", unit, mode}` three times, one a second apart, and the Operator saves the mode in `operator.cfg`. The existing chat commands have no player list, and neither does this one.
 
+- **Typed commands** (computer terminal only, `computer/operator/opcmd.lua` on `shared/slash.lua`; with or without the `/`; the bar is on the overview): `/status` (reactors on, FE/t, buffer), `/on [reactor]`, `/off [reactor]`, `/auto [reactor]`, `/level <percent> [reactor]` (a hold, like the level buttons), `/help [command]`. Reactor as `1`, `reactor-1` or `reactor 1`; none = every reactor. They go through `opctl`, so they do what the screen's buttons do.
+
 ## Log
 
 `operator.log` records what was found at boot (every peripheral name and type on the cable, then the reactor and its ports), every on/off with the buffer, "waste not clearing", and what a full-buffer reactor does (burn and FE/t), so the real passive behaviour can be confirmed.
