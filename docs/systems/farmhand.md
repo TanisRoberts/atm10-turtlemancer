@@ -30,4 +30,4 @@ Each view (the computer's own screen and a monitor, which may differ in size) ke
 
 ## Typed commands
 
-On the computer's own screen (not a monitor), with or without the `/`: `/status` (turtles, how many are working, who needs you) and `/help [command]`. The bar is on the overview; typing `/` lists them (`shared/slash.lua`, `docs/systems/ui.md`).
+On the computer's own screen (not a monitor), with or without the `/` (a bare `status` + Enter runs it): `/status` (turtles, how many are working, who needs you) and `/help [command]`. The bar is on the overview; typing `/` lists them (`shared/slash.lua`, `docs/systems/ui.md`).

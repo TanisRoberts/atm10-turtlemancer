@@ -114,4 +114,6 @@ T.test("slash: Farmhand terminal takes /status and /help; a monitor shows no com
   fh:type("/help"); w:run(0.3); fh:key(KEYS.enter); w:run(0.3)
   T.contains(scr:line(2), "/status")
   T.contains(scr:line(2), "/help")
+  fh:type("status"); w:run(0.3); fh:key(KEYS.enter); w:run(0.3)    -- without the slash
+  T.contains(scr:line(2), "no farm turtles yet")
 end)

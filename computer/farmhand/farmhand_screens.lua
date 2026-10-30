@@ -198,7 +198,12 @@ return function(F)
       })
     end
     if typed then
-      st.field = st.field or ui.field({ hint = "search" })
+      st.field = st.field or ui.field({ hint = "search", on_commit = function(text)   -- a bare command word runs too
+        local w = text:match("^%s*/?(%S+)")
+        for _, c in ipairs(F.commands) do
+          if w and c.name == w:lower() then st.field.text = ""; c.fn(text:match("^%s*/?%S+%s*(.-)%s*$")); return end
+        end
+      end })
       v:search(st.field, { hint = "/ = commands (/status, /help)", commands = F.commands })
     end
     v:footer({})

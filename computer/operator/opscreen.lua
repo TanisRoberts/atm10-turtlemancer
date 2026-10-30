@@ -272,7 +272,8 @@ local function overview(v, ctx, R, t)
   end
   if not v.side and ctx.commands then   -- only the computer's own screen has a keyboard
     local o = opState(v)
-    o.cmdField = o.cmdField or ui.field({ hint = "command", max = 40 })
+    o.cmdField = o.cmdField or ui.field({ hint = "command", max = 40,
+      on_commit = function(text) o.cmdField.text = ""; if text ~= "" then ctx.exec(text) end end })
     v:search(o.cmdField, { hint = "/ = commands (/status, /help)", commands = ctx.commands })
   end
   v:footer({ back = function() ui.say("This is the top page. Hold Ctrl+T to stop the Operator.", "fg") end })

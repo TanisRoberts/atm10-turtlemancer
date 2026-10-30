@@ -324,7 +324,7 @@ T.test("operator screen: typed commands, with and without the slash; a monitor h
   for _, name in ipairs({ "/status", "/on", "/off", "/auto", "/level", "/help" }) do T.contains(s:text(), name) end
   c:key(KEYS.backspace); world:run(0.3)
   run("/help")
-  T.contains(s:line(2), "/status"); T.contains(s:line(2), "/on")
+  T.contains(s:line(2), "/status"); T.contains(s:line(2), "/on")  -- bare words run too (no list to search here)
   run("status")
   T.contains(s:line(2), "of 2 reactors on")
   run("/off reactor-1")
