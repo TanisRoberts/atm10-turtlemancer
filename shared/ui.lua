@@ -396,7 +396,7 @@ end
 ---------------------------------------------------------------------------------------------------------
 -- Steppers (4.3)
 ---------------------------------------------------------------------------------------------------------
--- v:stepper(x, y, "Mine depth", value, { min=, max=, step=1, on = function(newValue) end, pending = false })
+-- v:stepper(x, y, "Mine depth", value, { min=, max=, step=1, on = function(newValue) end, pending = false, small = false })
 -- `-` value `+`, and on regular and wide screens `<<` `>>` for ten steps. At its minimum the `-` is disabled;
 -- at its maximum the `+`. A value sent but not yet confirmed (pending) is gold. Narrow screens stack the label
 -- above. Keys when focused: Left/Right or - / + one step, PgUp/PgDn ten. Returns the next free x and the row.
@@ -417,7 +417,7 @@ function View:stepper(x, y, label, value, o)
   else
     cx = self:put(x, y, label .. " ", "fg", "bg")
   end
-  local big = self.wc == "regular" or self.wc == "wide"
+  local big = (self.wc == "regular" or self.wc == "wide") and not o.small   -- small = true: no ten-step pills
   local atMin = lo and value <= lo
   local atMax = hi and value >= hi
   local focused = self.focus == id

@@ -60,7 +60,7 @@ Miner (`turtle/miner/`, all in `manifest.lua`): `miner.lua` is the header and a 
 
 Fuel, GPS, the dock report and chunk loading come from the turtle core (`docs/systems/turtle.md`): `core.fuel`, `core.gps`, `core.dock`, `core.chunk`. The miner has no fuel table, refuel loop or `gps.locate` of its own.
 
-Foremans share one engine in `shared/fm*.lua` (each a `return function(F) ... end` part on one table `F`, loaded like the turtle core): the registry (numbers, orders, presets), the barrel jobs (dock passes, stock and keep rules, output home, overflow, the factory, `dock_req`), the screens (overview, a miner's page, presets, rules, `/assign`), the miner radio and the remote link. A Foreman program is a profile (dimension, bird, protocol, config file, barrel jobs, presets) plus `dofile("fm.lua")(profile)`.
+Foremans share one engine in `shared/fm*.lua` (each a `return function(F) ... end` part on one table `F`, loaded like the turtle core): the registry (numbers, orders, presets), the barrel jobs (dock passes, stock and keep rules, output home, overflow, the factory, `dock_req`), the screens (overview, a miner's page, presets, rules, `/assign`; the Overworld Foreman draws itself on the UI kit instead, `docs/systems/foreman.md`), the miner radio and the remote link. A Foreman program is a profile (dimension, bird, protocol, config file, barrel jobs, presets) plus `dofile("fm.lua")(profile)`.
 
 ## MD Foreman barrel jobs
 

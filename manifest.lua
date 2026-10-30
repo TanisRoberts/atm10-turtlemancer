@@ -69,7 +69,7 @@ local M = {
             .. "layers, start or dock it, reboot or retire it. Canaries and Firecrests through their own Foreman "
             .. "(MD, Nether); Starlings directly. Needs an ender modem and an advanced monitor.",
           run = "foreman",
-          files = { "computer/foreman/foreman.lua", "shared/assignui.lua", "shared/screens.lua", "shared/ui.lua", "shared/ui_widgets.lua", "shared/ui_parts.lua", "shared/ui_motion.lua",
+          files = { "computer/foreman/foreman.lua", "computer/foreman/foreman_screens.lua", "shared/slash.lua", "shared/assignui.lua", "shared/screens.lua", "shared/ui.lua", "shared/ui_widgets.lua", "shared/ui_parts.lua", "shared/ui_motion.lua",
                     "shared/fm.lua", "shared/fm_reg.lua", "shared/fm_barrels.lua", "shared/fm_draw.lua", "shared/fm_pages.lua",
                     "shared/fm_edit.lua", "shared/fm_cmd.lua", "shared/fm_net.lua", "shared/fm_remote.lua" },
         },

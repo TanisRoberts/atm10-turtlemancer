@@ -10,7 +10,8 @@
 --    protocol, config, regKey ("firecrests"), oldKey/oldPrefix (names from before the rename), dim,
 --    defR2, yMin, yMax, newEntry ({ minY, maxY }), presets, keep, junk (nil: the miners keep their own),
 --    lava (Firecrest's drink-lava rule), fuelTarget (Canary's top-up rule), barrels (a cable with jobs),
---    jobs (the barrel jobs offered, in order), help (the /help line), remote ("dimension" or "hub").
+--    jobs (the barrel jobs offered, in order), help (the /help line), remote ("dimension" or "hub"),
+--    screens (a function(F) that draws the Foreman on the UI kit instead of fm_draw/fm_pages/fm_edit/fm_cmd).
 local PARTS = { "fm_reg.lua", "fm_barrels.lua", "fm_draw.lua", "fm_pages.lua", "fm_edit.lua", "fm_cmd.lua",
   "fm_net.lua", "fm_remote.lua" }
 
@@ -22,5 +23,6 @@ return function(P)
     local src = f.readAll(); f.close()
     assert(load(src, "@" .. name, "t", F))()
   end
+  if P.screens then P.screens(F) end   -- a profile on the UI kit replaces the engine's drawing and input (foreman_screens.lua)
   F.start()
 end

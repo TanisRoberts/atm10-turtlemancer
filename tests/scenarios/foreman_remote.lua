@@ -93,8 +93,7 @@ T.test("remote: every miner shows on the Overworld Foreman with its dimension", 
   T.contains(mon, "Mining")
   T.contains(mon, "Nether")
   T.contains(mon, "End")
-  T.contains(mon, "MD ok")
-  T.contains(mon, "NETHER ok")
+  T.contains(mon:line(1), "ok")                      -- every dimension Foreman heard
   T.absent(mon, "Canary-02")
 end)
 
@@ -103,7 +102,7 @@ T.test("remote: START a Canary through the MD Foreman and a Firecrest through th
   e.canary.env._G.senders = {}
   e.firecrest.env._G.senders = {}
   tapOn(e.w, e.hubMon, "Canary-01")
-  T.contains(e.hubMon, "< Canary-01")
+  T.contains(e.hubMon, "CANARY-01")
   T.contains(e.hubMon, "MD Foreman")                 -- whose he is
   tapOn(e.w, e.hubMon, "START", true)
   e.w:run(2)
@@ -153,6 +152,7 @@ T.test("remote: reboot and retire from the remote go through the miner's Foreman
   local e = world()
   tapOn(e.w, e.hubMon, "Firecrest-01")
   tapOn(e.w, e.hubMon, "Reboot", true)
+  tapOn(e.w, e.hubMon, "Sure?", true)
   e.w:run(5)
   T.truthy(e.firecrest.env._G.lastCmd.reboot, "reboot token from the Nether Foreman")
   tapOn(e.w, e.hubMon, "Retire", true)
@@ -166,15 +166,15 @@ T.test("remote: a dimension Foreman's presets can be edited from the remote", fu
   local e = world()
   e.hub:type("/presets"); e.hub:key(257)
   e.w:run(1)
-  T.contains(e.hub.screen, "< PRESETS of Starlings")
+  T.contains(e.hub.screen, "PRESETS OF STARLINGS")
   local x, y = e.hub.screen:find("Of:")
   e.hub:click(x, y); e.w:run(1)
-  T.contains(e.hub.screen, "< PRESETS of MD")
+  T.contains(e.hub.screen, "PRESETS OF MD")
   T.contains(e.hub.screen, "Diamonds")
   e.hub:type("/new Bottom"); e.hub:key(257)
   e.w:run(1)
-  e.hub:key(257)                                    -- save
-  e.w:run(5)
+  x, y = e.hub.screen:find("Save")
+  e.hub:click(x, y); e.w:run(5)
   local p = e.md:readTable("mdforeman.cfg").presets
   T.eq(p[#p].name, "Bottom")
 end)

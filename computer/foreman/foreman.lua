@@ -20,12 +20,13 @@
 --   "Of:", a dimension Foreman's. Type /presets on the computer (/help lists the commands).
 
 -- The Foreman engine (shared/fm*.lua) does the work; this is what makes it the Overworld's remote.
+-- What it shows is computer/foreman/foreman_screens.lua, on the UI kit (docs/systems/foreman.md).
 dofile("fm.lua")({
   title = "FOREMAN", short = "FOREMAN", name = "the Foreman", place = "the Overworld",
   bird = "Starling", birds = "miners", one = "miner", unit = "miner", birdNames = { Canary = true, Starling = true },
   protocol = "tanis-miner", config = "foreman.cfg", regKey = "canaries", oldKey = "diggers", oldPrefix = "Digger", oldBird = "Canary",
   dim = "overworld", defR2 = 3, yMin = -63, yMax = 319, newEntry = { minY = -59, maxY = -58 },
-  help = "/presets /new /edit /delete <name>  /reboot /redock <miner|all>  /home",
+  help = "/presets /new /edit /delete <name>  /reboot /redock <miner|all>  /retired /home",
   emptyText = {
     "No miners yet.",
     "Canaries come from the MD Foreman, Firecrests from the Nether",
@@ -41,4 +42,5 @@ dofile("fm.lua")({
     { name = "Copper",    minY =  45, maxY =  51, r1 = 0, r2 = 3 },
   },
   remote = "hub",
+  screens = require("foreman_screens"),
 })
