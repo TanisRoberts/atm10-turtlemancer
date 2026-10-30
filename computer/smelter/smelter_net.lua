@@ -134,6 +134,9 @@ cmds:add({ name = "enrich", args = "add <item> | forget <ore> | remove <item>", 
     return false
   end })
 
+cmds:add({ name = "monitors", help = "pick the smelter monitor again (reboots)", max = 0,
+  run = function() S.repickMonitor(); return true end })
+
 S.cmds = cmds
 
 ---------------------------------------------------------------------------

@@ -17,15 +17,13 @@ S.views = views
 
 local function stateFor(v) return states[v.side and "monitor" or "term"] end
 
-local function findMonitor()
-  for _, side in ipairs(rs.getSides()) do
-    if peripheral.hasType(side, "monitor") then return peripheral.wrap(side), side end
-  end
-end
+-- shared/screens.lua picks the monitor (docs/systems/screens.md): the biggest one touching the computer, else the
+-- one picked from the cable. Asked once at start; a resized or lost monitor reboots (screensLoop below).
+local screens = require("screens").new({ slots = { { id = "screen", label = "the smelter screen", required = false, scale = TEXT_SCALE } } })
+screens:open()
+local picked = { screens:get("screen") }        -- may ask, now, before anything else runs
 local function syncMonitor()
-  local mon, side = findMonitor()
-  if views[2] and views[2].side == side then views[2].t = mon or views[2].t; views[2]:measure(); return end
-  views[2] = mon and ui.view(mon, { side = side, scale = TEXT_SCALE }) or nil
+  views[2] = picked[1] and ui.view(picked[1], { side = picked[2], scale = TEXT_SCALE }) or nil
 end
 
 -- Show a page on a view. The page's own state (a selected factory, the recipe being edited, ...) starts empty;
@@ -142,11 +140,17 @@ end
 local function uiLoop()
   ui.loadAnim("smelter.env")
   syncMonitor()
-  ui.run(views, draw, { tick = 1, on_event = function(e)
-    if e == "peripheral" or e == "peripheral_detach" or e == "monitor_resize" then syncMonitor() end
-  end })
+  ui.run(views, draw, { tick = 1 })
 end
 
+-- Answers other computers' monitor claims; a resized or unplugged monitor reboots, which fits or asks again.
+local function screensLoop()
+  parallel.waitForAny(function() screens:daemon() end, function() os.pullEvent("screens_changed") end)
+  os.reboot()
+end
+function S.repickMonitor() screens:repick("screen"); os.reboot() end
+
 S.go, S.say, S.wrap, S.text, S.beat, S.plan = go, say, wrap, text, beat, plan
-S.termView, S.monView, S.stateFor, S.uiLoop = termView, monView, stateFor, uiLoop
+S.termView, S.monView, S.stateFor = termView, monView, stateFor
+S.uiLoop = function() parallel.waitForAny(uiLoop, screensLoop) end
 end

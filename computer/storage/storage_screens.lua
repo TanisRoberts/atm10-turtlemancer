@@ -43,17 +43,15 @@ local function take(e)
 end
 
 ---------------------------------------------------------------------------
--- Views: the computer's own screen and the monitor touching it. Only a monitor touching a side belongs to this
--- computer (screens out on the cable belong to other computers); this is the one place that looks for it.
+-- Views: the computer's own screen and the monitor. shared/screens.lua picks the monitor (docs/systems/screens.md):
+-- the biggest one touching the computer, else the one picked from the cable. This is the one place that asks.
 ---------------------------------------------------------------------------
+local screens = require("screens").new({ slots = { { id = "screen", label = "the storage screen", required = false, scale = TEXT_SCALE } } })
+screens:open()
 local function findMonitor()
-  for _, side in ipairs(rs.getSides()) do
-    if peripheral.hasType(side, "monitor") then
-      local m = peripheral.wrap(side)
-      local ok, w = pcall(m.getSize)
-      if ok and w then return m, side end
-    end
-  end
+  local mon, name = screens:get("screen")
+  if mon and not pcall(mon.getSize) then return nil end
+  return mon, name
 end
 
 local termView = ui.view(term.current())
@@ -94,6 +92,8 @@ function Scr.addViewCommands()
       S.cfg().sort = w; S.saveCfg(); S.buildItems(); state.page = "list"
       return true, w == "az" and "Sorted A-Z" or "Sorted by count"
     end })
+  cmds:add({ name = "monitors", max = 0, help = "pick the storage monitor again (reboots)",
+    run = function() screens:repick("screen"); os.reboot(); return true end })
   cmds:add(cmds.byName.help)
 end
 
@@ -248,13 +248,17 @@ end
 
 local function monLoop()
   while true do
-    ui.run(monViews, draw, { tick = 1, on_event = function(e)
-      if e == "peripheral" or e == "peripheral_detach" or e == "monitor_resize" then syncMonitor() end
-    end })
+    ui.run(monViews, draw, { tick = 1 })
   end
 end
 
-function Scr.loop() parallel.waitForAny(termLoop, monLoop) end
+-- Answers other computers' monitor claims; a resized or unplugged monitor reboots, which fits or asks again.
+local function screensLoop()
+  parallel.waitForAny(function() screens:daemon() end, function() os.pullEvent("screens_changed") end)
+  os.reboot()
+end
+
+function Scr.loop() parallel.waitForAny(termLoop, monLoop, screensLoop) end
 
 return Scr
 end

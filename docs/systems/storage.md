@@ -12,7 +12,7 @@ The only computer that moves items in or out of storage. This note covers the sc
 
 ## Screens
 
-Two kit views run side by side: the computer's own screen and the one monitor touching the computer (`Scr.findMonitor`, the only place that looks for it; the view is given the monitor's peripheral name). Each has its own kit loop, so a long command on the computer never freezes the monitor.
+Two kit views run side by side: the computer's own screen and the one monitor, picked by `shared/screens.lua` (`Scr.findMonitor`, the only place that asks; slot `screen`): the biggest one touching the computer, else the one you picked from the cable (see `docs/systems/screens.md`). The view is given the monitor's peripheral name, so taps on a wired monitor find it. `/monitors` forgets the pick and reboots, which asks again; a resized or unplugged monitor reboots too. Each has its own kit loop, so a long command on the computer never freezes the monitor.
 
 **Item list.** Header `STORAGE`, state `ok` (or `NN% full` in orange from 90%), slots used/total on regular and wide screens (`Fuel NN%` first when there are fuel barrels, `MONITOR LOCKED` on the computer while locked). Row 3: `Sort Qty A-Z`. Take amount `x1 x16 Stack` (default Stack) sits on that row on the computer when it is 39 wide or more, in the footer on a monitor 30 wide or more, on a row of its own on a narrower monitor; a narrow computer uses `/x1 /x16 /stack`. Tapping an item (or Enter on the search bar for the top match) sends that amount to the output chest. The notice row says what was sent. The wheel and pager page the list.
 

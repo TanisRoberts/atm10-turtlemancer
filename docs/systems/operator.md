@@ -31,7 +31,7 @@ Four pages (style A, design in `docs/design/operator.md`): found, inlet, outlet,
 
 ## Screens (`opscreen.lua`, `opwall.lua`, UI kit)
 
-Design: `docs/design/operator.md`. The computer's screen and every monitor touching a side are separate views, each with its own page. Taps and keys work on all of them.
+Design: `docs/design/operator.md`. The computer's screen and every monitor touching a side are separate views, each with its own page. Taps and keys work on all of them. With none touching, `shared/screens.lua` (slot `screen`, `docs/systems/screens.md`) numbers the monitors on the cable and you tap one; that view works the same. `/monitors` forgets the pick and reboots; a resized or unplugged wired monitor reboots too.
 
 - **Overview**: 50 wide or more has the Power Grid column (totals over every reactor, net FE/t from the last minute) and a 5-row tile per reactor (stripe: orange when something is missing, lime running, light blue idle, grey not heard for 30 s). 36 to 49 wide has a totals strip and 2-row tiles; narrower, the 26-wide layout. A tap opens the reactor on its Power tab. One reactor on a screen under 50 wide opens straight on Power.
 - **Power**: rods (grey inserted, lime withdrawn, light blue when off), the level stepper (5% a tap, stops at Lowest and Highest with a notice), the Run switch AUTO / ON / OFF, buffer bar with the ON and OFF marks, fuel and temperatures. Stepping the level in Auto forces ON and holds it for `HOLD_MIN` minutes (`Manual Hold:` with the countdown at the right edge); AUTO returns at once. In Auto the page shows `Auto set:` with how long ago, at the right, and why below.

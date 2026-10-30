@@ -305,7 +305,10 @@ plant:scan(); st.lastScan = os.clock()
 report()
 event("Operator", ("started, %d reactor%s found"):format(#plant.found.reactor, #plant.found.reactor == 1 and "" or "s"))
 
--- The computer's screen and each monitor touching a side
+-- The computer's screen and every monitor touching a side, plus one picked from the cable when none touches
+-- (shared/screens.lua, docs/systems/screens.md). A touching monitor wins with no prompt.
+local screens = require("screens").new({ slots = { { id = "screen", label = "the operator screen", required = false } } })
+screens:open()
 local views = { ui.view(term.current()) }
 local SIDES = { "top", "bottom", "left", "right", "front", "back" }
 local function syncViews()
@@ -321,10 +324,15 @@ local function syncViews()
   end
 end
 syncViews()
-
+do
+  local mon, name = screens:get("screen")      -- may ask, before the loop starts
+  local have = false
+  for i = 2, #views do if views[i].side == name then have = true end end
+  if mon and not have then views[#views + 1] = ui.view(mon, { side = name }) end
+end
 local timer = os.startTimer(0)
 ctlHooks.kick = function() if timer then os.cancelTimer(timer) end; timer = os.startTimer(0.05) end
-local function onEvent(ev, a, b, c3)
+local function onEvent(ev, a, b, c3, d)
   if ev == "timer" and a == timer then
     local ok, err = pcall(tick)
     if not ok then log("tick failed: " .. tostring(err)) end
@@ -343,9 +351,13 @@ local function onEvent(ev, a, b, c3)
     st.dirty = true
     syncViews()
   end
+  screens:handle(ev, a, b, c3, d)
+  if ev == "screens_changed" then os.reboot() end   -- a wired monitor resized or unplugged: fit or ask again
 end
 
 local cmds = require("opcmd")(ctl)
+cmds:add({ name = "monitors", help = "pick the operator monitor again (reboots)", max = 0,
+  run = function() screens:repick("screen"); os.reboot(); return true end })
 local ctx = { ctl = ctl, E = E, commands = cmds:commands(), exec = function(line) cmds:exec(line) end }
 ui.run(views, function(v)
   ctx.rec, ctx.now = st.rec, os.clock()
