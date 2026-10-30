@@ -322,7 +322,9 @@ local function levelText(r) return r.level and (floor(r.level + 0.5) .. "%") or 
 S.fuelPct = fuelText
 
 local function inletText(r)
-  return r.uranium and (fuelText(r) .. "  " .. D.num(r.uranium) .. " in inlet") or fuelText(r)
+  local s = r.uranium and (fuelText(r) .. "  " .. D.num(r.uranium) .. " in inlet") or fuelText(r)
+  if r.fuelChest then s = s .. "  " .. D.num(r.fuelChest) .. " in chest" end
+  return s
 end
 
 local function powerTab(v, ctx, r)
@@ -381,6 +383,7 @@ local function powerTab(v, ctx, r)
     local y = D.buffer(v, 2, 12, W - 2, r.buf, r.onBelow or 0.3, r.offAbove or 0.9, "Buffer")
     v:kv(2, y + 1, W - 2, "Fuel", fuelText(r))
     v:kv(2, y + 2, W - 2, "Temp", ("%sC / %sC"):format(D.num(r.fuelTemp), D.num(r.casing)))
+    if r.fuelChest and y + 3 < H - 1 then v:kv(2, y + 3, W - 2, "Chest", D.num(r.fuelChest)) end
   end
 end
 
@@ -564,8 +567,8 @@ local function reactorPage(v, ctx, r)
 end
 
 -- A need's own page: the reason in full and how to fix it -----------------------------------------------------------
-local ROLE = { fuelIn = "input", fuel = "input", wasteOut = "output", wasteTo = "output" }
-local ROLE_NAME = { input = "inlet", output = "outlet" }
+local ROLE = { fuelIn = "input", fuel = "input", wasteOut = "output", wasteTo = "output", fuelChest = "fuelChest", wasteChest = "wasteChest" }
+local ROLE_NAME = { input = "inlet", output = "outlet", fuelChest = "fuel chest", wasteChest = "waste chest" }
 
 local function findNeed(r, key)
   for _, n in ipairs(r.needs or {}) do if n.key == key then return n end end
@@ -592,7 +595,7 @@ local function needPage(v, ctx, r)
   if role and unit then
     local cur = unit.cfg[role]
     y = D.section(v, 2, y, W - 2, "FIX")
-    v:kv(2, y, W - 2, "Its " .. ROLE_NAME[role] .. " port", cur or "auto-detect", cur and "fg" or "dim")
+    v:kv(2, y, W - 2, "Its " .. ROLE_NAME[role] .. (role:find("Chest") and "" or " port"), cur or "auto-detect", cur and "fg" or "dim")
     y = y + 1
     v:buttons(2, y, {
       { label = "Manually assign", short = "Assign", fn = function()

@@ -175,6 +175,8 @@ return function(plant, E, hooks)
     for _, r in ipairs(reactors(nil)) do
       if r.cfg.input then taken[r.cfg.input] = r.label .. " inlet" end
       if r.cfg.output then taken[r.cfg.output] = r.label .. " outlet" end
+      if r.cfg.fuelChest then taken[r.cfg.fuelChest] = r.label .. " fuel chest" end
+      if r.cfg.wasteChest then taken[r.cfg.wasteChest] = r.label .. " waste chest" end
     end
     for _, n in ipairs(plant.found and plant.found.port or {}) do isPort[n] = true end
     local u = ref and reactors(ref)[1]
@@ -206,27 +208,31 @@ return function(plant, E, hooks)
     return out
   end
 
-  -- Say which port is a reactor's inlet or outlet (role "input" | "output"); name nil = back to auto-detect.
-  -- A port another reactor held is taken from it. Returns a notice text when it took one.
+  -- Say which device is a reactor's inlet, outlet, fuel chest or waste chest (role "input" | "output" | "fuelChest" |
+  -- "wasteChest"); name nil = back to auto-detect. A device another role or reactor held is taken from it.
+  -- Returns a notice text when it took one.
+  local ROLES = { "input", "output", "fuelChest", "wasteChest" }
+  local ROLE_WORD = { input = "inlet", output = "outlet", fuelChest = "fuel chest", wasteChest = "waste chest" }
   function C.assign(ref, role, name)
-    if role ~= "input" and role ~= "output" then return end
+    if not ROLE_WORD[role] then return end
     local u = reactors(ref)[1]
     if not u then return end
     local note
     if name then
       for _, r in ipairs(reactors(nil)) do
         if r ~= u then
-          for _, k in ipairs({ "input", "output" }) do
-            if r.cfg[k] == name then r.cfg[k] = nil; note = name .. " was " .. r.label .. "'s " .. (k == "input" and "inlet" or "outlet") end
+          for _, k in ipairs(ROLES) do
+            if r.cfg[k] == name then r.cfg[k] = nil; note = name .. " was " .. r.label .. "'s " .. ROLE_WORD[k] end
           end
         end
       end
-      local other = role == "input" and "output" or "input"
-      if u.cfg[other] == name then u.cfg[other] = nil end
+      for _, k in ipairs(ROLES) do
+        if k ~= role and u.cfg[k] == name then u.cfg[k] = nil end
+      end
     end
     u.cfg[role] = name
     u.wTrack, u.wasteStuck = nil, false
-    log(("%s %s port %s"):format(u.label, role == "input" and "inlet" or "outlet", name and ("= " .. name) or "back to auto"))
+    log(("%s %s %s"):format(u.label, ROLE_WORD[role], name and ("= " .. name) or "back to auto"))
     plant:save(); rescan(); kick()
     return note
   end

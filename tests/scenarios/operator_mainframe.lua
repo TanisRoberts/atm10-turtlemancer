@@ -50,6 +50,12 @@ local function build(opts)
     units["BigReactors-Reactor_1"] = { kind = "reactor", num = 2, label = "Reactor-2", mode = "auto", enabled = true, input = "in_1", output = "out_1" }
   end
   if opts.fullOutlet then outP:give("bigreactors:cyanite_ingot", 64 * 9) end
+  for _, u in pairs(units) do            -- the reactor room's two ender chests; a full outlet means the waste chest is full too
+    u.fuelChest, u.wasteChest = "enderstorage:ender_chest_" .. (2 * u.num - 2), "enderstorage:ender_chest_" .. (2 * u.num - 1)
+    net:add(u.fuelChest, cc.Inv.new{ size = 27 })
+    local wc = net:add(u.wasteChest, cc.Inv.new{ size = opts.fullOutlet and 1 or 27 })
+    if opts.fullOutlet then wc:give("bigreactors:cyanite_ingot", 64) end
+  end
   local opc = world:computer{ id = 5, label = "Operator" }
   opc:attach("back", cc.wired(net)); opc:attach("top", cc.wireless{ ender = true })
   opc:installRole("operator")

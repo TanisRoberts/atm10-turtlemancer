@@ -3,8 +3,10 @@
 -- Needs: an advanced computer with a wired modem on the cable that holds the reactor (computer port) and its inlet and
 -- outlet access ports (the cable is shared with Storage; everything that isn't a reactor or its ports is ignored), plus
 -- a wireless or ender modem for the mainframe.
--- The Operator never moves items. Storage fills the inlet port and drains the outlet port (issue #37); the Operator
--- only reads them: uranium in the inlet, and whether the outlet is emptying.
+-- Items: the reactor room has its own cable with two Ender Storage chests (issue #103). The Operator moves everything
+-- there (opchests.lua): fuel chest -> inlet port when the reactor has room (uranium blocks before ingots), outlet port ->
+-- waste chest every pass. Fuel is held back while waste can't clear. Storage keeps the fuel chest stocked and empties
+-- the waste chest from the far end.
 -- The computer's screen and every monitor touching a side show the same pages (opscreen.lua, on the UI kit):
 -- a plant overview, and per reactor a Power, Needs and Set tab. Taps change the run mode, the held level and the settings.
 --
@@ -12,13 +14,13 @@
 -- lets a policy (oppolicy.lua) decide who runs (on below ON_BELOW % of the buffer, off above OFF_ABOVE %), watches the
 -- outlet port ("waste not clearing" when it fills or stops emptying), works out what each reactor needs / has / is
 -- missing (opneeds.lua) and tells the mainframe (protocol tanis-operator) once every few seconds.
--- Storage tells the Operator how much uranium it holds with  { type = "uranium", total = <ingots> }  on the same
--- protocol; without it "fuel supply" reads unknown.
+-- Storage reports  { type = "reactor_fuel", chests = { { name, label, units, keep, low } }, supply = <fuel units in
+-- storage>, best = <item id> }  on the same protocol; the plant totals carry `supply` and `fuelChest` (summed over chests).
 -- Control rods: the policy picks a power level per running reactor from its buffer (full power at the ON threshold,
 -- LEVEL_MIN at the OFF threshold); oprods.lua steps the rods toward it, ROD_STEP percent every ROD_EVERY seconds.
 -- A level set by hand holds for HOLD_MIN minutes, then control returns to Auto.
 -- Settings: operator.env (plant-wide, live) and operator.cfg (per unit, keyed by peripheral name: mode auto|on|off,
--- enabled, onBelow, offAbove, levelMin, levelMax, level, input, output). Log: operator.log.
+-- enabled, onBelow, offAbove, levelMin, levelMax, level, input, output, fuelChest, wasteChest). Log: operator.log.
 -- Commands (mainframe or screen), protocol tanis-operator:
 --   { type = "operator_cmd", unit = <label or id; nil = every reactor>, mode = "auto"|"on"|"off", level = 1..100 }
 --   a mode is saved in operator.cfg; a level is a manual hold.
@@ -27,6 +29,7 @@ local plantlib = require("opplant")
 local policies = require("oppolicy")
 local needs = require("opneeds")
 local rods = require("oprods")
+local chests = require("opchests")
 local ui = require("ui")
 local screen = require("opscreen")
 
@@ -98,8 +101,8 @@ local ctl = require("opctl")(plant, E, ctlHooks)
 
 local function fmt(n, d) if type(n) ~= "number" then return "?" end return ("%." .. (d or 0) .. "f"):format(n) end
 
--- Waste: only watch the outlet port. Not clearing = every slot taken, or cyanite that has not dropped for STUCK_AFTER s.
--- Nothing is moved or voided here; Storage drains the port.
+-- Waste: watch the outlet port (opchests.step empties it into the waste chest). Not clearing = every slot taken, cyanite
+-- that has not dropped for STUCK_AFTER s, or the waste chest is full or missing. Nothing is voided.
 local function watchOutlet(u)
   u.outputCount, u.outputFull = nil, false
   local was = u.wasteStuck
@@ -122,14 +125,16 @@ local function watchOutlet(u)
       if u.outputFull and n > 0 then u.wasteStuck = true end
     end
   end
+  if u.wasteChestFull or u.wasteChestGone then u.wasteStuck = true end
   if u.wasteStuck and not was then
-    log(u.label .. ": waste not clearing (outlet holds " .. tostring(u.outputCount) .. " cyanite)")
+    log(u.label .. ": waste not clearing (outlet holds " .. tostring(u.outputCount) .. " cyanite"
+      .. (u.wasteChestGone and ", waste chest missing" or u.wasteChestFull and ", waste chest full" or "") .. ")")
     event(u.label, "waste outlet not emptying")
   end
   return (was or false) ~= u.wasteStuck
 end
 
--- Storage's uranium count (nil when it isn't reporting or went quiet)
+-- Storage's fuel unit count (nil when it isn't reporting or went quiet)
 local function supply()
   if st.supply and os.clock() - st.supplyAt < 90 then return st.supply end
 end
@@ -222,7 +227,8 @@ local function tick()
           end
         end
       end
-      if watchOutlet(u) then recheck(u, u.status) end
+      local moved = chests.step(u, ctlHooks)
+      if watchOutlet(u) or moved then recheck(u, u.status) end
       -- passive reactors may keep burning with a full buffer: log what we see once per change so it can be confirmed
       local full = (u.status.buf or 0) >= 0.99 and u.status.active == true
       if full ~= (st.bufFull[u.id] or false) then
@@ -255,6 +261,7 @@ local function record()
       r.onBelow, r.offAbove = plantlib.thresholds(u, E)
       r.seen = u.heardAt and (os.clock() - u.heardAt) or nil
       r.wasteStuck, r.needs, r.outlet = u.wasteStuck or false, u.needs, u.outputCount
+      r.fuelChest, r.holdFuel = u.fuelChestUnits, u.holdFuel or false
       r.note = u.wasteStuck and "waste not clearing" or needs.summary(u.needs)
       tot.reactors = tot.reactors + 1
       if s.answers then
@@ -277,6 +284,7 @@ local function record()
     tot.avgHour = t / #st.feS
   end
   tot.hist, tot.events = st.hist, st.events
+  tot.fuelChest = supply() ~= nil and st.fuelRep or nil
   return { type = "operator", id = os.getComputerID(), label = os.getComputerLabel() or "Operator", t = os.clock(),
            units = units, plant = tot }
 end
@@ -292,8 +300,8 @@ local function report()
   end
   for _, u in ipairs(plant.units) do
     if u.kind == "reactor" then
-      log(("%s = %s (%s driver); inlet port %s, outlet port %s"):format(u.label, u.id,
-        u.driver and u.driver.kind or "none", tostring(u.input), tostring(u.output)))
+      log(("%s = %s (%s driver); inlet port %s, outlet port %s, fuel chest %s, waste chest %s"):format(u.label, u.id,
+        u.driver and u.driver.kind or "none", tostring(u.input), tostring(u.output), tostring(u.fuelChest), tostring(u.wasteChest)))
     end
   end
 end
@@ -342,8 +350,16 @@ local function onEvent(ev, a, b, c3, d)
       rednet.broadcast(st.rec, PROTOCOL)
     end
     timer = os.startTimer(E.TICK)
+  elseif ev == "rednet_message" and c3 == PROTOCOL and type(b) == "table" and b.type == "reactor_fuel" and tonumber(b.supply) then
+    st.supply, st.supplyAt = tonumber(b.supply), os.clock()
+    local sum
+    for _, c in ipairs(type(b.chests) == "table" and b.chests or {}) do
+      sum = sum or { units = 0, keep = 0, low = 0 }
+      sum.units, sum.keep, sum.low = sum.units + (tonumber(c.units) or 0), sum.keep + (tonumber(c.keep) or 0), sum.low + (tonumber(c.low) or 0)
+    end
+    st.fuelRep = sum
   elseif ev == "rednet_message" and c3 == PROTOCOL and type(b) == "table" and b.type == "uranium" and tonumber(b.total) then
-    st.supply, st.supplyAt = tonumber(b.total), os.clock()
+    st.supply, st.supplyAt, st.fuelRep = tonumber(b.total), os.clock(), nil     -- the old message, until nothing sends it
   elseif ev == "rednet_message" and c3 == PROTOCOL and type(b) == "table" and b.type == "operator_cmd" then
     if b.mode then ctl.mode(b.unit, b.mode) end
     if tonumber(b.level) then ctl.hold(b.unit, tonumber(b.level)) end

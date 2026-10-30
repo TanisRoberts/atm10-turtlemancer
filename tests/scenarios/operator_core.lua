@@ -37,7 +37,7 @@ local function storage(w, net, outName, opts)
   c:attach("back", cc.wired(net)); c:attach("top", cc.wireless{ ender = true })
   c:writeFile("st.lua", ("local out, drain, supply = %q, %s, %s\nrednet.open('top')\nwhile true do\n"
     .. "  if drain then local o = peripheral.wrap(out); for slot in pairs(o.list()) do o.pushItems('minecraft:chest_9', slot) end end\n"
-    .. "  if supply then rednet.broadcast({ type = 'uranium', total = supply }, 'tanis-operator') end\n  sleep(1)\nend")
+    .. "  if supply then rednet.broadcast({ type = 'reactor_fuel', chests = {}, supply = supply }, 'tanis-operator') end\n  sleep(1)\nend")
     :format(outName, tostring(opts.drain ~= false), tostring(opts.supply)))
   c:run("st")
   return chest

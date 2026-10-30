@@ -24,9 +24,13 @@ local function build(w, h, mon, opts)
   c:attach("back", cc.wired(net)); c:attach("top", cc.wireless{ ender = true })
   local m = mon and c:monitor("right", mon[1], mon[2])
   c:installRole("operator")
+  for n = 0, 3 do net:add("enderstorage:ender_chest_" .. n, cc.Inv.new{ size = n == 1 and 1 or 27 }) end
+  net.devices["enderstorage:ender_chest_1"]:give("bigreactors:cyanite_ingot", 64)       -- reactor 1's waste chest is full too
   c:writeTable("operator.cfg", { nextNum = { reactor = 2 }, units = {
-    ["BigReactors-Reactor_0"] = { kind = "reactor", num = 1, label = "Reactor-1", mode = "auto", enabled = true, input = "in_0", output = "out_0" },
-    ["BigReactors-Reactor_1"] = { kind = "reactor", num = 2, label = "Reactor-2", mode = "auto", enabled = true, input = "in_1", output = "out_1" } } })
+    ["BigReactors-Reactor_0"] = { kind = "reactor", num = 1, label = "Reactor-1", mode = "auto", enabled = true, input = "in_0", output = "out_0",
+      fuelChest = "enderstorage:ender_chest_0", wasteChest = "enderstorage:ender_chest_1" },
+    ["BigReactors-Reactor_1"] = { kind = "reactor", num = 2, label = "Reactor-2", mode = "auto", enabled = true, input = "in_1", output = "out_1",
+      fuelChest = "enderstorage:ender_chest_2", wasteChest = "enderstorage:ender_chest_3" } } })
   c:run("operator")
   world:run(opts.run or 20)
   return world, c, m, ra, rb
@@ -137,7 +141,7 @@ T.test("operator screen: Needs tab lists the checks, and a tap on a problem says
   local s = c.screen
   touch(world, s, "Reactor-1")
   touch(world, s, "Needs")
-  T.truthy(s:find("NEEDS  7 ok  1 missing  0 unknown"), "counts\n" .. s:text())
+  T.truthy(s:find("NEEDS  9 ok  1 missing  0 unknown"), "counts\n" .. s:text())
   T.truthy(s:find("! Waste clearing") and s:find("1 problem"), "missing row")
   T.falsy(s:find("Fuel supply") or s:find("Power output"), "those two checks are gone")
     T.truthy(s:find("+ Computer port"), "ok row")
@@ -287,7 +291,7 @@ T.test("operator screen: a problem can be ignored and counted again", function()
   local world, c = build(51, 19)
   local s = c.screen
   toNeeds(world, s)
-  T.truthy(s:find("NEEDS  7 ok  1 missing  0 unknown"))
+  T.truthy(s:find("NEEDS  9 ok  1 missing  0 unknown"))
   touch(world, s, "! Waste clearing")
   T.truthy(s:find("outlet not emptying") and s:find("Ignore this"), "need page\n" .. s:text())
   touch(world, s, "Ignore this")
@@ -300,7 +304,7 @@ T.test("operator screen: a problem can be ignored and counted again", function()
   touch(world, s, "Stop ignoring")
   T.eq(c:readTable("operator.cfg").units["BigReactors-Reactor_0"].ignore, nil)
   touch(world, s, "Back")
-  T.truthy(s:find("NEEDS  7 ok  1 missing  0 unknown"), s:text())
+  T.truthy(s:find("NEEDS  9 ok  1 missing  0 unknown"), s:text())
 end)
 
 T.test("operator screen: a monitor can pick a port from the list (no typing there)", function()
@@ -340,4 +344,31 @@ T.test("operator screen: typed commands, with and without the slash; a monitor h
   T.contains(s:line(2), "not a whole number")
   run("/on 9")
   T.contains(s:line(2), "No reactor '9'")
+end)
+
+T.test("operator screen: the chests have Needs rows with Manually assign and Clear, and the Power tab shows the fuel chest", function()
+  local world, c = build(51, 19)
+  local s = c.screen
+  touch(world, s, "Reactor-1")
+  T.truthy(s:find("in chest"), "no fuel chest on the Power tab\n" .. s:text())
+  touch(world, s, "Needs")
+  T.truthy(s:find("+ Fuel chest") and s:find("+ Waste chest"), "both chest rows\n" .. s:text())
+  -- Reactor-1 loses its chests (two reactors: the Operator doesn't guess), so the rows turn into things to fix
+  local cfg0 = c:readTable("operator.cfg")
+  cfg0.units["BigReactors-Reactor_0"].fuelChest, cfg0.units["BigReactors-Reactor_0"].wasteChest = nil, nil
+  c:writeTable("operator.cfg", cfg0); world:run(5)
+  T.truthy(s:find("? Fuel chest") and s:find("? Waste chest"), "unknown rows\n" .. s:text())
+  touch(world, s, "? Fuel chest")
+  T.truthy(s:find("Its fuel chest") and s:find("Manually assign") and s:find("Clear"), "no fix section\n" .. s:text())
+  touch(world, s, "Manually assign")
+  T.truthy(s:find("ASSIGN FUEL CHEST"), "no picker\n" .. s:text())
+  T.truthy(s:find("ender_chest_0") and s:find("ender_chest_3"), "chests are candidates\n" .. s:text())
+  COMP:type("chest_3"); world:run(0.6)
+  touch(world, s, "ender_chest_3", 0)
+  touch(world, s, "ender_chest_3", 0)
+  local cfg = c:readTable("operator.cfg").units
+  T.eq(cfg["BigReactors-Reactor_0"].fuelChest, "enderstorage:ender_chest_3")
+  T.eq(cfg["BigReactors-Reactor_1"].wasteChest, nil, "taken from the other reactor")
+  touch(world, s, "Clear")
+  T.eq(c:readTable("operator.cfg").units["BigReactors-Reactor_0"].fuelChest, nil)
 end)

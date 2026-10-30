@@ -26,6 +26,15 @@ local CHECKS = {
       end
       return unknown(u.portNote or "no input port known")
     end },
+  { "fuelChest", "Fuel chest", function(c)
+      local u = c.unit
+      if u.fuelChestGone then return missing("fuel chest " .. tostring(u.fuelChest) .. " is not on the cable") end
+      if u.fuelChest then
+        return ok(u.fuelChest .. (u.holdFuel and ", fuel held back until waste clears" or ""))
+      end
+      if u.chestNote and u.chestNote:find("^no ender") then return missing(u.chestNote) end
+      return unknown(u.chestNote or "no fuel chest known")
+    end },
   { "fuel", "Fuel in reactor", function(c)
       local s, u = c.status or {}, c.unit
       local inPort = u.input and plantlib.contents(u.input)
@@ -40,8 +49,17 @@ local CHECKS = {
       if u.output then return ok(u.output) end
       return unknown(u.portNote or "no output port known")
     end },
+  { "wasteChest", "Waste chest", function(c)
+      local u = c.unit
+      if u.wasteChestGone then return missing("waste chest " .. tostring(u.wasteChest) .. " is not on the cable") end
+      if u.wasteChest then return ok(u.wasteChest) end
+      if u.chestNote and u.chestNote:find("^no ender") then return missing(u.chestNote) end
+      return unknown(u.chestNote or "no waste chest known")
+    end },
   { "wasteTo", "Waste clearing", function(c)
       local u = c.unit
+      if u.wasteChestGone then return missing("outlet not emptying: waste chest is not on the cable") end
+      if u.wasteChestFull then return missing("outlet not emptying: waste chest is full") end
       if u.wasteStuck then return missing("outlet not emptying") end
       if not u.output then return unknown("no outlet port known to watch") end
       if u.outputCount == nil then return unknown("can't read outlet") end

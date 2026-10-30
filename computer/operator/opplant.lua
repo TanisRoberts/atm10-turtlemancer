@@ -5,7 +5,8 @@
 -- later driver or policy adds to it without a new file.
 -- Ports: each reactor has an input port (fuel in) and an output port (waste out). They are read from the unit's
 -- config, or worked out when only one reactor is on the cable; otherwise the Operator says "unknown", never guesses.
--- The Operator only READS the ports; Storage fills the inlet and drains the outlet.
+-- The Operator moves the items itself (opchests.lua): fuel chest -> inlet port, outlet port -> waste chest. The chests
+-- (`fuelChest`, `wasteChest`) are worked out the same way when there is one reactor, else read from the config.
 local drivers = require("opdrivers")
 
 local M = {}
@@ -217,6 +218,7 @@ function M:resolvePorts()
     if u.input and not peripheral.isPresent(u.input) then u.inputGone = true else u.inputGone = nil end
     if u.output and not peripheral.isPresent(u.output) then u.outputGone = true else u.outputGone = nil end
   end
+  require("opchests").resolve(self)
 end
 
 -- The numbers a unit's settings resolve to (percent in env, fraction here)

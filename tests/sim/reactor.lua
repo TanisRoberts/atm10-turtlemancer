@@ -15,7 +15,7 @@ function Reactor.new(opts)
   local self = setmetatable({
     clock = opts.clock, types = { "BigReactors-Reactor" }, prod = opts.prod or 2000, demand = opts.demand or 1000,
     cap = opts.cap or 1000000, stored = opts.stored or 500000, on = opts.active or false, rods = opts.rods or 5,
-    inPort = opts.inPort, outPort = opts.outPort, fuel = opts.fuel or 0, fuelMax = 4000, waste = 0,
+    inPort = opts.inPort, outPort = opts.outPort, fuel = opts.fuel or 0, fuelMax = opts.fuelMax or 4000, waste = 0,
     cooled = opts.activelyCooled, rodLevel = opts.rodLevel or 100, rodScale = opts.rodScale, wasteAcc = 0, burnAcc = 0, made = 0,
   }, Reactor)
   self.last = self.clock()
@@ -38,8 +38,10 @@ function Reactor:touch()
   -- take fuel from the input port
   if self.inPort then
     for slot, it in pairs(self.inPort.slots) do
-      if it.name:find("uranium") and it.name:find("ingot") then
-        while it.count > 0 and self.fuel + 1000 <= self.fuelMax do it.count = it.count - 1; self.fuel = self.fuel + 1000 end
+      local worth = (it.tags and it.tags["c:storage_blocks/uranium"] and 9) or (it.tags and it.tags["c:ingots/uranium"] and 1)
+        or (it.name:find("uranium") and it.name:find("block") and 9) or (it.name:find("uranium") and it.name:find("ingot") and 1) or 0
+      if worth > 0 then
+        while it.count > 0 and self.fuel + worth * 1000 <= self.fuelMax do it.count = it.count - 1; self.fuel = self.fuel + worth * 1000 end
         if it.count <= 0 then self.inPort.slots[slot] = nil end
       end
     end
