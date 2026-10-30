@@ -179,7 +179,9 @@ end
 
 function inputLoop()
   while true do
-    local e, a, b, c = os.pullEvent()
+    local ev = table.pack(os.pullEvent())
+    local e, a, b, c = table.unpack(ev, 1, 4)
+    scr:handle(table.unpack(ev, 1, ev.n))
     local v, x, y
     if e == "monitor_touch" and a == monSide then v, x, y = views[1], b, c
     elseif e == "mouse_click" then v, x, y = views[2], b, c
@@ -192,7 +194,7 @@ function inputLoop()
       draw()
     elseif e == "char" or e == "key" or e == "paste" then
       handleKey(e, a); draw()
-    elseif e == "peripheral" or e == "peripheral_detach" or e == "monitor_resize" then
+    elseif e == "peripheral" or e == "peripheral_detach" or e == "monitor_resize" or e == "screens_changed" then
       mon, monSide = findMonitor(); draw()
     end
     if v then

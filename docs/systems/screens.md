@@ -42,7 +42,7 @@ Every message carries `from` (the computer id). A monitor a peer owns or is numb
 
 ## Who uses it
 
-Mainframe (`$island monitors`), neural, plastic, cartographer, architect (`/monitors`, `monitors`) and art (key `M`). All use one optional slot `wall` (art: required) and reboot on a re-pick. Tests: `wired_monitors_5.lua`.
+Mainframe (`$island monitors`), neural, plastic, cartographer, architect (`/monitors`, `monitors`) and art (key `M`), plus the Foreman engine (`shared/fm_draw.lua` `findMonitor`: Overworld, MD and Nether Foremen, `/monitors`) and the Farmhand (`/monitors`). All use one optional slot `wall` (art: required) and reboot on a re-pick. Tests: `wired_monitors_5.lua`, `wired_monitors_4.lua`.
 
 ## Tests
 

@@ -349,9 +349,9 @@ T.test("farmhand: a busy radio does not make the screens flicker", function()
   ]])
   noisy:run("n")
   w:run(5)
-  local m0, t0 = mon.writes, fh.screen.writes
+  local m0, t0, c0 = mon.writes, fh.screen.writes, mon.clears or 0   -- screens.lua clears the monitor once at boot
   w:run(10)
-  T.eq(mon.clears or 0, 0, "the monitor is never cleared"); T.eq(fh.screen.clears or 0, 0, "nor the computer's own screen")
+  T.eq((mon.clears or 0) - c0, 0, "the monitor is never cleared"); T.eq(fh.screen.clears or 0, 0, "nor the computer's own screen")
   -- Only the 'seen Ns ago' / countdown rows change, once a second or so: about 20 radio messages a second must
   -- not turn into 20 screen rewrites a second
   T.truthy(mon.writes - m0 <= 10 * 12, "monitor writes in 10 s: " .. (mon.writes - m0))

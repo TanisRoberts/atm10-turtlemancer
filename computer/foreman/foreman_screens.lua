@@ -511,6 +511,7 @@ return function(F)
   cmds:add({ name = "presets", help = "edit the layer presets", max = 0, run = function()
     local st = termState(); F.ui.pset = nil; st.page, st.edit = "presets", nil; return true end })
   alias("presets", "preset", "settings", "p")
+  cmds:add({ name = "monitors", help = "pick the monitor again (reboots)", max = 0, run = function() F.repickMonitor() end })
   cmds:add({ name = "home", help = "back to the overview", max = 0, run = function() home(); return true end })
   alias("home", "back", "overview")
   cmds:add({ name = "retired", help = "list the retired " .. P.birds, max = 0, run = function()
@@ -599,8 +600,9 @@ return function(F)
   function F.inputLoop()
     kviews[1] = ui.view(term.current())
     syncMonitor()
-    ui.run(kviews, draw, { tick = 1, on_event = function(e)
-      if e == "peripheral" or e == "peripheral_detach" or e == "monitor_resize" then syncMonitor() end
+    ui.run(kviews, draw, { tick = 1, on_event = function(e, ...)
+      F.scr:handle(e, ...)
+      if e == "peripheral" or e == "peripheral_detach" or e == "monitor_resize" or e == "screens_changed" then syncMonitor() end
     end })
   end
 end

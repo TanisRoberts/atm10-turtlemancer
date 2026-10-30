@@ -90,12 +90,14 @@ function newUi()
 end
 ui = nil
 
-function findMonitor()
-  for _, side in ipairs(rs.getSides()) do
-    if peripheral.hasType(side, "monitor") then return peripheral.wrap(side), side end
-  end
-end
-mon, monSide = findMonitor()
+-- The monitor: the biggest one touching the computer, else one picked from the cable (shared/screens.lua,
+-- docs/systems/screens.md). Asked once here at boot; findMonitor only re-reads it. Both the engine's drawing and
+-- the UI-kit profiles (foreman_screens.lua, via F.findMonitor) look through this one place.
+scr = require("screens").new({ slots = { { id = "wall", label = P.name .. "'s screen", required = false, scale = TEXT_SCALE } } })
+scr:open()
+function findMonitor() return scr:current("wall") end
+function repickMonitor() scr:repick("wall"); os.reboot() end
+mon, monSide = scr:get("wall")
 views = {
   { dev = function() return mon end, kind = "monitor", hits = {}, ui = newUi() },
   { dev = function() return term end, kind = "term", hits = {}, ui = newUi() },

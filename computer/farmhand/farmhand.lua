@@ -159,17 +159,18 @@ local screens = require("farmhand_screens")({
   forget = forget, nameOf = nameOf, ids = ids, problems = problems, radioOK = function() return radioOK end,
 })
 
-local function findMonitor()
-  for _, side in ipairs(rs.getSides()) do
-    if peripheral.hasType(side, "monitor") then return peripheral.wrap(side), side end
-  end
-end
+-- The monitor: the biggest one touching the computer, else one picked from the cable (shared/screens.lua,
+-- docs/systems/screens.md). Asked once at boot; findMonitor only re-reads it.
+local scr = require("screens").new({ slots = { { id = "wall", label = "the Farmhand screen", required = false, scale = 0.5 } } })
+scr:open()
+local function findMonitor() return scr:current("wall") end
 local views = { ui.view(term.current()) }
 local function syncMonitor()
   local mon, side = findMonitor()
   if views[2] and views[2].side == side then views[2].t = mon or views[2].t; views[2]:measure(); return end
   views[2] = mon and ui.view(mon, { side = side }) or nil
 end
+scr:get("wall")
 syncMonitor()
 
 ---------------------------------------------------------------------------
@@ -211,6 +212,8 @@ cmds:add({ name = "status", help = "turtles, what is working, who needs you", ma
              local sum = summary()
              return true, sum.note, sum.problems > 0 and "warn" or "good"
            end })
+cmds:add({ name = "monitors", help = "pick the monitor again (reboots)", max = 0,
+           run = function() scr:repick("wall"); os.reboot() end })
 for _, c in ipairs(cmds:commands()) do commandList[#commandList + 1] = c end
 
 local function netLoop()
@@ -265,7 +268,8 @@ loadCfg()
 -- The kit draws after every event (a status from a turtle, a tap, a key) and once a second; a monitor that
 -- comes or goes, or is resized, is picked up here.
 parallel.waitForAny(netLoop, function()
-  ui.run(views, screens.draw, { tick = 1, on_event = function(e)
-    if e == "peripheral" or e == "peripheral_detach" or e == "monitor_resize" then syncMonitor() end
+  ui.run(views, screens.draw, { tick = 1, on_event = function(e, ...)
+    scr:handle(e, ...)
+    if e == "peripheral" or e == "peripheral_detach" or e == "monitor_resize" or e == "screens_changed" then syncMonitor() end
   end })
 end)

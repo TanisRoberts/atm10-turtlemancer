@@ -10,6 +10,7 @@ function runCommand(line)
   cmd = (cmd or ""):lower()
   ui = termUi
   if cmd == "" or cmd == "help" or cmd == "?" then say(HELP, K.lightBlue)
+  elseif cmd == "monitors" then repickMonitor()
   elseif cmd == "presets" or cmd == "preset" or cmd == "settings" or cmd == "p" then ui.page, ui.edit = "presets", nil
   elseif cmd == "home" or cmd == "back" or cmd == "overview" then ui.page, ui.edit = "overview", nil
   elseif P.barrels and (cmd == "rules" or cmd == "keeps") then ui.page = "rules"
