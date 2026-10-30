@@ -286,11 +286,11 @@ function View:header(title, o)
     self:put(x, 1, state, o.color or ui.stateRole(state), "bg")
     if x - 2 > chipW + 1 then self:glyph(x - 2, 1, state) end
     if o.onState then self:_box({ x, 1, W, 1 }, nil, { fn = o.onState, id = "state" }) end
-    local right = (self.wc == "regular" or self.wc == "wide") and o.right
-    if right then
-      local rx = x - 4 - #right
-      if rx > chipW + 1 then self:put(rx, 1, right, "dim", "bg") end
-    end
+  end
+  local right = (self.wc == "regular" or self.wc == "wide") and o.right
+  if right then
+    local rx = (state and W - #state - 4 or W) - #right   -- left of the state word, or flush right without one
+    if rx > chipW + 1 then self:put(rx, 1, right, "dim", "bg") end
   end
   self:put(1, 2, (self.colour and RULE or "-"):rep(W), "bar", "bg")
   self:notice()

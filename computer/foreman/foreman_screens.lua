@@ -9,11 +9,20 @@
 --   P.screens = require("foreman_screens")      in the profile; shared/fm.lua calls it with the engine's environment F
 -- It replaces the engine's draw, inputLoop and say (the MD and Nether Foremen keep the engine's own drawing code
 -- until they move over). Data and orders stay in the engine: F.live, F.entry, F.order, F.pick, F.adjust ...
+--
+-- The Nether Foreman is this screen plus a few extras (computer/nether/nether_screens.lua): it fills the table
+-- F.ext before calling this, and gets F.kit (the helpers below) back. Hooks, all optional:
+--   ext.header(v, st, nActive)       draws the overview's header instead of the hub's
+--   ext.statusLine(v, y)             one line under the header; the tiles start a row lower
+--   ext.buttons(list, v, st)         edits the overview's button list
+--   ext.statusRows(v, id, row)       more rows on a miner's status (row(label, value, tone))
+--   ext.pages[name] = fn(v, st)      pages of its own (go(v, st, name) opens one)
 local ui = require("ui")
 local slash = require("slash")
 
 return function(F)
   local P = F.P
+  local X = F.ext or {}
   local fit = ui.text.fit
   local FLEET_STALE = 30
 
@@ -98,6 +107,7 @@ return function(F)
     return "ok", "good"
   end
   local function overviewHeader(v, st, nActive)
+    if X.header and not st.retired then return X.header(v, st, nActive) end
     local word, role = hubState()
     local storage = F.storageSeen and os.clock() - F.storageSeen < FLEET_STALE and "ok" or "?"
     v:header(st.retired and "FOREMAN retired" or P.title, { state = word, color = role,
@@ -121,7 +131,8 @@ return function(F)
     go(v, st, "miner", id)
   end
   local function openEdit(st, idx, name)
-    local p = idx and F.presetList()[idx] or { name = name or "", minY = -59, maxY = -48, r1 = 0, r2 = F.DEF_R2 }
+    local ne = P.newEntry or { minY = -59, maxY = -48 }
+    local p = idx and F.presetList()[idx] or { name = name or "", minY = ne.minY, maxY = ne.maxY, r1 = 0, r2 = F.DEF_R2 }
     st.edit = { idx = idx, minY = p.minY, maxY = p.maxY, r1 = p.r1, r2 = p.r2, autofocus = p.name == "",
                 f = ui.field({ hint = "name", max = F.NAME_MAX, text = p.name }) }
     st.page = "edit"
@@ -163,6 +174,8 @@ return function(F)
     end
     local typed = not v.side
     overviewHeader(v, st, active)
+    local top = 3
+    if X.statusLine and not st.retired then X.statusLine(v, 3); top = 4 end
     if #ids == 0 then
       if st.retired then
         v:put(2, 4, fit(("No retired %s."):format(P.birds), v.W - 2), "dim", "bg")
@@ -175,7 +188,7 @@ return function(F)
         end
       end
     else
-      v:tiles(ids, { grow = true, input = typed and 2 or true, on = function(id) openMiner(v, st, id) end,
+      v:tiles(ids, { grow = true, top = top, input = typed and 2 or true, on = function(id) openMiner(v, st, id) end,
                      render = tileFields })
     end
     local by = v.H - (typed and 2 or 1)
@@ -198,6 +211,7 @@ return function(F)
     if retiredN > 0 and v.W >= 56 then
       list[#list + 1] = { label = "Retired (" .. retiredN .. ")", fn = function() st.retired = true; v.page = 1 end }
     end
+    if X.buttons then X.buttons(list, v, st) end
     v:buttons(2, by, list)
     if typed then v:search(st.field, { hint = "/ = commands (/help)", commands = F.commands }) end
     v:footer({})
@@ -249,6 +263,7 @@ return function(F)
       if s.chunkyNote then gear, warn = s.chunkyNote, true end
     end
     row("Gear", gear, warn and "warn" or nil)
+    if X.statusRows then X.statusRows(v, id, row) end
     if F.ownerLine then row("Foreman", F.ownerLine(id)) end
     row("Computer", "#" .. id, "dim")
     return y
@@ -565,6 +580,7 @@ return function(F)
     elseif st.page == "presets" then drawPresets(v, st)
     elseif st.page == "edit" then drawEdit(v, st)
     elseif st.page == "help" then drawHelp(v, st)
+    elseif X.pages and X.pages[st.page] then X.pages[st.page](v, st)
     else drawOverview(v, st) end
   end
 
@@ -576,6 +592,9 @@ return function(F)
 
   -- The engine asks for a redraw after every radio message and state change: wake the loop (it throttles)
   function F.draw() os.queueEvent("fm_draw") end
+
+  F.kit = { stateFor = stateFor, termState = termState, go = go, home = home, wrap = wrap, views = kviews,
+            stateOf = stateOf, nameOf = nameOf }
 
   function F.inputLoop()
     kviews[1] = ui.view(term.current())

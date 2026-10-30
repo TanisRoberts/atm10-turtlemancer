@@ -2,7 +2,7 @@
 
 The remote for every miner in every dimension (`computer/foreman/`). `foreman.lua` is the profile (title, protocol, presets, `remote = "hub"`, `screens`); the work is the Foreman engine in `shared/fm*.lua` (`docs/systems/miner.md`: registry, orders, radio, the link to the MD and Nether Foremen). `foreman_screens.lua` is everything it shows and takes typed, built only from the UI kit (`docs/systems/ui.md`); nothing in it writes to a terminal.
 
-`shared/fm.lua` calls `P.screens(F)` after loading the engine parts. The screens module replaces the engine's `draw`, `inputLoop` and `say` on `F` (the engine calls them late-bound), and reads and orders through the engine: `F.live`, `F.entry`, `F.order`, `F.pick`, `F.adjust`, `F.requestReboot`, `F.retire`, `F.presetList`, `F.savePreset` ... The MD and Nether Foremen are not moved yet and still use the engine's own drawing (`fm_draw`, `fm_pages`, `fm_edit`, `fm_cmd`); those four parts go when they move.
+`shared/fm.lua` calls `P.screens(F)` after loading the engine parts. The screens module replaces the engine's `draw`, `inputLoop` and `say` on `F` (the engine calls them late-bound), and reads and orders through the engine: `F.live`, `F.entry`, `F.order`, `F.pick`, `F.adjust`, `F.requestReboot`, `F.retire`, `F.presetList`, `F.savePreset` ... The MD Foreman is not moved yet and still uses the engine's own drawing (`fm_draw`, `fm_pages`, `fm_edit`, `fm_cmd`); those four parts go when it moves. The Nether Foreman (`docs/systems/nether.md`) reuses this module: it fills `F.ext` first (hooks `header`, `statusLine`, `buttons`, `statusRows`, `pages`; listed at the top of `foreman_screens.lua`) and gets `F.kit` back.
 
 ## Screens
 

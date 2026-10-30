@@ -163,11 +163,13 @@ end
 -- A stripe in the state colour runs down the left edge (gold on the highlighted tile, grey when stale).
 -- grow = true: use the spare height: only as many rows of tiles as the items need, each tile taller than 5 rows
 -- (the extra rows go to fields.extra), and no more columns than items. input = true leaves the row above the
--- footer free for a search bar (a number leaves that many rows). Whole tile is the tap target. Arrows move the highlight, Enter opens, Esc clears.
+-- footer free for a search bar (a number leaves that many rows). top = the first row of tiles (default 3; 4 leaves
+-- a status line under the rule). Whole tile is the tap target. Arrows move the highlight, Enter opens, Esc clears.
 function View:tiles(items, o)
   local r = self:rect(o.input)
-  local avail = r.y2 - r.y1 + 1
-  local cols, tw, th, rows = ui.layout.tiles(self.W, self.H - (o.input == true and 1 or tonumber(o.input) or 0), #items)
+  local up = (o.top or 3) - 3
+  local avail = r.y2 - r.y1 + 1 - up
+  local cols, tw, th, rows = ui.layout.tiles(self.W, self.H - up - (o.input == true and 1 or tonumber(o.input) or 0), #items)
   if o.grow then
     cols = max(1, min(cols, #items))
     tw = floor((self.W - 2 - (cols - 1)) / cols)
@@ -188,7 +190,7 @@ function View:tiles(items, o)
     if not item then break end
     local f = o.render(item)
     local x = 2 + ((i - 1) % cols) * (tw + 1)
-    local y = 3 + floor((i - 1) / cols) * (th + 1)
+    local y = 3 + up + floor((i - 1) / cols) * (th + 1)
     local stale = f.stale ~= nil
     local role = (self.sel == first + i) and "gold" or stale and "bar" or f.color or ui.stateRole(f.state)
     for rr = 0, th - 1 do
@@ -218,7 +220,7 @@ function View:tiles(items, o)
     self:_box({ x, y, x + tw - 1, y + th - 1 }, nil, { id = "tile:" .. idx,
       fn = function() self.sel = idx; if o.on then o.on(item) end end })
   end
-  return 3 + min(rows, ceil(max(#items - first, 0) / cols)) * (th + 1)
+  return 3 + up + min(rows, ceil(max(#items - first, 0) / cols)) * (th + 1)
 end
 
 ---------------------------------------------------------------------------------------------------------

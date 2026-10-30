@@ -18,12 +18,12 @@
 -- the Foreman's Canaries (a retired number is never handed out again). Saved in nether.cfg.
 -- Rules page: when Firecrests drink lava (under 25% until 75% by default), what the Nether keeps and
 -- what Firecrest throws away underground. Typed on the computer: /keep /junk /unjunk /assign /presets
--- (/help lists them all).
+-- (/help lists them all). What it shows is computer/nether/nether_screens.lua, on the UI kit.
 
 -- The Foreman engine (shared/fm*.lua) does the work; this is what makes it the Nether's.
 dofile("fm.lua")({
   title = "NETHER FOREMAN", short = "NETHER", name = "the Nether Foreman", place = "the Nether",
-  bird = "Firecrest", birds = "Firecrests", kind = "firecrest", birdNames = { Firecrest = true },
+  bird = "Firecrest", birds = "Firecrests", one = "firecrest", unit = "firecrest", kind = "firecrest", birdNames = { Firecrest = true },
   protocol = "tanis-nether", config = "nether.cfg", regKey = "firecrests", oldKey = "diggers", oldPrefix = "Pigger",
   dim = "the_nether", defR2 = 1, yMin = 6, yMax = 120, newEntry = { minY = 12, maxY = 17 },
   lava = true, barrels = true, jobs = { "dock", "output", "stock", "input", "ignore" },
@@ -43,4 +43,6 @@ dofile("fm.lua")({
     "magma_block", "gravel", "crimson_nylium", "warped_nylium", "nether_wart_block", "warped_wart_block",
     "cobblestone", "cobbled_deepslate", "polished_blackstone_bricks" },
   remote = "dimension",
+  emptyText = { "No Firecrests yet. A Firecrest asks me for a number the first time it starts at its dock." },
+  screens = require("nether_screens"),   -- everything it shows: computer/nether/nether_screens.lua (docs/systems/nether.md)
 })
