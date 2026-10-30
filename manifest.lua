@@ -36,7 +36,7 @@ local M = {
             .. "torch top-ups and warnings (Inventory Manager), welcomes, visitors and the storage "
             .. "lock (Player Detector). Needs an ender or wireless modem.",
           run = "mainframe",
-          files = { "computer/mainframe/mainframe.lua", "computer/mainframe/island.lua", "shared/ui.lua", "shared/ui_widgets.lua", "shared/ui_parts.lua", "shared/ui_motion.lua",
+          files = { "computer/mainframe/mainframe.lua", "computer/mainframe/island.lua", "shared/screens.lua", "shared/ui.lua", "shared/ui_widgets.lua", "shared/ui_parts.lua", "shared/ui_motion.lua",
                     "computer/mainframe/board.lua", "computer/mainframe/butler.lua",
                     "computer/mainframe/base_link.lua",
                     "computer/mainframe/dig_link.lua", "computer/mainframe/weaver_link.lua",
@@ -50,7 +50,7 @@ local M = {
             .. "drawers, search + take on its screen, tops up turtle fuel barrels, supplies Weaver "
             .. "and does the smelter's moves. Wired modem on the storage cable + wireless modem.",
           run = "storage",
-          files = { "computer/storage/storage.lua", "computer/storage/storage_docks.lua", "computer/storage/storage_rules.lua", "shared/envfile.lua", "shared/assignui.lua", "shared/assignrules.lua", "shared/ui.lua", "shared/ui_widgets.lua", "shared/ui_parts.lua", "shared/ui_motion.lua" },
+          files = { "computer/storage/storage.lua", "computer/storage/storage_docks.lua", "computer/storage/storage_rules.lua", "shared/envfile.lua", "shared/assignui.lua", "shared/assignrules.lua", "shared/screens.lua", "shared/ui.lua", "shared/ui_widgets.lua", "shared/ui_parts.lua", "shared/ui_motion.lua" },
         },
         smelter = {
           name = "Smelter",
@@ -59,7 +59,7 @@ local M = {
             .. "first. Teach it new recipes with a training furnace. Storage moves the items. "
             .. "Wired modem on the storage cable; advanced monitor optional (3x2 is ideal).",
           run = "smelter",
-          files = { "computer/smelter/smelter.lua", "computer/smelter/smelter_core.lua", "computer/smelter/smelter_recipes.lua", "computer/smelter/smelter_factory.lua", "computer/smelter/smelter_pass.lua", "computer/smelter/smelter_train.lua", "computer/smelter/smelter_screen.lua", "computer/smelter/smelter_home.lua", "computer/smelter/smelter_trainui.lua", "computer/smelter/smelter_lists.lua", "computer/smelter/smelter_facui.lua", "computer/smelter/smelter_net.lua", "computer/smelter/drip.lua", "computer/smelter/direct.lua", "computer/smelter/trainsafe.lua", "shared/ui.lua", "shared/ui_widgets.lua", "shared/ui_parts.lua", "shared/ui_motion.lua", "shared/slash.lua" },
+          files = { "computer/smelter/smelter.lua", "computer/smelter/smelter_core.lua", "computer/smelter/smelter_recipes.lua", "computer/smelter/smelter_factory.lua", "computer/smelter/smelter_pass.lua", "computer/smelter/smelter_train.lua", "computer/smelter/smelter_screen.lua", "computer/smelter/smelter_home.lua", "computer/smelter/smelter_trainui.lua", "computer/smelter/smelter_lists.lua", "computer/smelter/smelter_facui.lua", "computer/smelter/smelter_net.lua", "computer/smelter/drip.lua", "computer/smelter/direct.lua", "computer/smelter/trainsafe.lua", "shared/screens.lua", "shared/ui.lua", "shared/ui_widgets.lua", "shared/ui_parts.lua", "shared/ui_motion.lua", "shared/slash.lua" },
           once = { "computer/smelter/smelt.txt" },
         },
         foreman = {
@@ -69,7 +69,7 @@ local M = {
             .. "layers, start or dock it, reboot or retire it. Canaries and Firecrests through their own Foreman "
             .. "(MD, Nether); Starlings directly. Needs an ender modem and an advanced monitor.",
           run = "foreman",
-          files = { "computer/foreman/foreman.lua", "shared/assignui.lua", "shared/ui.lua", "shared/ui_widgets.lua", "shared/ui_parts.lua", "shared/ui_motion.lua",
+          files = { "computer/foreman/foreman.lua", "shared/assignui.lua", "shared/screens.lua", "shared/ui.lua", "shared/ui_widgets.lua", "shared/ui_parts.lua", "shared/ui_motion.lua",
                     "shared/fm.lua", "shared/fm_reg.lua", "shared/fm_barrels.lua", "shared/fm_draw.lua", "shared/fm_pages.lua",
                     "shared/fm_edit.lua", "shared/fm_cmd.lua", "shared/fm_net.lua", "shared/fm_remote.lua" },
         },
@@ -81,7 +81,7 @@ local M = {
             .. "keeps the lava factory in empty buckets, sends the haul home through the output barrel (hopper -> "
             .. "ender chest), with an overflow barrel for when home is full. Ender modem + wired modem; /assign.",
           run = "mdforeman",
-          files = { "computer/mdforeman/mdforeman.lua", "shared/assignui.lua", "shared/ui.lua", "shared/ui_widgets.lua", "shared/ui_parts.lua", "shared/ui_motion.lua",
+          files = { "computer/mdforeman/mdforeman.lua", "shared/assignui.lua", "shared/screens.lua", "shared/ui.lua", "shared/ui_widgets.lua", "shared/ui_parts.lua", "shared/ui_motion.lua",
                     "shared/fm.lua", "shared/fm_reg.lua", "shared/fm_barrels.lua", "shared/fm_draw.lua", "shared/fm_pages.lua",
                     "shared/fm_edit.lua", "shared/fm_cmd.lua", "shared/fm_net.lua", "shared/fm_remote.lua" },
         },
@@ -93,7 +93,7 @@ local M = {
             .. "what the Rules say in Nether stock, sends the rest home through the output barrel "
             .. "(hopper -> ender chest). Ender modem + wired modem; /assign for the barrels.",
           run = "nether",
-          files = { "computer/nether/nether.lua", "shared/assignui.lua", "shared/ui.lua", "shared/ui_widgets.lua", "shared/ui_parts.lua", "shared/ui_motion.lua",
+          files = { "computer/nether/nether.lua", "shared/assignui.lua", "shared/screens.lua", "shared/ui.lua", "shared/ui_widgets.lua", "shared/ui_parts.lua", "shared/ui_motion.lua",
                     "shared/fm.lua", "shared/fm_reg.lua", "shared/fm_barrels.lua", "shared/fm_draw.lua", "shared/fm_pages.lua",
                     "shared/fm_edit.lua", "shared/fm_cmd.lua", "shared/fm_net.lua", "shared/fm_remote.lua" },
         },
@@ -105,7 +105,7 @@ local M = {
             .. "Needs a wireless or ender modem and an advanced monitor.",
           run = "farmhand",
           files = { "computer/farmhand/farmhand.lua", "computer/farmhand/farmhand_screens.lua", "computer/farmhand/farmhand_map.lua",
-                    "shared/slash.lua", "shared/ui.lua", "shared/ui_widgets.lua", "shared/ui_parts.lua", "shared/ui_motion.lua" },
+                    "shared/slash.lua", "shared/screens.lua", "shared/ui.lua", "shared/ui_widgets.lua", "shared/ui_parts.lua", "shared/ui_motion.lua" },
         },
         architect = {
           name = "Architect",
@@ -128,7 +128,7 @@ local M = {
           files = { "computer/operator/operator.lua", "computer/operator/opplant.lua", "computer/operator/opdrivers.lua",
                     "computer/operator/oppolicy.lua", "computer/operator/opneeds.lua", "computer/operator/oprods.lua", "computer/operator/opctl.lua",
                     "computer/operator/opscreen.lua", "computer/operator/opwall.lua", "computer/operator/opdraw.lua", "computer/operator/opwizard.lua", "shared/envfile.lua",
-                    "shared/ui.lua", "shared/ui_widgets.lua", "shared/ui_parts.lua", "shared/ui_motion.lua" },
+                    "shared/screens.lua", "shared/ui.lua", "shared/ui_widgets.lua", "shared/ui_parts.lua", "shared/ui_motion.lua" },
         },
         gps = {
           name = "GPS host",
@@ -146,7 +146,7 @@ local M = {
             .. "into the Latex Processing Unit, tops up its water, smelts the dry rubber and puts the "
             .. "plastic in a dock barrel that storage empties and keeps fuelled (/dock on storage).",
           run = "plastic",
-          files = { "computer/plastic/plastic.lua", "shared/ui.lua", "shared/ui_widgets.lua", "shared/ui_parts.lua", "shared/ui_motion.lua" },
+          files = { "computer/plastic/plastic.lua", "shared/screens.lua", "shared/ui.lua", "shared/ui_widgets.lua", "shared/ui_parts.lua", "shared/ui_motion.lua" },
         },
         neural = {
           name = "Neural lab",
@@ -156,7 +156,7 @@ local M = {
             .. "enough of what its fab makes (neural.txt), learns new columns and fab changes by "
             .. "itself. Dock barrel shared with storage. Needs a wireless or ender modem.",
           run = "neural",
-          files = { "computer/neural/neural.lua", "shared/ui.lua", "shared/ui_widgets.lua", "shared/ui_parts.lua", "shared/ui_motion.lua" },
+          files = { "computer/neural/neural.lua", "shared/screens.lua", "shared/ui.lua", "shared/ui_widgets.lua", "shared/ui_parts.lua", "shared/ui_motion.lua" },
         },
         art = {
           name = "Art controller",
@@ -178,7 +178,7 @@ local M = {
           files = { "computer/cartographer/cartographer.lua", "computer/cartographer/carto_store.lua",
                     "computer/cartographer/carto_paint.lua", "computer/cartographer/carto_floor.lua",
                     "computer/cartographer/carto_screen.lua", "computer/art/art_gfx.lua", "shared/mapchunk.lua",
-                    "shared/envfile.lua", "shared/slash.lua", "shared/ui.lua", "shared/ui_widgets.lua",
+                    "shared/envfile.lua", "shared/slash.lua", "shared/screens.lua", "shared/ui.lua", "shared/ui_widgets.lua",
                     "shared/ui_parts.lua", "shared/ui_motion.lua" },
         },
       },

@@ -50,6 +50,12 @@ function Net:remove(name)
   for _, m in ipairs(self.modems) do m.comp:_queue("peripheral_detach", name) end
   return dev
 end
+-- A monitor out on the cable (a peripheral called `name`); tap it with mon:touch(x, y).
+function Net:monitor(name, w, h)
+  local m = Term.new(w or 57, h or 24)
+  m.types = { "monitor" }
+  return self:add(name, m)
+end
 function Net:get(name) return self.devices[name] end
 function Net:names()
   local t = {}
@@ -66,11 +72,20 @@ Modem.__index = Modem
 Modem.peripheralMethods = { "isWireless", "open", "close", "isOpen", "closeAll", "transmit", "getNameLocal",
   "getNamesRemote", "isPresentRemote", "getTypeRemote", "callRemote" }
 function Modem:isWireless() return not self.wired end
-function Modem:open() end
-function Modem:close() end
-function Modem:isOpen() return true end
-function Modem:closeAll() end
-function Modem:transmit() end
+-- Channels: open/close are remembered per modem. A wired transmit reaches every other modem on the same cable
+-- that has the channel open, as a modem_message event (side, channel, replyChannel, message, distance).
+function Modem:open(ch) self.chan = self.chan or {}; self.chan[ch] = true end
+function Modem:close(ch) if self.chan then self.chan[ch] = nil end end
+function Modem:isOpen(ch) return (self.chan and self.chan[ch]) == true end
+function Modem:closeAll() self.chan = nil end
+function Modem:transmit(ch, reply, msg)
+  if not self.wired then return end
+  for _, m in ipairs(self.net.modems) do
+    if m ~= self and m.comp and m.comp.alive and m.chan and m.chan[ch] then
+      m.comp:_queue("modem_message", m.side, ch, reply, deepcopy(msg), 0)
+    end
+  end
+end
 function Modem:getNameLocal() return self.comp and ("computer_" .. self.comp.id) or nil end
 function Modem:getNamesRemote() return self.wired and self.net:names() or {} end
 function Modem:isPresentRemote(n) return self.wired and self.net:get(n) ~= nil end
@@ -289,17 +304,20 @@ function Computer:monitor(side, w, h)
   self:attach(side, m)
   return m
 end
+-- A monitor on a cable is touched on every computer with a wired modem on that cable (as in the game).
 function Term:touch(x, y)
-  local c = self.comp or (self.net and error("touch the monitor via a computer it is attached to"))
-  c:_queue("monitor_touch", self.side or self.netName, x, y)
+  if self.comp then self.comp:_queue("monitor_touch", self.side, x, y); return end
+  for _, m in ipairs(self.net.modems) do m.comp:_queue("monitor_touch", self.netName, x, y) end
 end
 
 -- Resize a screen as the game does (monitor blocks added or removed; a window resized): the program gets
 -- term_resize (its own screen) or monitor_resize (a monitor).
 function Term:setSize(w, h)
   self:resize(w, h)
-  local c = self.comp
-  if c then c:_queue("monitor_resize", self.side or self.netName) end
+  if self.comp then self.comp:_queue("monitor_resize", self.side)
+  elseif self.net then
+    for _, m in ipairs(self.net.modems) do m.comp:_queue("monitor_resize", self.netName) end
+  end
 end
 function Computer:resize(w, h)
   self.screen:resize(w, h)
@@ -368,6 +386,7 @@ end
 function Computer:reboot()
   self:_stop()
   self.q, self.printLog, self.openModems, self.error = {}, {}, {}, nil
+  for _, dev in pairs(self.sides) do dev.chan = nil end     -- like CC: a reboot closes every channel
   self.bootAt = self.world.now
   self.screen:clear(); self.screen:setCursorPos(1, 1)
   self.screen.fg, self.screen.bg = 1, 32768
