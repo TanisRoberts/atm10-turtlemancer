@@ -2,7 +2,7 @@
 
 Code: `computer/neural/neural.lua` (columns, power, passes, network) and `neural_screens.lua` (every screen, built only from the UI kit, `docs/systems/ui.md`). Design: `docs/design/neural.md`. What the lab does: README, "Neural lab", and the header of neural.lua.
 
-neural.lua hands the screens a snapshot (`S.snap()`: columns `L`, per-column state `P`, `cfg`, problems, power, note) and the actions (`setPaused`, `setForce`, `check`, `setRule`, `scan`, `findMonitor`). The monitor lookup is in neural.lua (`findMonitor`: a monitor touching the computer); the kit's view is given the monitor's peripheral name. The computer's own screen and the monitor each keep their own page.
+neural.lua hands the screens a snapshot (`S.snap()`: columns `L`, per-column state `P`, `cfg`, problems, power, note) and the actions (`setPaused`, `setForce`, `check`, `setRule`, `scan`, `findMonitor`). The monitor lookup is in neural.lua (`findMonitor`: the monitor `shared/screens.lua` picked at boot, a touching one or one from the cable; `/monitors` forgets the pick and reboots); the kit's view is given the monitor's peripheral name. The computer's own screen and the monitor each keep their own page.
 
 ## Overview
 

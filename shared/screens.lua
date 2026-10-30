@@ -523,6 +523,19 @@ function S:get(id)
   end
 end
 
+-- Mid-run lookup that never asks: the slot's monitor if it still has one, else (slot 1) a touching monitor that
+-- appeared since. For controllers whose event loop re-syncs on `peripheral` events.
+function S:current(id)
+  local r = self.res[id]
+  if r and peripheral.isPresent(r.name) then return r.mon, r.name end
+  if r then self.res[id] = nil; self.owned[r.name] = nil end
+  if self.index[id] == 1 and not self.skipped[id] then
+    local touch = monitorNames()
+    local best = biggestTouching(touch, takenNames(self))
+    if best then return adopt(self, id, best, false), best end
+  end
+end
+
 -- Required slot with nothing to offer: say so on the computer and wait until a monitor appears.
 function S:waitForMonitor(id, held)
   local slot = self:slot(id)

@@ -2,7 +2,7 @@
 
 Code: `computer/plastic/plastic.lua` (machines, passes, network) and `plastic_screens.lua` (every screen, built only from the UI kit, `docs/systems/ui.md`). Design: `docs/design/plastic.md`. Setup and what the factory does: README, "Plastic factory".
 
-plastic.lua hands the screens a snapshot (`S.snap()`: state, totals, taps, units, furnaces, dock, problems) and the actions (`setPaused`, `scan`, `findMonitor`). The monitor lookup is in plastic.lua (`findMonitor`: a monitor touching the computer); the kit's view is given the monitor's peripheral name. The computer's own screen and the monitor show the same dashboard.
+plastic.lua hands the screens a snapshot (`S.snap()`: state, totals, taps, units, furnaces, dock, problems) and the actions (`setPaused`, `scan`, `findMonitor`). The monitor lookup is in plastic.lua (`findMonitor`: the monitor `shared/screens.lua` picked at boot, a touching one or one from the cable; `/monitors` forgets the pick and reboots); the kit's view is given the monitor's peripheral name. The computer's own screen and the monitor show the same dashboard.
 
 ## Dashboard
 

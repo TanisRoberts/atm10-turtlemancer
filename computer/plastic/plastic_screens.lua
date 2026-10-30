@@ -5,7 +5,8 @@
 --   S.snap()         -> the current picture: { cfg, F, tapState, unitState, furnState, problems, note, dockFuel,
 --                       dockPlastic, rate (plastic/h or nil), state ("running"|"paused"|"waiting"), furnaceOn }
 --   S.lines()        -> the status lines (also sent to the mainframe)
---   S.setPaused(p), S.scan(), S.findMonitor() -> wrapped monitor, its peripheral name (or nil)
+--   S.setPaused(p), S.scan(), S.findMonitor() -> wrapped monitor, its peripheral name (or nil),
+--   S.repickMonitor() (forget the saved monitor, reboot), S.handle(event...) (feeds shared/screens.lua)
 --   S.unitCap        -> a unit's tank size in mB
 -- Returns { run = fn }: run() is the event loop (taps, keys, typed commands) and never returns.
 
@@ -211,6 +212,10 @@ cmds:add({ name = "list", help = "what I found on my cable", max = 0, run = func
 end })
 cmds:add({ name = "home", help = "back to the dashboard", max = 0, run = function()
   states.term.page = "home"; views[1].page = 1; return true, "Dashboard" end })
+cmds:add({ name = "monitors", help = "pick the monitor again (reboots)", max = 0, run = function()
+  if not S.repickMonitor then return false, "No monitor to pick here." end
+  S.repickMonitor()
+end })
 cmds:add({ name = "pause", help = "stop moving things (machines keep their contents)", max = 0,
   run = function() S.setPaused(true); return true, "Paused.", "warn" end })
 cmds:add({ name = "stop", help = "same as /pause", max = 0,
@@ -240,7 +245,8 @@ end
 local function run()
   ui.loadAnim("plastic.env")
   syncMonitor()
-  ui.run(views, draw, { tick = 1, on_event = function(e)
+  ui.run(views, draw, { tick = 1, on_event = function(e, ...)
+    if S.handle then S.handle(e, ...) end
     if e == "peripheral" or e == "peripheral_detach" or e == "monitor_resize" then syncMonitor() end
   end })
 end

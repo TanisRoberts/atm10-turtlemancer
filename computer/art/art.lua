@@ -150,21 +150,14 @@ end
 -- Monitor
 ---------------------------------------------------------------------------
 local mon, monName, gfx = nil, nil, nil
--- Finds the biggest advanced monitor touching us. Returns true if the screen changed (new monitor,
--- different size, or gone), so the caller knows to rebuild. Only sets the text scale when it isn't
--- 0.5 already: every setTextScale fires monitor_resize, which would bring us straight back here.
+-- The monitor: the biggest one touching the computer, else one picked from the cable (shared/screens.lua,
+-- docs/systems/screens.md), asked once at boot. findMonitor re-reads it and returns true if the screen changed
+-- (new monitor, different size, or gone), so the caller knows to rebuild. It has to be an advanced monitor.
+local scr = require("screens").new({ slots = { { id = "wall", label = "the art wall", required = true, scale = 0.5 } } })
+scr:open()
 local function findMonitor()
-  local best, bestName, bestM = -1, nil, nil
-  for _, side in ipairs(rs.getSides()) do
-    if peripheral.hasType(side, "monitor") then
-      local m = peripheral.wrap(side)
-      if m.isColour and m.isColour() then
-        if not m.getTextScale or m.getTextScale() ~= 0.5 then m.setTextScale(0.5) end
-        local w, h = m.getSize()
-        if w * h > best then bestM, bestName, best = m, side, w * h end
-      end
-    end
-  end
+  local bestM, bestName = scr:current("wall")
+  if bestM and not (bestM.isColour and bestM.isColour()) then bestM, bestName = nil, nil end
   if not bestM then
     local changed = mon ~= nil
     mon, monName, gfx = nil, nil, nil
@@ -613,6 +606,7 @@ local function uiLoop()
   while true do
     local ev = table.pack(os.pullEvent())
     local e = ev[1]
+    scr:handle(table.unpack(ev, 1, 5))
     if e == "timer" and ev[2] == frameTimer then
       refreshEnv()
       frame = 1 / E.FPS
@@ -661,6 +655,7 @@ local function uiLoop()
     elseif e == "char" then
       local k = ev[2]:lower()
       if k == "q" then return end
+      if k == "m" then scr:repick("wall"); os.reboot() end
       local n = tonumber(k)
       if n and VIEWS[n] and gfx then lastTouch = os.clock(); switchTo(VIEWS[n].id) end
     end
@@ -723,11 +718,12 @@ end
 readEnv()
 math.randomseed(os.epoch("utc"))
 term.clear()
+scr:get("wall")
 findMonitor()
 while not gfx do
   term.setCursorPos(1, 1)
   print("ART CONTROLLER")
-  print("I need an ADVANCED monitor touching one of my sides.")
+  print("I need an ADVANCED monitor, touching me or on the cable.")
   os.pullEvent("peripheral")
   findMonitor()
 end

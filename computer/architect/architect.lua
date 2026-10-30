@@ -690,11 +690,10 @@ end
 local monView = { follow = true }      -- no layer / zoom / pan set: his layer, fitted to the screen
 local mon = { dev = nil, side = nil, gfx = nil, w = 0, h = 0 }
 
-local function findMonitor()
-  for _, side in ipairs(redstone.getSides()) do
-    if peripheral.hasType(side, "monitor") then return peripheral.wrap(side), side end
-  end
-end
+-- The monitor: the biggest one touching the computer, else one picked from the cable (shared/screens.lua,
+-- docs/systems/screens.md), asked once at boot. With none, the map stays on the computer's own screen.
+local scr = require("screens").new({ slots = { { id = "wall", label = "the Architect map", required = false, scale = 0.5 } } })
+local function findMonitor() return scr:current("wall") end
 
 -- (Re)attach to the monitor on one of our sides, and size the map to it
 local function syncMonitor()
@@ -1053,6 +1052,7 @@ local function run(line)
     else ui.zoom = math.max(0.25, tonumber(a)) end
     ui.tab = "map"
   elseif c == "refresh" then st.info = nil; st.layers = {}; askInfo(); notice("Asked Weaver for his plan.")
+  elseif c == "monitors" then scr:repick("wall"); os.reboot()
   elseif c == "help" or c == "?" then ui.help = true
   else
     for _, t in ipairs(TABS) do
@@ -1077,6 +1077,7 @@ end
 
 local function onEvent(e)
   local ev = e[1]
+  scr:handle(table.unpack(e, 1, 5))
   if ev == "rednet_message" then onMessage(e[2], e[3], e[4])
   elseif ev == "peripheral" or ev == "peripheral_detach" or ev == "monitor_resize" then pcall(syncMonitor)
   elseif ev == "mouse_click" then
@@ -1130,6 +1131,8 @@ if not fs.exists("startup.lua") then
   local f = fs.open("startup.lua", "w"); f.write('shell.run("architect")\n'); f.close()
 end
 loadLog()
+scr:open()
+scr:get("wall")
 pcall(syncMonitor)
 addLog("Architect started")
 if hasModem then askInfo() end

@@ -363,12 +363,13 @@ local function pairUp()
   for c in pairs(cfg.train) do if not present[c] then cfg.train[c] = nil end end
 end
 
--- Only a monitor touching the computer. The kit's view gets its peripheral name, so this is the one place that looks.
-local function findMonitor()
-  for _, side in ipairs(rs.getSides()) do
-    if peripheral.hasType(side, "monitor") then return peripheral.wrap(side), side end
-  end
-end
+-- The monitor: the biggest one touching the computer, else one picked from the cable (shared/screens.lua,
+-- docs/systems/screens.md). Asked once at boot; findMonitor only re-reads it. The kit's view gets its peripheral
+-- name, so this is the one place that looks.
+local scr = require("screens").new({ slots = { { id = "wall", label = "the neural lab screen", required = false, scale = 0.5 } } })
+scr:open()
+local function findMonitor() return scr:current("wall") end
+local function repickMonitor() scr:repick("wall"); os.reboot() end
 
 ---------------------------------------------------------------------------
 -- Storage's item counts (heard on tanis-base)
@@ -1110,7 +1111,7 @@ local screens = require("neural_screens")({
              dockMatrices = dockMatrices, storageItems = storageItems, furnatorFuel = furnatorFuel }
   end,
   lines = statusLines, stockText = stockText, accText = accText, shortName = shortName, pathOf = pathOf,
-  setPaused = setPaused, setForce = setForce, check = check, setRule = setRule, scan = scan, findMonitor = findMonitor,
+  setPaused = setPaused, setForce = setForce, check = check, setRule = setRule, scan = scan, findMonitor = findMonitor, repickMonitor = repickMonitor, handle = function(...) scr:handle(...) end,
 })
 
 -- A wireless/ender modem reaches storage and the mainframe (the wired one is the lab cable)
@@ -1122,5 +1123,6 @@ readEnv()
 readRules()
 loadCfg()
 scan()
+scr:get("wall")
 note = cfg.paused and "Paused" or "Starting"
 parallel.waitForAny(workLoop, netLoop, lampLoop, screens.run)

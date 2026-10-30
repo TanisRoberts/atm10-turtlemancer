@@ -36,6 +36,14 @@ Every message carries `from` (the computer id). A monitor a peer owns or is numb
 
 `screens_changed <slotId>` is queued after a `monitor_resize` (the module has already re-measured: `s.size[id] = {w=, h=}`) or a `peripheral_detach` of an owned monitor (the slot is empty; the next `get` falls back to rules 1-3). Both need `s:handle` / `s:daemon` to see the raw events.
 
+## Mid-run lookup
+
+`s:current(id)` never asks: it returns the slot's monitor (or, for slot 1, a touching monitor that appeared since). Controllers that re-sync on `peripheral` events use it after one `get` at boot.
+
+## Who uses it
+
+Mainframe (`$island monitors`), neural, plastic, cartographer, architect (`/monitors`, `monitors`) and art (key `M`). All use one optional slot `wall` (art: required) and reboot on a re-pick. Tests: `wired_monitors_5.lua`.
+
 ## Tests
 
 `tests/scenarios/screens_basic.lua`, `screens_peers.lua`, stand-in controller `tests/demo/screens_stub.lua`. The sim has monitors on a cable (`net:monitor(name, w, h)`, touch goes to every computer on that cable) and `modem.open/transmit` between computers on one cable.

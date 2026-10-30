@@ -65,7 +65,7 @@ Keys (command bar empty): arrows pan, `-` / `+` zoom, `f` fits.
 
 ## Setting one up
 
-1. Advanced computer with an ender modem; an advanced monitor touching it (laid flat is the idea, any works); optional disk drives next to it with floppies.
+1. Advanced computer with an ender modem; an advanced monitor touching it or on the wired cable (the biggest touching one wins; otherwise tap-to-pick, `/monitors` asks again; laid flat is the idea, any works); optional disk drives next to it with floppies.
 2. `startup` -> pick Cartographer. It lists itself on the mainframe board within seconds.
 3. It finds Seagull on the radio and catches up with his map. The old `art.map` on the art controller is not read; Seagull's `seagull.map` is the master.
 

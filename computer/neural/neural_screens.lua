@@ -5,7 +5,8 @@
 --   S.snap()  -> { L, P, cfg, E, problems, power, note, state ("running"|"paused"|"waiting"), dockMatrices,
 --                  storageItems, furnatorFuel, matrixId }
 --   S.lines(), S.stockText(p), S.accText(stats), S.shortName(id), S.pathOf(id)
---   S.setPaused(v), S.setForce(c, v), S.check(c), S.setRule(item, value), S.scan(), S.findMonitor() -> mon, name
+--   S.setPaused(v), S.setForce(c, v), S.check(c), S.setRule(item, value), S.scan(), S.findMonitor() -> mon, name,
+--   S.repickMonitor() (forget the saved monitor, reboot), S.handle(event...) (feeds shared/screens.lua)
 -- Returns { run = fn, cmds = ... }: run() is the event loop (taps, keys, typed commands) and never returns.
 
 local ui = require("ui")
@@ -375,6 +376,10 @@ cmds:add({ name = "target", args = "<n> <count>", min = 2, max = 2, help = "how 
   S.setRule(p.item, count)
   return true, ("Column %d keeps %s."):format(n, count == 0 and "nothing (off)" or tostring(count))
 end })
+cmds:add({ name = "monitors", help = "pick the monitor again (reboots)", max = 0, run = function()
+  if not S.repickMonitor then return false, "No monitor to pick here." end
+  S.repickMonitor()
+end })
 cmds:add({ name = "pause", help = "stop the lab (machines keep their contents)", max = 0,
   run = function() S.setPaused(true); return true, "Paused.", "warn" end })
 cmds:add({ name = "stop", help = "same as /pause", max = 0, run = function() S.setPaused(true); return true, "Paused.", "warn" end })
@@ -402,7 +407,8 @@ end
 local function run()
   ui.loadAnim("neural.env")
   syncMonitor()
-  ui.run(views, draw, { tick = 1, on_event = function(e)
+  ui.run(views, draw, { tick = 1, on_event = function(e, ...)
+    if S.handle then S.handle(e, ...) end
     if e == "peripheral" or e == "peripheral_detach" or e == "monitor_resize" then
       syncMonitor()
       if e ~= "monitor_resize" then os.queueEvent("neural_work") end   -- a new column (or a removed one): pick it up now

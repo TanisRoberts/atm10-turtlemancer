@@ -257,6 +257,8 @@ cmds:add({ name = "goto", args = "x z", help = "centre the map on a block", min 
     act.centre(x, z)
     return true, ("Map centred on %d,%d"):format(x, z)
   end })
+cmds:add({ name = "monitors", help = "pick the floor monitor again (reboots)", max = 0,
+  run = function() scr:repick("wall"); os.reboot() end })
 cmds:add({ name = "fit", help = "show everything explored", max = 0, run = function() act.fit(); return true, "Fitting everything" end })
 cmds:add({ name = "fill", args = "on|off", help = "the floor as a static table", min = 1, max = 1,
   run = function(a)
@@ -290,18 +292,13 @@ _G.CARTO_DEBUG = { st = st, store = store, sh = sh }   -- for the simulator scen
 ---------------------------------------------------------------------------
 -- Monitors
 ---------------------------------------------------------------------------
+-- The floor: the biggest monitor touching the computer, else one picked from the cable (shared/screens.lua,
+-- docs/systems/screens.md). Asked once at boot; the floor module keeps its own text scale logic.
+local scr = require("screens").new({ slots = { { id = "wall", label = "the map floor", required = false, scale = 0.5 } } })
+scr:open()
 local function findFloor()
-  local best, bestSide, bestSize = nil, nil, -1
-  for _, side in ipairs(rs.getSides()) do
-    if peripheral.hasType(side, "monitor") then
-      local m = peripheral.wrap(side)
-      if m.isColour and m.isColour() then
-        local w, h = m.getSize()
-        if w * h > bestSize then best, bestSide, bestSize = m, side, w * h end
-      end
-    end
-  end
-  return best, bestSide
+  local m, name = scr:current("wall")
+  if m and m.isColour and m.isColour() then return m, name end
 end
 
 local function syncFloor()
@@ -483,7 +480,8 @@ P.apply(term.current())
 
 local lastTick, lastGauge = -100, -100
 local rescan = false
-local function onEvent(e, a, b, c)
+local function onEvent(e, a, b, c, d)
+  scr:handle(e, a, b, c, d)
   if e == "disk" or e == "disk_eject" then rescan = true
   elseif e == "peripheral" or e == "peripheral_detach" or e == "monitor_resize" then syncFloor()
   elseif e == "monitor_touch" and floor and a == floor.side then
@@ -536,6 +534,7 @@ for k in pairs(store.chunks) do
   if n % 100 == 0 then sleepNow() end
 end
 st.mapRev = 1
+scr:get("wall")
 syncFloor()
 if not floor then ui.say("No advanced monitor touching me: the floor is dark, this screen still works.", "warn") end
 st.gauge = { store:gauge() }

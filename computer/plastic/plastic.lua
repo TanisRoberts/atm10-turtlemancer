@@ -197,13 +197,13 @@ local function scan()
   F = f
 end
 
--- Only a monitor touching the computer (screens on a cable belong to other computers). The kit's view gets its
--- peripheral name, so this is the one place that looks.
-local function findMonitor()
-  for _, side in ipairs(rs.getSides()) do
-    if peripheral.hasType(side, "monitor") then return peripheral.wrap(side), side end
-  end
-end
+-- The monitor: the biggest one touching the computer, else one picked from the cable (shared/screens.lua,
+-- docs/systems/screens.md). Asked once at boot; findMonitor only re-reads it. The kit's view gets its peripheral
+-- name, so this is the one place that looks.
+local scr = require("screens").new({ slots = { { id = "wall", label = "the plastic factory screen", required = false, scale = 0.5 } } })
+scr:open()
+local function findMonitor() return scr:current("wall") end
+local function repickMonitor() scr:repick("wall"); os.reboot() end
 
 ---------------------------------------------------------------------------
 -- State for the screen and the network
@@ -531,7 +531,8 @@ local screens = require("plastic_screens")({
              note = note, dockFuel = dockFuel, dockPlastic = dockPlastic, state = stateWord(),
              rate = r and r * 60 / PER_RUBBER_LATEX or nil, furnaceOn = yes("FURNACE") }
   end,
-  lines = statusLines, setPaused = setPaused, scan = scan, findMonitor = findMonitor, unitCap = UNIT_CAP,
+  lines = statusLines, setPaused = setPaused, scan = scan, findMonitor = findMonitor, repickMonitor = repickMonitor, handle = function(...) scr:handle(...) end,
+  unitCap = UNIT_CAP,
 })
 
 -- Talk on every modem (a wireless/ender one reaches the mainframe; it's optional)
@@ -542,5 +543,6 @@ end)
 readEnv()
 loadCfg()
 scan()
+scr:get("wall")
 note = cfg.paused and "Paused" or "Starting"
 parallel.waitForAny(workLoop, netLoop, screens.run)
