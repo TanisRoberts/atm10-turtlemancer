@@ -195,7 +195,6 @@ end
 local function manager()  return find("inventory_manager", "inventoryManager") end
 local function detector() return find("player_detector", "playerDetector") end
 local function chatBox()  return find("chat_box", "chatBox") end
-local mon = peripheral.find("monitor")   -- the visitor table window (nil if the wall is too narrow)
 
 -- The chat box has a ~1 s cooldown shared with island.lua (_G.CHAT_LAST), so we never trip it.
 local function say(msg, player, range)
@@ -375,14 +374,9 @@ local function whenText(name, v)
   return os.date("%d %b", math.floor((v.last or 0) / 1000)), colours.grey
 end
 
+-- The wall (wall.lua) draws the visitor column; this hands it who is there and the "are you home" line.
+local WHEN_TONE = { [colours.lime] = "good", [colours.white] = "fg", [colours.lightGrey] = "dim", [colours.grey] = "dim" }
 local function drawVisitors()
-  if not mon then return end
-  local w, h = mon.getSize()
-  mon.setBackgroundColour(colours.black); mon.clear()
-  mon.setCursorPos(1, 1); mon.setBackgroundColour(colours.grey); mon.clearLine()
-  mon.setTextColour(colours.cyan); mon.write(" VISITORS")
-  mon.setBackgroundColour(colours.black)
-
   local owner = ownerName()
   local list = {}
   for name, v in pairs(S.visitors) do
@@ -394,33 +388,23 @@ local function drawVisitors()
     if a.here ~= b.here then return a.here end
     return (a.v.last or 0) > (b.v.last or 0)
   end)
-  if not detector() then
-    mon.setCursorPos(2, 3); mon.setTextColour(colours.red); mon.write(("No player detector"):sub(1, w - 2))
-  elseif #list == 0 then
-    mon.setCursorPos(2, 3); mon.setTextColour(colours.grey); mon.write(("Nobody yet"):sub(1, w - 2))
-  end
-  for i, e in ipairs(list) do
-    local y = i + 2
-    if y > h - 2 then break end
+  local rows = {}
+  for _, e in ipairs(list) do
     local when, c = whenText(e.name, e.v)
-    mon.setCursorPos(2, y)
-    mon.setTextColour(e.here and colours.lime or colours.white)
-    mon.write(e.name:sub(1, math.max(1, w - #when - 3)))
-    mon.setCursorPos(w - #when, y); mon.setTextColour(c); mon.write(when)
+    rows[#rows + 1] = { name = e.name, when = when, tone = WHEN_TONE[c] or "fg", here = e.here }
   end
-
-  -- Footer: are you home (and so is storage locked)?
-  mon.setCursorPos(2, h)
+  local foot
   if not known then
-    mon.setTextColour(colours.grey); mon.write(("You: ?"):sub(1, w - 2))
+    foot = { text = "You: ?", tone = "dim" }
   elseif ownerHome(owner) then
-    mon.setTextColour(colours.lime); mon.write(("You're home"):sub(1, w - 2))
+    foot = { text = "You're home", tone = "good" }
   else
     local away = leftAt and math.max(0, math.floor((os.clock() - leftAt) / 60)) or nil
     local txt = away and ("Away %dm"):format(away) or "Away"
     if yes("AUTO_LOCK") then txt = txt .. ", locked" end
-    mon.setTextColour(colours.orange); mon.write(txt:sub(1, w - 2))
+    foot = { text = txt, tone = "warn" }
   end
+  _G.WALL_VISITORS = { rows = rows, detector = detector() ~= nil, foot = foot }
 end
 
 ---------------------------------------------------------------------------

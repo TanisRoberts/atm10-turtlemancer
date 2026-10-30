@@ -1,5 +1,5 @@
 -- The mainframe and the Operator: the board row, alerts, and `island operator` chat commands.
--- island.lua, board.lua and operator_link.lua run side by side on one simulated mainframe (as mainframe.lua does).
+-- island.lua, board.lua, wall.lua and operator_link.lua run side by side on one simulated mainframe (as mainframe.lua does).
 local cc = require("sim.cc")
 local T  = require("sim.test")
 
@@ -25,6 +25,7 @@ local LAUNCH = [[
   parallel.waitForAll(
     function() os.run(sandbox(nil), "island.lua") end,
     function() os.run({ require = require }, "board.lua") end,
+    function() require("wall").run(peripheral.wrap("bottom"), "bottom") end,
     function() os.run(sandbox(nil), "operator_link.lua") end)
 ]]
 
@@ -83,7 +84,7 @@ T.test("operator mainframe: the board shows an Operator row with ON, FE/t, buffe
   world:run(20)
   T.eq(mf.error, nil)
   T.truthy(mon:find("Operator"), mon:text())
-  T.truthy(mon:find("RUNNING"), "state\n" .. mon:text())
+  T.truthy(mon:find("running"), "state\n" .. mon:text())
   local _, y = mon:find("Operator")
   local row = mon:line(y)
   T.truthy(row:find("ON, ", 1, true) and row:find("FE/t", 1, true) and row:find("buffer", 1, true) and row:find("uranium 48", 1, true), row)
@@ -160,7 +161,7 @@ T.test("operator mainframe: a reactor awaiting setup shows on the board and rais
   say(world, mf, "$island alerts")
   world:run(20)
   T.truthy(mon:find("awaiting setup"), mon:text())
-  T.truthy(mon:find("SETUP"), mon:text())
+  T.truthy(mon:find("setup"), mon:text())
   T.falsy(heard(chat, "waste not clearing"), "no alert for a reactor that is not set up\n" .. dump(chat))
   say(world, mf, "$island operator status")
   T.truthy(heard(chat, "Awaiting Setup"), dump(chat))

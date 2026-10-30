@@ -253,7 +253,8 @@ T.test("mainframe board: one Cartographer row replaces Seagull's own row", funct
     end
     parallel.waitForAll(
       function() os.run({ require = require }, "base_link.lua") end,
-      function() os.run({ require = require }, "board.lua") end)
+      function() os.run({ require = require }, "board.lua") end,
+      function() require("wall").run(peripheral.wrap("bottom"), "bottom") end)
   ]])
   mf:run("launch")
   local cg = w:computer{ id = 10, label = "Cartographer" }

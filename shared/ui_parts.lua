@@ -138,18 +138,25 @@ end
 
 -- v:board(x, y, w, rows): rows = { title = "Machines" (optional), { name, state, detail, age (seconds or text),
 -- color (role, default from the state word), glyph }, ... }. Read-only, no focus. A row not heard for 30 s goes grey
--- and still. Returns the next free row.
+-- and still. A row `{ section = "Mining" }` draws a section label instead. Returns the next free row.
 function View:board(x, y, w, rows)
   if rows.title then y = self:boardHeader(x, y, w, rows.title) end
   local nl, sl, al = 6, 2, 2
   for _, r in ipairs(rows) do
-    nl = max(nl, #tostring(r.name or "")); sl = max(sl, #tostring(r.state or "")); al = max(al, #age(r.age))
+    if not r.section then
+      nl = max(nl, #tostring(r.name or "")); sl = max(sl, #tostring(r.state or "")); al = max(al, #age(r.age))
+    end
   end
   nl = min(nl, max(6, floor(w * 0.32))); sl = min(sl, 10)
   local sx = x + 2 + nl + 1                      -- the state cell: glyph, space, word
   local dx = sx + 2 + sl + 1
   local ax = x + w - al - 1
   for _, r in ipairs(rows) do
+    if r.section then                              -- { section = "Mining" }: a label row between groups
+      self:section(x, y, w, r.section)
+      y = y + 1
+      goto next
+    end
     local stale = type(r.age) == "number" and r.age >= STALE_S
     local state = tostring(r.state or "")
     local tone = stale and "dim" or (r.color or ui.stateRole(state))
@@ -164,6 +171,7 @@ function View:board(x, y, w, rows)
     local a = age(r.age)
     self:put(x + w - #a, y, a, "dim", "bg")
     y = y + 1
+    ::next::
   end
   return y
 end

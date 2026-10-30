@@ -37,7 +37,7 @@ local M = {
             .. "lock (Player Detector). Needs an ender or wireless modem.",
           run = "mainframe",
           files = { "computer/mainframe/mainframe.lua", "computer/mainframe/island.lua", "shared/screens.lua", "shared/ui.lua", "shared/ui_widgets.lua", "shared/ui_parts.lua", "shared/ui_motion.lua",
-                    "computer/mainframe/board.lua", "computer/mainframe/butler.lua",
+                    "computer/mainframe/board.lua", "computer/mainframe/butler.lua", "computer/mainframe/wall.lua",
                     "computer/mainframe/base_link.lua",
                     "computer/mainframe/dig_link.lua", "computer/mainframe/weaver_link.lua",
                     "computer/mainframe/farm_link.lua", "computer/mainframe/operator_link.lua", "computer/mainframe/operator_fmt.lua",

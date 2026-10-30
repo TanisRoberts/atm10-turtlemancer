@@ -37,7 +37,6 @@ local function find(...)
 end
 
 local env = find("environment_detector", "environmentDetector")
-local mon = peripheral.find("monitor")
 local function chatBox() return find("chat_box", "chatBox") end -- looked up each time, so a new box just works
 
 if not env then
@@ -57,13 +56,6 @@ do
   if #missing > 0 then
     print("Detector lacks: " .. table.concat(missing, ", ") .. " (working around it)")
   end
-end
-
-local out = mon or term
-if mon then mon.setTextScale(0.5) end
-
-local function col(c)
-  out.setTextColour(out.isColour() and c or colours.white)
 end
 
 local function pretty(id)
@@ -381,65 +373,17 @@ local function read()
   return r
 end
 
-local function line(y, label, value, c)
-  out.setCursorPos(1, y)
-  col(colours.lightGrey); out.write(label)
-  col(c or colours.white); out.write(value)
-end
-
--- Compact strip for when the station shares the monitor (3 lines)
-local function drawCompact(r, w, h)
-  local function seg(text, c) col(c or colours.white); out.write(text) end
-  out.setCursorPos(1, 1)
-  seg(" ISLAND ", colours.lime)
-  seg(r.time .. "  ")
-  seg(r.phase, r.phase == "Night" and colours.red or colours.yellow)
-  seg("  day " .. r.day .. "  ", colours.lightGrey)
-  seg(r.weather, r.weather == "Clear" and colours.lightBlue or colours.orange)
-  if h >= 2 then
-    out.setCursorPos(1, 2)
-    seg((" Moon %s  Biome %s  Light %s/%s"):format(r.moon, r.biome, tostring(r.sky), tostring(r.block)):sub(1, w),
-      colours.lightGrey)
+-- The wall (wall.lua) draws the strip and the nearby list; this hands it the numbers and the words.
+local function hand(r)
+  local hostile, others = {}, 0
+  for _, e in ipairs(r.near) do
+    if HOSTILES[e.name] then hostile[#hostile + 1] = { name = e.name, d = e.d } else others = others + 1 end
   end
-  if h >= 3 then
-    out.setCursorPos(1, 3)
-    local hostile, others = {}, 0
-    for _, e in ipairs(r.near) do
-      if HOSTILES[e.name] then hostile[#hostile + 1] = ("%s %.0fm"):format(e.name, e.d) else others = others + 1 end
-    end
-    if #hostile > 0 then
-      seg((" Danger: " .. table.concat(hostile, ", ")):sub(1, w), colours.red)
-    elseif #activeOrder > 0 then
-      local text = active[activeOrder[#activeOrder]]
-      local more = #activeOrder > 1 and (" (+%d more)"):format(#activeOrder - 1) or ""
-      seg((" ! " .. text):sub(1, w - #more) .. more, colours.orange)
-    else
-      seg((" All clear (%d other thing%s nearby)"):format(others, others == 1 and "" or "s"):sub(1, w), colours.lime)
-    end
-  end
-end
-
-local function draw(r)
-  out.setBackgroundColour(colours.black)
-  out.clear()
-  local w, h = out.getSize()
-  if h < 10 then return drawCompact(r, w, h) end
-  out.setCursorPos(1, 1); col(colours.lime); out.write("ISLAND STATION")
-  line(3, "Time    ", r.time .. "  (day " .. r.day .. ")")
-  line(4, "Phase   ", r.phase, r.phase == "Night" and colours.red or colours.yellow)
-  line(5, "Weather ", r.weather, r.weather == "Clear" and colours.lightBlue or colours.orange)
-  line(6, "Moon    ", r.moon)
-  line(7, "Biome   ", r.biome)
-  line(8, "Light   ", ("sky %s  block %s"):format(tostring(r.sky), tostring(r.block)))
-  if r.fuel then line(9, "Fuel    ", tostring(r.fuel)) end
-  out.setCursorPos(1, 11); col(colours.lightGrey)
-  out.write("Nearby (" .. SCAN_RANGE .. "m):")
-  if #r.near == 0 then line(12, " ", "nothing", colours.grey) end
-  for i, e in ipairs(r.near) do
-    if 11 + i > h then break end
-    line(11 + i, " ", ("%-14s %5.1fm"):format(e.name:sub(1, 14), e.d),
-      HOSTILES[e.name] and colours.red or colours.white)
-  end
+  local alert
+  if #activeOrder > 0 then alert = { text = active[activeOrder[#activeOrder]], more = #activeOrder - 1 } end
+  _G.WALL_STRIP = { time = r.time, day = r.day, phase = r.phase, weather = r.weather, moon = r.moon, biome = r.biome,
+    sky = r.sky, block = r.block, fuel = r.fuel, range = SCAN_RANGE, near = r.near, hostile = hostile, others = others,
+    alert = alert, hostiles = HOSTILES }
 end
 
 local function summary(r)
@@ -470,7 +414,7 @@ local function stationLoop()
   while true do
     state = read()
     watch()
-    draw(state)
+    hand(state)
     stationAlerts(state)
     os.sleep(REFRESH)
   end
