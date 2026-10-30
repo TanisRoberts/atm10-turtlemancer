@@ -27,8 +27,12 @@ Add a row in `board.lua`'s `rows()`: `{ name, state, detail, seen, group }` with
 
 ## Commands
 
-The wall has nothing to type into and the mainframe has no kit screen on its own terminal (that is the shell, where `reset` is typed), so there is no `/command` bar here. Chat (`$island ...`, `$dump`, `$pocket`, `$lock`) is how the mainframe is driven, and it is unchanged: `island status | scan | miner | storage | operator | alerts | test | help | remove_ring`.
+The wall has nothing to type into and the mainframe has no kit screen on its own terminal (that is the shell, where `reset` is typed), so there is no `/command` bar here. Chat (`$island ...`, `$dump`, `$pocket`, `$lock`) is how the mainframe is driven, and it is unchanged: `island status | scan | miner | storage | operator | alerts | test | help | remove_ring | monitors`.
 
 ## Tests
 
 `tests/scenarios/mainframe_wall.lua` runs the real `mainframe.lua` with stand-in machines at 57x24, 57x38, 36x24 and 164x81: rows, colours, the visitor column, grey rows after 30 s, paging. `operator_mainframe.lua` checks the Operator rows on the wall.
+
+## Which monitor is the wall
+
+`mainframe.lua` asks `shared/screens.lua` (see `docs/systems/screens.md`) for one slot, `wall`: the biggest monitor touching the computer, as before. With none touching, the mainframe shows numbers on the unowned monitors on the cable and you tap the one you want (or type its number on the computer); the pick is saved in `monitors.cfg`. The mainframe runs the claim daemon so other computers don't offer its wall. A resized or unplugged wall reboots the mainframe. `$island monitors` forgets the pick and reboots, which asks again. More slots (the light strips) can be added to the list at the top of `mainframe.lua`.

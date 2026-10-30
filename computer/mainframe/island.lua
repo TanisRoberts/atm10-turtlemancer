@@ -3,6 +3,7 @@
 --
 -- Chat commands (start with $ to keep them out of public chat, e.g. "$island miner"):
 --   island status | scan | miner (every Canary) | storage | operator [reactor] on|off|auto|status | alerts | test | help
+--   island monitors             forget the saved wall monitor and reboot, which asks again (shared/screens.lua)
 --   island remove_ring [name]   takes a cursed ring out of your Curios slots (ring.lua)
 -- ($dump and $pocket are the butler's: see butler.lua)
 -- "island alerts" subscribes you to private alerts: storage filling up, the miner going quiet,
@@ -423,7 +424,7 @@ end
 ---------------------------------------------------------------------------
 -- Chat commands
 ---------------------------------------------------------------------------
-local HELP = "Commands: island status | scan | miner | storage | weaver | woodpecker | partridge | smelt | plastic | neural | operator | alerts | test | remove_ring."
+local HELP = "Commands: island status | scan | miner | storage | weaver | woodpecker | partridge | smelt | plastic | neural | operator | alerts | test | remove_ring | monitors."
   .. " Your inventory: $get [n] <item> | $dump | $pocket"
 
 local function chatLoop()
@@ -565,6 +566,13 @@ local function chatLoop()
           say("Alerts on. I'll message you about storage and the miner, even when you're away from base.", user)
         end
         saveA()
+      elseif cmd == "monitors" then
+        if _G.MAINFRAME_REPICK then
+          say("Rebooting to pick the wall monitor again.", user)
+          _G.MAINFRAME_REPICK()
+        else
+          say("The mainframe can't re-pick its monitor right now.", user)
+        end
       elseif cmd == "remove_ring" then
         local word = tostring(msg):lower():match("remove_ring%s+(%S+)")
         say(ring.remove(find("inventory_manager", "inventoryManager"), user, word), user)

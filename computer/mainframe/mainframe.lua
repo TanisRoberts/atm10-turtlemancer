@@ -10,21 +10,21 @@
 --                        [ status board: every machine | visitors ]
 -- wall.lua draws all of it on the UI kit; island.lua, board.lua and butler.lua (Inventory Manager +
 -- Player Detector) only hand it what to show. The visitor column only appears when the wall is wide enough.
--- Only monitors touching the computer count; the biggest one is the wall.
+-- The wall is the biggest monitor touching the computer; with none touching, you pick one from the cable.
 -- Mining control lives on its own computer now (the Foreman); dig_link just listens to the Canaries.
 -- Any program can be missing or crash; the others keep running.
 
-local TEXT_SCALE    = 0.5
+-- Find the wall, the one place that looks (shared/screens.lua, docs/systems/screens.md): the biggest monitor
+-- touching the computer, else the one picked from the monitors on the cable (saved in monitors.cfg).
+-- More slots (the light strips) go in this list later.
+local screens = require("screens").new({ slots = { { id = "wall", label = "the main wall", required = false, scale = 0.5 } } })
+screens:open()
+local wall, wallName = screens:get("wall")
 
--- Find the wall, the one place that looks: the biggest monitor touching the computer.
--- Monitors out on the cable belong to other computers.
-local wallName, best = nil, -1
-for _, n in ipairs(rs.getSides()) do
-  if peripheral.hasType(n, "monitor") then
-    local m = peripheral.wrap(n); m.setTextScale(TEXT_SCALE)
-    local w, h = m.getSize()
-    if w * h > best then wallName, best = n, w * h end
-  end
+-- `$island monitors` (island.lua): forget the saved pick and reboot, which asks again.
+_G.MAINFRAME_REPICK = function()
+  screens:repick("wall")
+  os.reboot()
 end
 
 -- Give a script its own view of the world: optional silenced print.
@@ -51,9 +51,15 @@ end
 -- The wall: wall.lua draws on the monitor, given its peripheral name so taps find it.
 local function runWall()
   if not wallName then return os.pullEvent("never") end
-  local ok, err = pcall(function() require("wall").run(peripheral.wrap(wallName), wallName) end)
+  local ok, err = pcall(function() require("wall").run(wall, wallName) end)
   printError("Wall stopped: " .. tostring(err))
   return os.pullEvent("never")
+end
+
+-- Answers other computers' monitor claims; a resized or unplugged wall means the windows are the wrong size: reboot.
+local function runScreens()
+  parallel.waitForAny(function() screens:daemon() end, function() os.pullEvent("screens_changed") end)
+  os.reboot()
 end
 
 term.clear(); term.setCursorPos(1, 1)
@@ -61,6 +67,7 @@ print("Mainframe running: island station, status board, butler, links.")
 print("Reboot (hold Ctrl+R) to update. Type reset to give this computer a new role.")
 parallel.waitForAll(
   runWall,
+  runScreens,
   runScript("island.lua",        sandbox(true), "Island station"),
   runScript("board.lua",         sandbox(true), "Status board"),
   runScript("butler.lua",        sandbox(true), "Butler"),
