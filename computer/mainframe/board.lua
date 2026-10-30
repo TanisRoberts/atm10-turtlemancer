@@ -34,7 +34,8 @@ local function rows()
   end
   local op = _G.OPERATOR
   if op then
-    for _, r in ipairs(require("operator_fmt").boardRows(op, _G.OPERATOR_SEEN)) do r[5] = "Labs"; out[#out + 1] = r end
+    local rf, rfSeen = _G.REACTOR_FUEL, _G.REACTOR_FUEL_SEEN
+    for _, r in ipairs(require("operator_fmt").boardRows(op, _G.OPERATOR_SEEN, rf, rfSeen and os.clock() - rfSeen)) do r[5] = "Labs"; out[#out + 1] = r end
   end
   local digs = {}
   for _, e in pairs(_G.CANARIES or {}) do

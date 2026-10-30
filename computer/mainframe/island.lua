@@ -20,7 +20,6 @@ local opfmt = require("operator_fmt")
 local ring = require("ring")
 local tune = require("envfile").new("island.env", "Mainframe alert settings.", {
   { "OPERATOR_SILENT_AFTER", 60, "Seconds without the Operator's heartbeat before a 'reactor silent' alert." },
-  { "URANIUM_LOW", 16, "Alert when Storage reports fewer uranium ingots than this." },
 })
 tune.load()
 local HOSTILES = {
@@ -199,6 +198,7 @@ local function farmLine(st)
 end
 
 local operatorKeys = {} -- reactor problems we've raised
+local fuelKeys = {}     -- reactor fuel chest problems we've raised
 local lastHaul = {}   -- per Canary
 local factoryKeys = {} -- plastic factory problems we've raised
 local neuralKeys = {}  -- neural lab problems we've raised
@@ -253,11 +253,20 @@ local function watch()
     local silent = os.clock() - _G.OPERATOR_SEEN > tune.v.OPERATOR_SILENT_AFTER
     condition("operatorSilent", silent, ("Reactor silent: no word from the Operator (%s) for %d seconds. Is it running?"):format(
       tostring(_G.OPERATOR and _G.OPERATOR.label or "Operator"), tune.v.OPERATOR_SILENT_AFTER))
-    local probs = (not silent and _G.OPERATOR) and opfmt.problems(_G.OPERATOR, tune.v.URANIUM_LOW) or {}
+    local probs = (not silent and _G.OPERATOR) and opfmt.problems(_G.OPERATOR) or {}
     for k in pairs(operatorKeys) do
       if not probs[k] then condition("operator:" .. k, false); operatorKeys[k] = nil end
     end
     for k, text in pairs(probs) do operatorKeys[k] = true; condition("operator:" .. k, true, text) end
+  end
+  -- Storage's reactor fuel report (its own radio message, so these hold while the Operator is quiet)
+  do
+    local seen = _G.REACTOR_FUEL_SEEN
+    local probs = opfmt.fuelProblems(_G.REACTOR_FUEL, seen and os.clock() - seen)
+    for k in pairs(fuelKeys) do
+      if not probs[k] then condition("reactorfuel:" .. k, false); fuelKeys[k] = nil end
+    end
+    for k, text in pairs(probs) do fuelKeys[k] = true; condition("reactorfuel:" .. k, true, text) end
   end
 
   for _, e in ipairs(canaries()) do
@@ -549,7 +558,7 @@ local function chatLoop()
         elseif ref and not unit then
           say(("No reactor called %s. I know: %s."):format(ref, table.concat(known or {}, ", ")), user)
         elseif verb == "status" then
-          say(unit and opfmt.unitLine(unit) or opfmt.plantLine(op), user)
+          say(unit and opfmt.unitLine(unit) or opfmt.plantLine(op, _G.REACTOR_FUEL, _G.REACTOR_FUEL_SEEN and os.clock() - _G.REACTOR_FUEL_SEEN), user)
         else
           _G.OPERATOR_CMD = { unit = unit and unit.label or nil, mode = verb, left = 3, at = -10 }
           local who = unit and unit.label or "All reactors"

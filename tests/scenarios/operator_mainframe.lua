@@ -31,6 +31,8 @@ local LAUNCH = [[
 
 -- opts.supply: what the Storage stand-in reports; opts.fullOutlet: leave cyanite in the outlet that never drains
 -- opts.reactors: 1 or 2
+-- opts.fuel: { units, keep, low, supply }: the stand-in also sends Storage's reactor_fuel report, read from the global
+--            FUEL on its computer each time (st:writeTable-free: change it with st.fuel); opts.fuelOnce: send it only until 30 s
 local function build(opts)
   opts = opts or {}
   local world = cc.world(); local net = world:net()
@@ -56,14 +58,19 @@ local function build(opts)
   -- Storage stand-in: reports its uranium
   local st = world:computer{ id = 7, label = "Storage" }
   st:attach("top", cc.wireless{ ender = true })
-  st:writeFile("st.lua", ("rednet.open('top')\nwhile true do rednet.broadcast({ type = 'uranium', total = %d }, 'tanis-operator'); sleep(2) end"):format(opts.supply or 100))
+  local f = opts.fuel
+  local fuelSend = f and ("rednet.broadcast({ type = 'reactor_fuel', chests = { { name = 'enderstorage:ender_chest_0', label = 'Reactor fuel', units = %d, keep = %d, low = %d } }, supply = %d, best = 'mekanism:ingot_uranium' }, 'tanis-operator')"):format(
+    f.units, f.keep, f.low, f.supply) or ""
+  if f and f.units == 0 and f.supply == 0 then fuelSend = fuelSend:gsub(", best = 'mekanism:ingot_uranium'", "") end
+  local gate = opts.fuelOnce and "if os.clock() < 30 then " .. fuelSend .. " end" or fuelSend
+  st:writeFile("st.lua", ("rednet.open('top')\nwhile true do rednet.broadcast({ type = 'uranium', total = %d }, 'tanis-operator'); %s sleep(2) end"):format(opts.supply or 100, gate))
   st:run("st")
   -- the mainframe
   local mf = world:computer{ id = 1, label = "Mainframe" }
   mf:attach("top", cc.wireless{ ender = true })
   local chat, mon = chatBox(), nil
   mf:attach("left", chat); mf:attach("right", envDetector())
-  mon = mf:monitor("bottom", 90, 20)
+  mon = mf:monitor("bottom", opts.wide or 90, 20)
   mf:installRole("mainframe")
   mf:writeFile("launch.lua", LAUNCH)
   mf:run("launch")
@@ -99,12 +106,12 @@ T.test("operator mainframe: with two reactors the row expands to one line each",
   T.truthy(mon:line(y2):find("OFF", 1, true), mon:line(y2))
 end)
 
-T.test("operator mainframe: alerts for fuel supply low and waste not clearing, named per reactor", function()
+T.test("operator mainframe: the old fuel supply alert is gone, waste not clearing is named per reactor, named per reactor", function()
   local world, mf, opc, chat = build{ supply = 10, fullOutlet = true }
   say(world, mf, "$island alerts")
   T.truthy(heard(chat, "Alerts on"), dump(chat))
   world:run(10)
-  T.truthy(heard(chat, "Fuel supply low: only 10 uranium", "Tanis"), dump(chat))
+  T.falsy(heard(chat, "Fuel supply low"), "the old uranium alert is gone\n" .. dump(chat))
   T.truthy(heard(chat, "Reactor%-1: waste not clearing", "Tanis"), dump(chat))
 end)
 
@@ -165,4 +172,72 @@ T.test("operator mainframe: a reactor awaiting setup shows on the board and rais
   T.falsy(heard(chat, "waste not clearing"), "no alert for a reactor that is not set up\n" .. dump(chat))
   say(world, mf, "$island operator status")
   T.truthy(heard(chat, "Awaiting Setup"), dump(chat))
+end)
+
+T.test("operator mainframe: the board shows the fuel chest and the store from Storage's report", function()
+  local world, mf, opc, chat, mon = build{ supply = 412, wide = 130, fuel = { units = 48, keep = 64, low = 16, supply = 412 } }
+  world:run(20)
+  T.eq(mf.error, nil)
+  local _, y = mon:find("Operator")
+  local row = mon:line(y)
+  T.truthy(row:find("fuel chest 48/64", 1, true) and row:find("store 412", 1, true), row)
+  T.falsy(row:find("uranium", 1, true), row)
+end)
+
+T.test("operator mainframe: a stale fuel report reads fuel chest ?", function()
+  local world, mf, opc, chat, mon = build{ supply = 412, wide = 130, fuel = { units = 48, keep = 64, low = 16, supply = 412 }, fuelOnce = true }
+  world:run(20)
+  local _, y = mon:find("Operator")
+  T.truthy(mon:line(y):find("fuel chest 48/64", 1, true), mon:line(y))
+  world:run(120)
+  _, y = mon:find("Operator")
+  T.truthy(mon:line(y):find("fuel chest ?", 1, true), mon:line(y))
+  T.falsy(mon:line(y):find("store", 1, true), mon:line(y))
+end)
+
+T.test("operator mainframe: no fuel report keeps the uranium text", function()
+  local world, mf, opc, chat, mon = build{ supply = 48 }
+  world:run(20)
+  local _, y = mon:find("Operator")
+  local row = mon:line(y)
+  T.truthy(row:find("uranium 48", 1, true) and not row:find("fuel chest", 1, true), row)
+end)
+
+T.test("operator mainframe: Fuel chest low fires under low and clears at low", function()
+  local world, mf, opc, chat = build{ supply = 100, fuel = { units = 10, keep = 64, low = 16, supply = 100 } }
+  say(world, mf, "$island alerts")
+  world:run(20)
+  T.truthy(heard(chat, "Fuel chest low: Reactor fuel has 10/64", "Tanis"), dump(chat))
+  T.falsy(heard(chat, "Nothing left to stock"), dump(chat))
+end)
+
+T.test("operator mainframe: Fuel chest low clears when the chest is back at low", function()
+  local world, mf, opc, chat = build{ supply = 100, fuel = { units = 16, keep = 64, low = 16, supply = 100 } }
+  say(world, mf, "$island alerts")
+  world:run(20)
+  T.falsy(heard(chat, "Fuel chest low"), "16 is not under low\n" .. dump(chat))
+end)
+
+T.test("operator mainframe: Nothing left to stock fires when supply is 0", function()
+  local world, mf, opc, chat = build{ supply = 100, fuel = { units = 48, keep = 64, low = 16, supply = 0 } }
+  say(world, mf, "$island alerts")
+  world:run(20)
+  T.truthy(heard(chat, "Nothing left to stock: Storage has no reactor fuel left", "Tanis"), dump(chat))
+  T.falsy(heard(chat, "Fuel chest low"), dump(chat))
+end)
+
+T.test("operator mainframe: fuel alerts fire while the Operator is quiet, and clear when the report recovers", function()
+  local world, mf, opc, chat = build{ supply = 100, fuel = { units = 4, keep = 64, low = 16, supply = 0 } }
+  say(world, mf, "$island alerts")
+  opc:_stop()
+  world:run(20)
+  T.truthy(heard(chat, "Fuel chest low"), dump(chat))
+  T.truthy(heard(chat, "Nothing left to stock"), dump(chat))
+end)
+
+T.test("operator mainframe: island operator status mentions the fuel chest", function()
+  local world, mf, opc, chat = build{ supply = 100, fuel = { units = 48, keep = 64, low = 16, supply = 412 } }
+  world:run(20)
+  say(world, mf, "$island operator")
+  T.truthy(heard(chat, "Fuel chest 48/64, store 412"), dump(chat))
 end)

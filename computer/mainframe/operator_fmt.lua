@@ -38,9 +38,24 @@ local function uranium(op)
   return "uranium ?"
 end
 
+-- Storage's reactor_fuel report is heard every 10 s; this long without one and it is stale
+F.FUEL_STALE = 60
+
+-- The report as the board and chat show it: "fuel chest 48/64, store 412"; "fuel chest ?" when it has gone quiet.
+-- nil when Storage has never reported (callers fall back to the uranium text).
+function F.fuelText(rf, age)
+  if not rf then return nil end
+  if age and age > F.FUEL_STALE then return "fuel chest ?" end
+  local units, keep = 0, 0
+  for _, c in ipairs(rf.chests or {}) do units, keep = units + (c.units or 0), keep + (c.keep or 0) end
+  local out = ("fuel chest %s/%s"):format(num(units), num(keep))
+  if rf.supply ~= nil then out = out .. ", store " .. num(rf.supply) end
+  return out
+end
+
 -- Rows for the status board: { name, state, detail, seen }. One row with the plant totals; with more than one
--- reactor, a row for each reactor under it.
-function F.boardRows(op, seen)
+-- reactor, a row for each reactor under it. `rf`/`rfAge`: Storage's reactor_fuel report and its age in seconds.
+function F.boardRows(op, seen, rf, rfAge)
   local R = F.reactors(op)
   local p = op.plant or {}
   local worst, running, setup = "idle", 0, 0
@@ -55,7 +70,7 @@ function F.boardRows(op, seen)
   local lead = #R > 1 and ("%d of %d on, "):format(running, #R) or ((running > 0 and "ON, " or "OFF, "))
   if #R == 0 then lead = "no reactor found, " end
   if setup > 0 then lead = ("%d awaiting setup, "):format(setup) .. lead end
-  local rows = { { op.label or "Operator", worst, ("%s%s FE/t, buffer %s, %s"):format(lead, num(p.fe or 0), pct(p.buf), uranium(op)), seen } }
+  local rows = { { op.label or "Operator", worst, ("%s%s FE/t, buffer %s, %s"):format(lead, num(p.fe or 0), pct(p.buf), F.fuelText(rf, rfAge) or uranium(op)), seen } }
   if #R > 1 then
     for _, u in ipairs(R) do
       rows[#rows + 1] = { "  " .. u.label, F.state(u), ("%s %s FE/t, buffer %s%s"):format(u.active and "ON" or "OFF",
@@ -82,15 +97,16 @@ function F.unitLine(u)
 end
 
 -- Chat: one line for the plant
-function F.plantLine(op, age)
+function F.plantLine(op, rf, rfAge)
+  local fuel = F.fuelText(rf, rfAge)
+  local function ura() return fuel and fuel:gsub("^%l", string.upper) or uranium(op):gsub("^%l", string.upper) end
   local R = F.reactors(op)
   local p = op.plant or {}
   if #R == 0 then return "Operator: no reactor on its cable." end
-  if #R == 1 then return F.unitLine(R[1]) .. " " .. uranium(op):gsub("^%l", string.upper) .. "." end
+  if #R == 1 then return F.unitLine(R[1]) .. " " .. ura() .. "." end
   local running = 0
   for _, u in ipairs(R) do if u.active then running = running + 1 end end
-  local line = ("Operator: %d reactors, %d on, %s FE/t, buffer %s. %s."):format(#R, running, num(p.fe or 0), pct(p.buf),
-    uranium(op):gsub("^%l", string.upper))
+  local line = ("Operator: %d reactors, %d on, %s FE/t, buffer %s. %s."):format(#R, running, num(p.fe or 0), pct(p.buf), ura())
   local bad = {}
   for _, u in ipairs(R) do
     local s = F.state(u)
@@ -100,8 +116,8 @@ function F.plantLine(op, age)
   return line
 end
 
--- Problems for alerts: { [key] = text }. `low` = alert when the uranium supply is under this many ingots.
-function F.problems(op, low)
+-- Problems for alerts: { [key] = text }.
+function F.problems(op)
   local out = {}
   for _, u in ipairs(F.reactors(op)) do
     if not u.present then out["gone:" .. u.label] = u.label .. " is not on the cable any more."
@@ -109,10 +125,21 @@ function F.problems(op, low)
     elseif u.awaiting then -- not set up yet: nothing to report
     elseif u.wasteStuck then out["waste:" .. u.label] = u.label .. ": waste not clearing. The outlet port isn't emptying; is Storage running?" end
   end
-  local sup = op.plant and op.plant.supply
-  if sup ~= nil and sup < (low or 16) then
-    out["fuel"] = ("Fuel supply low: only %s uranium ingots left in Storage (alert under %d)."):format(num(sup), low or 16)
+  return out
+end
+
+-- Fuel problems from Storage's report (kept apart from the Operator's, so they hold while it is quiet).
+-- Nothing is raised for a stale or missing report.
+function F.fuelProblems(rf, age)
+  local out = {}
+  if not rf or (age and age > F.FUEL_STALE) then return out end
+  for _, c in ipairs(rf.chests or {}) do
+    if (c.units or 0) < (c.low or 0) then
+      out["chest:" .. tostring(c.name or c.label)] = ("Fuel chest low: %s has %s/%s."):format(
+        tostring(c.label or c.name), num(c.units or 0), num(c.keep or 0))
+    end
   end
+  if rf.supply == 0 then out["nostock"] = "Nothing left to stock: Storage has no reactor fuel left." end
   return out
 end
 

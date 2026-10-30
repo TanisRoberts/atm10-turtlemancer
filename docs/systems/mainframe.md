@@ -25,13 +25,21 @@ The programs that used to draw now hand data over in globals, and `wall.lua` red
 
 Add a row in `board.lua`'s `rows()`: `{ name, state, detail, seen, group }` with `group` one of the five above. A new state word that is not in the kit's `ui.state` can get its colour from `TONE` in `wall.lua`.
 
+## Reactor fuel (Storage's `reactor_fuel` report)
+
+Storage broadcasts `{ type = "reactor_fuel", chests = { { name, label, units, keep, low } }, supply, best }` every 10 s on `tanis-operator`. `operator_link.lua` keeps the last one in `_G.REACTOR_FUEL` and `_G.REACTOR_FUEL_SEEN`, apart from `_G.OPERATOR`, so its alerts work while the Operator is quiet.
+
+- **Board:** the Operator row ends with `fuel chest 48/64, store 412` (units and keep summed over the chests; `store` is the supply left in Storage). Not heard for 60 s it reads `fuel chest ?`. With no report ever heard, the row keeps the old `uranium N` text. `island operator` says the same.
+- **Alerts:** `Fuel chest low` (a chest under its `low`; names the chest label and `units/keep`, clears at or above `low`) and `Nothing left to stock` (`supply == 0`). Both are silent while the report is stale. They replace `Fuel supply low`; `URANIUM_LOW` is no longer used (old `island.env` files keep the line, harmlessly).
+- Code: `operator_fmt.lua` (`fuelText`, `fuelProblems`), raised from `island.lua`'s `watch()`.
+
 ## Commands
 
 The wall has nothing to type into and the mainframe has no kit screen on its own terminal (that is the shell, where `reset` is typed), so there is no `/command` bar here. Chat (`$island ...`, `$dump`, `$pocket`, `$lock`) is how the mainframe is driven, and it is unchanged: `island status | scan | miner | storage | operator | alerts | test | help | remove_ring | monitors`.
 
 ## Tests
 
-`tests/scenarios/mainframe_wall.lua` runs the real `mainframe.lua` with stand-in machines at 57x24, 57x38, 36x24 and 164x81: rows, colours, the visitor column, grey rows after 30 s, paging. `operator_mainframe.lua` checks the Operator rows on the wall.
+`tests/scenarios/mainframe_wall.lua` runs the real `mainframe.lua` with stand-in machines at 57x24, 57x38, 36x24 and 164x81: rows, colours, the visitor column, grey rows after 30 s, paging. `operator_mainframe.lua` checks the Operator rows on the wall, the fuel chest text (report, stale, none) and both fuel alerts.
 
 ## Which monitor is the wall
 
