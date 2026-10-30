@@ -82,6 +82,7 @@ local function loadCfg()
   if cfg.fuel and not cfg.fuels then cfg.fuels = { cfg.fuel } end -- older config: one fuel barrel
   cfg.fuel = nil
   cfg.fuels = cfg.fuels or {}
+  cfg.reactorFuels = cfg.reactorFuels or {}   -- Reactor fuel chests (storage_reactor.lua)
   cfg.drawers = cfg.drawers or {}   -- assigned as drawers (bulk storage) by hand, besides those found by name
   cfg.ignored = cfg.ignored or {}   -- never touched or counted
   cfg.fluidDepots = cfg.fluidDepots or {}   -- tank -> the fluid storage keeps it filled with ("" = not chosen yet)
@@ -171,6 +172,7 @@ local function isSpecial(n)
   if n == cfg.output or n == cfg.weaver or n == cfg.pocketIn or n == cfg.pocketOut then return true end
   for _, d in ipairs(cfg.docks or {}) do if d == n then return true end end
   for _, d in ipairs(cfg.fuels) do if d == n then return true end end
+  for _, d in ipairs(cfg.reactorFuels or {}) do if d == n then return true end end
   if cfg.depots and cfg.depots[n] ~= nil then return true end
   for _, d in ipairs(cfg.ignored or {}) do if d == n then return true end end
   if isMachine(n) then return true end
@@ -188,6 +190,8 @@ local TYPES = {
     about = "Turtle/machine dock: a few lava buckets kept in it (coal if there is no lava, plus its keep list), everything else taken." },
   { key = "fuel",      label = "Canary fuel",    short = "Fuel",    tag = "FUEL",   col = colours.orange,
     about = "Kept at one Canary refill (lava, coal blocks, coal...). One per Canary." },
+  { key = "reactorFuel", label = "Reactor fuel", short = "R.fuel",  tag = "R.FUEL", col = colours.red,
+    about = "Kept at REACTOR_FUEL_KEEP reactor fuel units (uranium blocks, then ingots). Never emptied. One per reactor. Its waste chest is an ordinary Input." },
   { key = "weaver",    label = "Weaver supply",  short = "Weaver",  tag = "WEAVER", col = colours.purple,
     about = "Filled with what Weaver asks for. Only one." },
   { key = "pocketIn",  label = "Pocket dump",    short = "P.dump",  tag = "P.DUMP", col = colours.pink,
@@ -205,7 +209,7 @@ local TYPES = {
 }
 local TYPE_BY = {}
 for _, t in ipairs(TYPES) do TYPE_BY[t.key] = t end
-local LISTS   = { input = "inputs", dock = "docks", fuel = "fuels", drawer = "drawers", ignore = "ignored" }
+local LISTS   = { input = "inputs", dock = "docks", fuel = "fuels", reactorFuel = "reactorFuels", drawer = "drawers", ignore = "ignored" }
 local SINGLES = { output = "output", weaver = "weaver", pocketIn = "pocketIn", pocketOut = "pocketOut" }
 
 local function typeOf(n)
@@ -1223,6 +1227,11 @@ end
 -- Keep every Canary fuel barrel at (as close as possible to) one stack of coal's worth, and hand
 -- anything over that back to storage so the smelter and the neural lab get it.
 -- fuelUnits = the emptiest barrel, for the screen and the mainframe's "running dry" alert.
+local REACTOR = dofile("storage_reactor.lua")({
+  cfg = function() return cfg end, items = function() return items end, info = info, call = call,
+  retrieve = retrieve, env = require("envfile"),
+})
+
 local function topUpFuel()
   if #cfg.fuels == 0 then return false end
   local target = canaryFuelTarget()
@@ -1486,6 +1495,7 @@ local function workerLoop()
       end
       if moved > 0 then buildItems() end
       if topUpFuel() then buildItems() end
+      if REACTOR.tick() then buildItems() end
       if topUpDocks() then buildItems() end
       if topUpDepots() then buildItems() end
       topUpFluidDepots()
@@ -1731,6 +1741,11 @@ local function assignScreen()
       return out
     end,
     describe = function(n)
+      if typeOf(n) == "reactorFuel" then
+        local units = REACTOR.units(n)
+        if not units then return nil end
+        return { count = units, size = 0, text = ("%d/%d units"):format(units, REACTOR.keep()) }
+      end
       if not isTank(n) then return nil end
       local tanks = call(n, "tanks") or {}
       local best, kinds, total = nil, 0, 0

@@ -50,7 +50,7 @@ local M = {
             .. "drawers, search + take on its screen, tops up turtle fuel barrels, supplies Weaver "
             .. "and does the smelter's moves. Wired modem on the storage cable + wireless modem.",
           run = "storage",
-          files = { "computer/storage/storage.lua", "computer/storage/storage_docks.lua", "computer/storage/storage_rules.lua", "computer/storage/storage_screens.lua", "computer/storage/storage_lock.lua", "shared/slash.lua", "shared/envfile.lua", "shared/assignui.lua", "shared/assignrules.lua", "shared/screens.lua", "shared/ui.lua", "shared/ui_widgets.lua", "shared/ui_parts.lua", "shared/ui_motion.lua" },
+          files = { "computer/storage/storage.lua", "computer/storage/storage_docks.lua", "computer/storage/storage_reactor.lua", "computer/storage/storage_rules.lua", "computer/storage/storage_screens.lua", "computer/storage/storage_lock.lua", "shared/slash.lua", "shared/envfile.lua", "shared/assignui.lua", "shared/assignrules.lua", "shared/screens.lua", "shared/ui.lua", "shared/ui_widgets.lua", "shared/ui_parts.lua", "shared/ui_motion.lua" },
         },
         smelter = {
           name = "Smelter",

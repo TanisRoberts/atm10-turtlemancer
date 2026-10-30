@@ -8,6 +8,7 @@ The only computer that moves items in or out of storage. This note covers the sc
 - `storage_screens.lua`: the item list, report and progress pages, the take amounts, `/x1 /x16 /stack /sort`, and the two kit loops.
 - `storage_lock.lua`: the padlock screen.
 - `storage_rules.lua`, `storage_docks.lua`: depot rules and dock links (see the design doc).
+- `storage_reactor.lua`: the Reactor fuel job (below).
 - `shared/assignui.lua` + `shared/assignrules.lua`: the `/assign` pages, shared with the Nether and MD Foremen.
 
 ## Screens
@@ -35,3 +36,19 @@ Pages: list (tap a row to edit; search by name or contents; `+ Add`), kind (Depo
 ## Tests
 
 `tests/scenarios/storage_screens.lua` (list, search, command bar, `/assign`, Find it at 57x24, 51x19, 39x13 and 26x20; lock; reports; old command names; first run), `storage_depot_ui.lua`, `storage_depot.lua`, `storage_sort.lua`, and `mdforeman_basic.lua` for the Foreman's `/assign`.
+
+## Reactor fuel (`storage_reactor.lua`, #104)
+
+An assigned inventory of type **Reactor fuel** (`cfg.reactorFuels`, `/assign`, one per reactor) is an Ender Storage chest on a full-block modem. Storage keeps it at a number of **fuel units** and tells the Operator.
+
+- **Not storage.** It is special like a Canary fuel barrel: not counted, not sorted into, not a source for any move, `/tidy` and rescans never see it. **Nothing is ever pulled out of it**, and storage never crafts or compresses.
+- **Settings** (`storage.env`, live, missing keys appended):
+  - `REACTOR_FUEL=#c:storage_blocks/uranium=9,#c:ingots/uranium=1`: best first, `<item id or #tag>=<units>`. Tags are read from `getItemDetail().tags` (the same `info` the depot rules use). The first entry an item matches wins.
+  - `REACTOR_FUEL_KEEP=64` fuel units per chest, `REACTOR_FUEL_LOW=16` (reported, the mainframe alerts on it).
+- **Top-up** (every worker pass): units in the chest = what is on the list, counted with the values above (other items are ignored). Short of `KEEP`, it takes the best listed fuel storage has, rounding up to a whole item (so it overshoots by less than one item's value), then the next one down. A chest already over `KEEP` is left alone.
+- **Waste** is an ordinary **Input**: assign the waste chest as Input and storage empties it. Both ender chests must be assigned, or storage treats them as storage.
+- **Report** on protocol `tanis-operator` (`rednet.broadcast`), every 10 s and right after a top-up, only while a chest is assigned:
+  `{ type = "reactor_fuel", chests = { { name, label, units, keep, low } }, supply = <units of every listed fuel in storage, chests not counted>, best = <item id being stocked with, nil when supply == 0> }`.
+- `/assign` shows each chest as `48/64 units`.
+
+Test: `tests/scenarios/storage_reactor.lua`.
