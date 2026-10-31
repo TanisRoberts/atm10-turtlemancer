@@ -11,7 +11,8 @@
 -- Needs: a turtle with a GEO SCANNER on one side and an ENDER (or wireless) MODEM on the other, and an Advanced
 --        Peripherals CHUNK CONTROLLER in his bag. No pickaxe: he never digs, he flies over things. GPS towers.
 -- Dock:  a barrel or chest touching him (any side, above or below) that storage keeps fuelled:
---        run /dock on the storage computer and pick it, or use the coal marker in /setup.
+--        run /assign on the storage computer and add it as a Dock (then link it to him), or use the coal
+--        marker in /setup. He fills to FUEL_PCT (90%) of his fuel limit there, waiting while Storage refills it.
 --        Open sky above the dock: he leaves and comes home straight up and down.
 --
 -- First start: put him next to his dock and start him. He finds the barrel, works out which way
@@ -40,7 +41,8 @@ local DEFAULTS = {
   { "CLEARANCE", 3, "How high above the ground (or trees, water) he flies." },
   { "RADIUS", 8, "Scan radius. 8 is free and covers a whole chunk from its middle; up to 16 costs fuel per scan." },
   { "SHALLOW", 4, "Water this deep or less counts as shallow (lighter blue)." },
-  { "FUEL_FULL", 8000, "Fuel he tops up to at the dock." },
+  { "FUEL_PCT", 90, "Fuel he tops up to at the dock, as % of his fuel limit (an advanced turtle holds 100,000)." },
+  { "DOCK_WAIT", 30, "Seconds he waits at the dock for Storage to bring more fuel before he goes with what he has." },
   { "FUEL_RESERVE", 200, "Spare fuel kept on top of the trip home." },
   { "MAX_Y", 300, "He never flies higher than this; places that would need it are skipped." },
 }
@@ -634,17 +636,36 @@ local function dropDock()
   turnTo(d); return turtle.drop()
 end
 
+-- FUEL_PCT of his fuel limit (90% of an advanced turtle's 100,000 is 90 lava buckets: more than a dock holds)
 local function fuelTarget()
   local limit = turtle.getFuelLimit()
-  return math.min(E.FUEL_FULL, limit == "unlimited" and E.FUEL_FULL or limit)
+  if limit == "unlimited" then return 0 end
+  local pct = math.max(1, math.min(100, tonumber(E.FUEL_PCT) or 90))
+  return math.floor(limit * pct / 100)
 end
+local function lowOnFuel() return turtle.getFuelLevel() < fuelTarget() end
 
--- Take fuel from the dock up to FUEL_FULL (lava first); the core hands back anything else, and the empty buckets.
-local function refuel()
+-- Take fuel from the dock up to fuelTarget() (lava first); the core hands back anything else, and the empty
+-- buckets. wait = true (he is about to set off): a dock holds less than he wants, so he stays while Storage keeps
+-- refilling it, and leaves once he is full or no fuel has come for DOCK_WAIT seconds.
+local function refuel(wait)
   local d = S.dock
-  if d ~= "up" and d ~= "down" then turnTo(d) end
-  core.fuel.refuelFromInventory(fuelTarget())
-  core.fuel.refuelFromDock(d, fuelTarget())
+  local target = fuelTarget()
+  local function once()
+    if d ~= "up" and d ~= "down" then turnTo(d) end
+    core.fuel.refuelFromInventory(target)
+    core.fuel.refuelFromDock(d, target)
+  end
+  once()
+  if not wait then return end
+  local last, lastGain = turtle.getFuelLevel(), os.clock()
+  while turtle.getFuelLevel() < target and os.clock() - lastGain < (tonumber(E.DOCK_WAIT) or 30) do
+    setStatus("docked", ("Refuelling %d / %d"):format(turtle.getFuelLevel(), target))
+    sleep(3)
+    once()
+    local now = turtle.getFuelLevel()
+    if now > last then last, lastGain = now, os.clock() end
+  end
 end
 
 -- Tell Storage where the dock is (core.dock.report), now and then
@@ -726,11 +747,12 @@ end
 ---------------------------------------------------------------------------
 -- Main
 ---------------------------------------------------------------------------
-local function dockAndRefuel(why)
+-- wait = true: he is going straight back out, so he stays while Storage refills the dock (see refuel)
+local function dockAndRefuel(why, wait)
   local ok, err = goHome()
   if not ok then setStatus("error", "Can't get home: " .. tostring(err)); return false end
   setStatus("docked", why or "Refuelling")
-  refuel()
+  refuel(wait)
   reportDock()
   return true
 end
@@ -809,7 +831,7 @@ local function mapOneChunk()
   local ch = list[S.ci]
   local tx, tz = plan.centre(ch.cx, ch.cz)
   if not enoughFuelFor(tx, tz) then
-    if dockAndRefuel("Refuelling") then
+    if dockAndRefuel("Refuelling", true) then
       if not enoughFuelFor(tx, tz) then
         setStatus("waiting", "Waiting for fuel in my dock")
         waitOrder(30)
@@ -878,7 +900,7 @@ local function mapLoop()
           pushedAt = os.clock()
           for k in pairs(chunks) do if inRegion(k, S.doneRegion) then dirtyKeys[k] = true end end
         end
-        if atHome() and turtle.getFuelLevel() < math.min(E.FUEL_FULL, turtle.getFuelLimit()) then refuel() end
+        if atHome() and lowOnFuel() then refuel() end
         reportDock()
         waitOrder(5)
       end
@@ -888,7 +910,7 @@ local function mapLoop()
     else
       if atHome() then
         if status ~= "done" and status ~= "error" then setStatus("docked", "Ready. MAP on the Cartographer (or M here)") end
-        if turtle.getFuelLevel() < math.min(E.FUEL_FULL, turtle.getFuelLimit()) then refuel() end
+        if lowOnFuel() then refuel() end
         reportDock()
       elseif status ~= "error" then
         dockAndRefuel("Docked")

@@ -19,11 +19,22 @@ return function(X)
 
   local tune = X.env.new("storage.env", "Storage settings.", {
     { "DOCK_LAVA", 4, "Lava buckets kept in each turtle dock when storage has them (1 - 27). Coal and charcoal only when it has none." },
+    { "DOCK_LAVA_SEAGULL", 27, "Lava buckets kept in a dock linked to a Seagull (1 - 27): he fills up to 90% of 100,000 each visit." },
   })
   tune.load()
-  function D.lavaTarget()
+  local function clampLava(v, default) return math.max(0, math.min(D.BARREL, math.floor(tonumber(v) or default))) end
+  -- The turtle linked to dock d (/assign), by its latest dock report's role; nil if none
+  local function linkedRole(d)
+    local cfg = X.cfg()
+    local link = d and cfg.dockLink and cfg.dockLink[d]
+    local rep = link and cfg.dockReports and cfg.dockReports[link.label]
+    return rep and rep.role
+  end
+  -- Lava buckets kept in dock d (no d: the ordinary docks' number)
+  function D.lavaTarget(d)
     tune.refresh()
-    return math.max(0, math.min(D.BARREL, math.floor(tonumber(tune.v.DOCK_LAVA) or 4)))
+    if linkedRole(d) == "cartographer" then return clampLava(tune.v.DOCK_LAVA_SEAGULL, 27) end
+    return clampLava(tune.v.DOCK_LAVA, 4)
   end
 
   -- Fuel units in a dock's list (a lava bucket counts 1,000), and how many lava buckets
@@ -59,7 +70,7 @@ return function(X)
   function D.stock(d, list)
     local byName, changed = X.byName(), false
     local units, lava = D.units(list)
-    local want = D.lavaTarget() - lava
+    local want = D.lavaTarget(d) - lava
     local stored = byName["minecraft:lava_bucket"] or 0
     if want > 0 and stored > 0 then
       local moved = X.retrieve("minecraft:lava_bucket", math.min(want, stored), d)
@@ -82,11 +93,11 @@ return function(X)
   function D.info(print)
     local cfg = X.cfg()
     if #(cfg.docks or {}) == 0 then return end
-    print(("Turtle docks (%d lava buckets kept each):"):format(D.lavaTarget()))
+    print(("Turtle docks (%d lava buckets kept each, %d in a Seagull's):"):format(D.lavaTarget(), clampLava(tune.v.DOCK_LAVA_SEAGULL, 27)))
     for _, d in ipairs(cfg.docks) do
       local units, lava = D.units(X.call(d, "list"))
       local link = cfg.dockLink and cfg.dockLink[d]
-      print(("  %s%s: %d fuel, %d lava"):format(d, link and (" (" .. link.label .. ")") or "", units, lava))
+      print(("  %s%s: %d fuel, %d/%d lava"):format(d, link and (" (" .. link.label .. ")") or "", units, lava, D.lavaTarget(d)))
     end
   end
 

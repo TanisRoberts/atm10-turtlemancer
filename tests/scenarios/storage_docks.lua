@@ -42,6 +42,19 @@ T.test("storage docks: stocked with lava buckets up to DOCK_LAVA, and no coal wh
   T.eq(lavaIn(inv[2]), 6)
 end)
 
+T.test("storage docks: a dock linked to a Seagull is kept at DOCK_LAVA_SEAGULL (27), not DOCK_LAVA (4)", function()
+  local w, c, inv = base({ cfg = {
+    dockLink = { [DOCK] = { label = "Seagull-01", x = 0, y = 64, z = -1 } },
+    dockReports = { ["Seagull-01"] = { x = 0, y = 64, z = -1, role = "cartographer" } },
+  } })
+  inv[2]:give("minecraft:lava_bucket", 27)      -- lava doesn't stack: a full store barrel
+  c:run("storage")
+  T.waitFor(w, function() return lavaIn(inv[3]) == 27 end, 120, "the Seagull's dock never got a full barrel of lava")
+  w:run(10)
+  T.eq(lavaIn(inv[3]), 27, "a barrel holds 27 buckets")
+  T.eq(lavaIn(inv[2]), 0)
+end)
+
 T.test("storage docks: coal and charcoal only when storage has no lava", function()
   local w, c, inv = base()
   inv[2]:give("minecraft:charcoal", 20)

@@ -47,6 +47,30 @@ T.test("Seagull: drinks the lava bucket at his dock, hands the empty back, and r
   end
 end)
 
+T.test("Seagull: tops up to FUEL_PCT (90%) of his limit while the dock is refilled, and stops there", function()
+  local w = cc.world()
+  w.gpsOn = true
+  local dock = cc.Inv.new{ size = 27, types = BARREL }
+  w:setBlock(0, 64, -1, "minecraft:barrel", dock)
+  dock:give("minecraft:lava_bucket", 27)
+  local t = w:turtle{ id = 7, label = "Seagull-01", x = 0, y = 64, z = 0, facing = 0, fuel = 0, fuelLimit = 100000,
+                      right = "computercraft:wireless_modem_advanced" }
+  t:installRole("seagull")
+  t:attach("right", cc.wireless{ ender = true })
+  storage(w)
+  w:run(1)
+  t:run("seagull"); w:run(60)
+  T.eq(t.body.fuel >= 26000, true, "he drank the first barrel (fuel " .. tostring(t.body.fuel) .. ")")
+  for _ = 1, 3 do               -- Storage refills the barrel three times: 108 buckets in all, more than he wants
+    dock:clear()                -- (Storage takes the empties back)
+    dock:give("minecraft:lava_bucket", 27)
+    w:run(60)
+  end
+  T.eq(t.body.fuel >= 90000, true, "he reached 90% (fuel " .. tostring(t.body.fuel) .. ")")
+  T.eq(t.body.fuel < 91000, true, "and stopped there (fuel " .. tostring(t.body.fuel) .. ")")
+  T.eq(dock:count("minecraft:lava_bucket") > 0, true, "the rest stays in the dock")
+end)
+
 T.test("Bowerbird: reports a bottom dock to Storage, from his GPS fix", function()
   local w = cc.world()
   w.gpsOn = true
