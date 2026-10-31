@@ -37,7 +37,7 @@ local function room(opts)
   mf:run("mon")
   return { w = w, net = net, r = r, inP = inP, outP = outP, fuelC = fuelC, wasteC = wasteC, c = c, mf = mf }
 end
-local function unit(R) return R.mf.env._G.last and R.mf.env._G.last.units[1] end
+local function unit(R) return R.mf.G.last and R.mf.G.last.units[1] end
 local function need(u, key) for _, n in ipairs(u.needs or {}) do if n.key == key then return n end end end
 
 T.test("operator chests: blocks go in before ingots, the reactor is never overfilled, cyanite goes to the waste chest", function()
@@ -147,7 +147,7 @@ T.test("operator chests: Storage's reactor_fuel report fills plant.supply and pl
   st:run("st")
   R.fuelC:give(INGOT, 30, nil, TI)                           -- 20 go into the reactor, 10 stay
   R.c:run("operator"); R.w:run(12)
-  local p = R.mf.env._G.last.plant
+  local p = R.mf.G.last.plant
   T.eq(p.supply, 412)
   T.eq(p.fuelChest.units, 58); T.eq(p.fuelChest.keep, 128); T.eq(p.fuelChest.low, 32)
   T.eq(unit(R).fuelChest, 10, "per-unit chest units")

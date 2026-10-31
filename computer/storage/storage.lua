@@ -1426,7 +1426,7 @@ end
 -- Screens (storage_screens.lua, built from the UI kit): the monitor wall and the computer's own screen share one
 -- item-list design. This file hands over what they show; the "/" commands are added further down.
 ---------------------------------------------------------------------------
-local Scr = dofile("storage_screens.lua")({
+local Scr = require("storage_screens")({
   TEXT_SCALE = TEXT_SCALE,
   cfg = function() return cfg end, saveCfg = saveCfg, buildItems = buildItems,
   items = function() return items end, stats = function() return stats end,
@@ -1723,7 +1723,7 @@ end
 -- /assign: which inventory on the cable does what (the screen lives in assignui.lua, shared with
 -- the Nether Foreman). Everything that isn't on the list is storage.
 ---------------------------------------------------------------------------
-local AUI = dofile("assignui.lua")
+local AUI = require("assignui")
 
 local function assignScreen()
   AUI.run({

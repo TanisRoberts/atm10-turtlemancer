@@ -85,9 +85,9 @@ T.test("nether: a dock_req gets lava and a bucket from Stock, and the dock is le
     b.stock:give("minecraft:lava_bucket", 5)
     b.stock:give("minecraft:bucket", 2)
   end })
-  e.f.env._G.ask = { seq = 77, bucket = true, fuel = 2500 }
+  e.f.G.ask = { seq = 77, bucket = true, fuel = 2500 }
   e.w:run(5)
-  local r = e.f.env._G.replies[1]
+  local r = e.f.G.replies[1]
   T.truthy(r, "no dock_ready")
   T.eq(r.seq, 77)
   T.eq(r.got["minecraft:lava_bucket"], 3); T.eq(r.got["minecraft:bucket"], 1)
@@ -96,7 +96,7 @@ T.test("nether: a dock_req gets lava and a bucket from Stock, and the dock is le
   T.eq(e.b.dock:count("minecraft:bucket"), 1)
   e.w:run(10)
   T.eq(e.b.dock:count("minecraft:lava_bucket"), 3, "held while he takes his supplies")
-  e.f.env._G.done = true
+  e.f.G.done = true
   e.w:run(6)
   T.eq(e.b.dock:count("minecraft:lava_bucket"), 0, "emptied after dock_done")
   T.eq(e.b.stock:count("minecraft:lava_bucket"), 5)
@@ -104,9 +104,9 @@ end)
 
 T.test("nether: a dock_req with nothing in Stock says so", function()
   local e = base()
-  e.f.env._G.ask = { seq = 5, bucket = true, fuel = 1000 }
+  e.f.G.ask = { seq = 5, bucket = true, fuel = 1000 }
   e.w:run(5)
-  local r = e.f.env._G.replies[1]
+  local r = e.f.G.replies[1]
   T.truthy(r, "no dock_ready")
   T.eq(r.note, "Stock has no bucket or fuel")
 end)
@@ -129,14 +129,14 @@ T.test("nether: START and STOP on a Firecrest's page send the order", function()
   T.contains(e.mon, "#9")
   tap(e, "START", true)
   e.w:run(3)
-  local m = e.f.env._G.lastCmd
+  local m = e.f.G.lastCmd
   T.eq(m.want, "run"); T.eq(m.minY, 12); T.eq(m.maxY, 17); T.eq(m.c1, 0); T.eq(m.c2, 1)
   T.eq(m.hungryAt, 25); T.eq(m.fullAt, 75)
   T.truthy(type(m.junk) == "table" and #m.junk > 5, "the junk list goes with it")
   T.contains(e.mon, "Firecrest-01: START sent.")
   tap(e, "STOP + DOCK")
   e.w:run(3)
-  T.eq(e.f.env._G.lastCmd.want, "dock")
+  T.eq(e.f.G.lastCmd.want, "dock")
   T.eq(e.c:readTable("nether.cfg").firecrests[9].want, "dock")
 end)
 
@@ -151,7 +151,7 @@ T.test("nether: picking a preset and nudging Min Y, then START sends that range"
   e.mon:touch(px, y); e.w:run(1)
   tap(e, "START", true)
   e.w:run(3)
-  local m = e.f.env._G.lastCmd
+  local m = e.f.G.lastCmd
   T.eq(m.minY, 34); T.eq(m.maxY, 44)
 end)
 
@@ -164,11 +164,11 @@ T.test("nether: /keep, /junk and /reboot typed on the computer", function()
   T.contains(e.c.screen, "RULES")
   e.c:type("/junk tuff"); e.c:key(257)
   e.w:run(4)
-  local junk = e.f.env._G.lastCmd.junk
+  local junk = e.f.G.lastCmd.junk
   T.eq(junk[#junk], "tuff")
   e.c:type("/reboot 1"); e.c:key(257)
   e.w:run(3)
-  T.truthy(e.f.env._G.lastCmd.reboot, "reboot token sent")
+  T.truthy(e.f.G.lastCmd.reboot, "reboot token sent")
   T.contains(e.c.screen, "Firecrest-01: reboot sent.")
 end)
 
@@ -197,8 +197,8 @@ T.test("nether: retire takes two taps and the number is never handed out again",
   T.eq(cfg.firecrests[9].retired, true)
   T.eq(cfg.retiredNums[1], "Firecrest-01")
   e.w:run(4)
-  T.eq(e.f.env._G.lastCmd.retired, true)
-  T.eq(e.f.env._G.lastCmd.want, "dock")
+  T.eq(e.f.G.lastCmd.retired, true)
+  T.eq(e.f.G.lastCmd.want, "dock")
   -- a new Firecrest gets number 2
   local g = MS.standIn(e.w, { id = 10 })
   e.w:run(5)

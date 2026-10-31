@@ -99,8 +99,8 @@ end)
 
 T.test("remote: START a Canary through the MD Foreman and a Firecrest through the Nether Foreman", function()
   local e = world()
-  e.canary.env._G.senders = {}
-  e.firecrest.env._G.senders = {}
+  e.canary.G.senders = {}
+  e.firecrest.G.senders = {}
   tapOn(e.w, e.hubMon, "Canary-01")
   T.contains(e.hubMon, "CANARY-01")
   T.contains(e.hubMon, "MD Foreman")                 -- whose he is
@@ -108,20 +108,20 @@ T.test("remote: START a Canary through the MD Foreman and a Firecrest through th
   e.w:run(2)
   T.contains(e.mdMon, "Canary-01: START from the Overworld Foreman.")
   e.w:run(3)
-  T.eq(e.canary.env._G.want, "run")
-  T.eq(e.canary.env._G.lastCmd.kind, "canary")
-  T.eq(e.canary.env._G.lastCmd.minY, -59)
+  T.eq(e.canary.G.want, "run")
+  T.eq(e.canary.G.lastCmd.kind, "canary")
+  T.eq(e.canary.G.lastCmd.minY, -59)
   T.eq(e.md:readTable("mdforeman.cfg").canaries[7].want, "run")
   tapOn(e.w, e.hubMon, "Back", true)
   tapOn(e.w, e.hubMon, "Firecrest-01")
   tapOn(e.w, e.hubMon, "STOP + DOCK", true)
   tapOn(e.w, e.hubMon, "START", true)
   e.w:run(5)
-  T.eq(e.firecrest.env._G.want, "run")
+  T.eq(e.firecrest.G.want, "run")
   T.eq(e.nether:readTable("nether.cfg").firecrests[9].want, "run")
   e.w:run(10)
-  for from in pairs(e.canary.env._G.senders) do T.eq(from, 3, "a Canary only hears his MD Foreman") end
-  for from in pairs(e.firecrest.env._G.senders) do T.eq(from, 2, "a Firecrest only hears his Nether Foreman") end
+  for from in pairs(e.canary.G.senders) do T.eq(from, 3, "a Canary only hears his MD Foreman") end
+  for from in pairs(e.firecrest.G.senders) do T.eq(from, 2, "a Firecrest only hears his Nether Foreman") end
 end)
 
 T.test("remote: an order given on the MD Foreman's own screen shows on the Overworld Foreman", function()
@@ -143,9 +143,9 @@ T.test("remote: the Overworld Foreman gives a Starling his orders itself", funct
   tapOn(e.w, e.hubMon, "Starling-03")
   tapOn(e.w, e.hubMon, "START", true)
   e.w:run(5)
-  T.eq(e.starling.env._G.want, "run")
-  T.eq(e.starling.env._G.cmdFrom, 1)
-  T.eq(e.starling.env._G.lastCmd.kind, "starling")
+  T.eq(e.starling.G.want, "run")
+  T.eq(e.starling.G.cmdFrom, 1)
+  T.eq(e.starling.G.lastCmd.kind, "starling")
 end)
 
 T.test("remote: reboot and retire from the remote go through the miner's Foreman", function()
@@ -154,12 +154,12 @@ T.test("remote: reboot and retire from the remote go through the miner's Foreman
   tapOn(e.w, e.hubMon, "Reboot", true)
   tapOn(e.w, e.hubMon, "Sure?", true)
   e.w:run(5)
-  T.truthy(e.firecrest.env._G.lastCmd.reboot, "reboot token from the Nether Foreman")
+  T.truthy(e.firecrest.G.lastCmd.reboot, "reboot token from the Nether Foreman")
   tapOn(e.w, e.hubMon, "Retire", true)
   tapOn(e.w, e.hubMon, "Sure?", true)
   e.w:run(5)
   T.eq(e.nether:readTable("nether.cfg").firecrests[9].retired, true)
-  T.eq(e.firecrest.env._G.lastCmd.retired, true)
+  T.eq(e.firecrest.G.lastCmd.retired, true)
 end)
 
 T.test("remote: a dimension Foreman's presets can be edited from the remote", function()
@@ -208,7 +208,7 @@ T.test("remote: storage's junk caps reach the Canaries through the Overworld and
   ]])
   st:run("st")
   e.w:run(25)
-  local capped = e.canary.env._G.lastCmd.capped
+  local capped = e.canary.G.lastCmd.capped
   T.eq(capped[1], "minecraft:cobblestone")
 end)
 
@@ -217,8 +217,8 @@ T.test("remote: Re-dock on the Overworld Foreman reaches a Canary through the MD
   tapOn(e.w, e.hubMon, "Canary-01")
   tapOn(e.w, e.hubMon, "Re-dock", true)
   e.w:run(5)
-  T.truthy(e.canary.env._G.lastCmd.redock, "re-dock token from the MD Foreman")
-  T.eq(e.canary.env._G.cmdFrom, 3)
+  T.truthy(e.canary.G.lastCmd.redock, "re-dock token from the MD Foreman")
+  T.eq(e.canary.G.cmdFrom, 3)
 end)
 
 T.test("remote: an old 'Digger' Canary the hand-over missed is never ordered by the Overworld Foreman", function()
@@ -234,6 +234,6 @@ T.test("remote: an old 'Digger' Canary the hand-over missed is never ordered by 
   local c5 = MS.standIn(w, { id = 15, num = 5, label = "Canary-05", protocol = "tanis-miner", bird = "Canary",
     kind = "canary", dim = "allthemodium:mining" })
   w:run(15)
-  T.eq(c5.env._G.lastCmd, nil, "the Overworld Foreman sent him an order")
+  T.eq(c5.G.lastCmd, nil, "the Overworld Foreman sent him an order")
   T.eq(hub:readTable("foreman.cfg").canaries[15], nil, "dropped from its list")
 end)

@@ -101,14 +101,14 @@ T.test("miner: a Starling mines and fuels himself from his one dock barrel (no F
   T.eq(dock:count("minecraft:raw_iron"), 1)
   T.truthy(w:getBlock(1, 64, 0), "dock barrel still standing")
   T.truthy(t.body.fuel > 400, "took fuel from his dock")
-  T.eq(f.env._G.requests, 0, "never asked a Foreman for fuel")
+  T.eq(f.G.requests, 0, "never asked a Foreman for fuel")
 end)
 
 T.test("miner: a reboot in the middle of a run resumes where it was", function()
   local w, t, dock, _, f = mineWorld()
   MS.order(f)
   w:run(150)
-  T.eq(f.env._G.lastStatus.state, "mining")
+  T.eq(f.G.lastStatus.state, "mining")
   t:reboot()                                      -- chunk unload / server restart: startup.lua runs the miner again
   w:run(5)
   T.running(t)
@@ -131,7 +131,7 @@ T.test("miner: with a chunk controller he swaps it on as he goes (core.chunk) an
   T.contains(t:output(), "Chunk controller on board")
   MS.order(f)
   T.waitFor(w, MS.finished(f), 1200, "never finished the range")
-  local s = f.env._G.lastStatus
+  local s = f.G.lastStatus
   T.eq(s.chunky, true)
   T.truthy((s.swaps or 0) >= 2, "swapped at the start and during the run")
   T.eq(s.chunkyNote, nil)
@@ -146,14 +146,14 @@ T.test("miner: an order with no range, or one above his dock, says why instead o
   local f = MS.foreman(w)
   MS.setup(w, t)
   w:run(10)
-  f.env._G.order = { want = "run", seq = 5 }                    -- no minY / maxY
+  f.G.order = { want = "run", seq = 5 }                    -- no minY / maxY
   w:run(10)
-  T.contains(f.env._G.lastStatus.msg, "No range from the MD Foreman")
+  T.contains(f.G.lastStatus.msg, "No range from the MD Foreman")
   T.eq(t.body.y, 64)
   MS.order(f, { minY = 70, maxY = 80, seq = 6 })
   w:run(10)
-  T.contains(f.env._G.lastStatus.msg, "Range Y 70..80 isn't below my dock (Y 64)")
-  T.absent(f.env._G.lastStatus.msg, "Range finished")
+  T.contains(f.G.lastStatus.msg, "Range Y 70..80 isn't below my dock (Y 64)")
+  T.absent(f.G.lastStatus.msg, "Range finished")
   MS.order(f, { seq = 7 })                                       -- a good one: he goes
   T.waitFor(w, MS.finished(f), 1200, "never mined the good range")
 end)
@@ -184,14 +184,14 @@ T.test("miner: losing his ender modem mid-run he stops mining and goes home, ins
   local w, t, dock, _, f = mineWorld()
   MS.order(f, { minY = 50, maxY = 63 })
   w:run(120)
-  T.eq(f.env._G.lastStatus.state, "mining")
+  T.eq(f.G.lastStatus.state, "mining")
   t.body:equip("right", nil)                                -- the modem is gone (a chunk controller in its place, say)
   T.waitFor(w, function() return t.body.x == 0 and t.body.y == 64 and t.body.z == 0 end, 600, "never came home")
   w:run(20)
   T.eq(t.body.y, 64, "stays home")
   T.contains(t:output(), "No ender modem")
   t.body:equip("right", "computercraft:wireless_modem_advanced")   -- put back: he hears his Foreman again
-  T.waitFor(w, function() return f.env._G.lastStatus.state == "mining" end, 60, "never went back to mining")
+  T.waitFor(w, function() return f.G.lastStatus.state == "mining" end, 60, "never went back to mining")
 end)
 
 T.test("miner: many chunk swaps while the radio is busy never lose his modem or controller, nor crash", function()
@@ -218,7 +218,7 @@ T.test("miner: many chunk swaps while the radio is busy never lose his modem or 
   for _, sl in pairs(t.body.slots) do if sl.name == "advancedperipherals:chunk_controller" then n = n + sl.count end end
   T.eq(n, 1, "controller still in his bag")
   T.eq(dock:count("advancedperipherals:chunk_controller") + dock:count("computercraft:wireless_modem_advanced"), 0, "no gear in the dock")
-  T.truthy((f.env._G.lastStatus.swaps or 0) >= 9, "swapped in every chunk")
+  T.truthy((f.G.lastStatus.swaps or 0) >= 9, "swapped in every chunk")
 end)
 
 T.test("miner: a chunk swap landing while the radio loop waits in receive never crashes him (issue 96)", function()
@@ -243,7 +243,7 @@ T.test("miner: a chunk swap landing while the radio loop waits in receive never 
     w:run(400)
     T.running(t)
     T.eq(t:output():find("No such method", 1, true), nil, "offset " .. i .. ": " .. t:output())
-    T.truthy(f.env._G.lastStatus ~= nil, "still reporting")
+    T.truthy(f.G.lastStatus ~= nil, "still reporting")
     hits = hits + (w.staleHits or 0)
   end
   cost.equipLeft, cost.equipRight = old[1], old[2]

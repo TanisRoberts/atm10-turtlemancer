@@ -108,7 +108,7 @@ T.test("nether screens: START and the layers go out with the lava rule", functio
   tapOn(e, e.s, "Above lava")
   tapOn(e, e.s, "START", true)
   e.w:run(4)
-  local m = e.f.env._G.lastCmd
+  local m = e.f.G.lastCmd
   T.eq(m.want, "run"); T.eq(m.minY, 33); T.eq(m.maxY, 44)
   T.eq(m.hungryAt, 25); T.eq(m.fullAt, 75)
 end)

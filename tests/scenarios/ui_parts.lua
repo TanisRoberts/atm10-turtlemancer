@@ -41,7 +41,7 @@ local function fg(scr, x, y) local f = scr:colourAt(x, y); return f end
 local function bg(scr, x, y) local _, b = scr:colourAt(x, y); return b end
 local function tap(world, c, x, y) c:click(x, y); world:run(0.2) end
 local function key(world, c, code) c:key(code); world:run(0.2) end
-local function d3(c) return c.env._G.d3 end
+local function d3(c) return c.G.d3 end
 
 for _, s in ipairs(SIZES) do
   local W, H = s[1], s[2]
@@ -216,10 +216,10 @@ T.test("ui3: switch wraps to a second row when even the short labels do not fit;
   T.truthy(inRow(scr, 3, "Smelt everything")); T.truthy(inRow(scr, 4, "Keep N stacks"), "the next one starts a new row")
   T.truthy(inRow(scr, 4, "No rule"), "and the next one fits beside it")
   T.absent(scr:line(5), "No rule")
-  T.eq(c.env._G.r[2], 4, "returns the last row")
+  T.eq(c.G.r[2], 4, "returns the last row")
   T.eq(bg(scr, 3, 4), COL.yellow, "current is gold on the second row")
-  tap(world, c, 4, 3); T.eq(c.env._G.picked, "a", "a tap on the first row")
-  tap(world, c, 20, 4); T.eq(c.env._G.picked, "c", "and beside it")
+  tap(world, c, 4, 3); T.eq(c.G.picked, "a", "a tap on the first row")
+  tap(world, c, 20, 4); T.eq(c.G.picked, "c", "and beside it")
 end)
 
 T.test("ui3: kv cuts the key first and the value last; alert and section clip to their width", function()
@@ -252,9 +252,9 @@ T.test("ui3: without colour: ! stripe, [current] switch, - rule, | board stripe,
   local w4, c4 = demo3(51, 19, { screen = "wait" }, { colour = false })
   T.eq(c4.screen.ch[5][4], ".", "still glyph without colour")
   local w5, c5 = frame(40, 6, [[ ui.anim = "off"; v:spinner_line(2, 3, "x"); _G.an = v.animated ]])
-  T.eq(c5.env._G.an, nil, "ANIM=off: still, not animated")
+  T.eq(c5.G.an, nil, "ANIM=off: still, not animated")
   local w6, c6 = frame(40, 6, [[ v:spinner_line(2, 3, "x"); _G.an = v.animated ]])
-  T.eq(c6.env._G.an, true, "a spinner marks the view as animated")
+  T.eq(c6.G.an, true, "a spinner marks the view as animated")
 end)
 
 T.test("ui3: a monitor view picks with a touch and has no keys", function()

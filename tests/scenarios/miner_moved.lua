@@ -37,7 +37,7 @@ T.test("miner moved: carried to a new dock far away he offers to set up there an
   T.contains(t.screen, "I'VE BEEN MOVED")
   T.contains(t.screen, "I stay Canary-01")
   w:run(4)
-  T.contains(f.env._G.lastStatus.msg, "confirm on my screen")
+  T.contains(f.G.lastStatus.msg, "confirm on my screen")
   t:type("1"); t:key(257)                                       -- yes, set up here
   w:run(1)
   T.contains(t.screen, "Dimension")
@@ -55,8 +55,8 @@ T.test("miner moved: carried to a new dock far away he offers to set up there an
   T.eq(t.body.x, 40); T.eq(t.body.y, 120); T.eq(t.body.z, 40)
   T.eq(stoneLeft(w), stone, "never dug towards the old dock")
   w:run(10)
-  T.eq(f.env._G.lastStatus.state, "docked")
-  T.eq(f.env._G.lastStatus.num, 1)
+  T.eq(f.G.lastStatus.state, "docked")
+  T.eq(f.G.lastStatus.num, 1)
 end)
 
 T.test("miner moved: carried far with no barrel next to him he waits to be carried back", function()
@@ -66,8 +66,8 @@ T.test("miner moved: carried far with no barrel next to him he waits to be carri
   MS.order(f)                                                   -- START doesn't send him tunnelling either
   w:run(60)
   T.running(t)
-  T.contains(f.env._G.lastStatus.msg, "Carry me back to 0 64 0")
-  T.eq(f.env._G.lastStatus.pos.x, 300)
+  T.contains(f.G.lastStatus.msg, "Carry me back to 0 64 0")
+  T.eq(f.G.lastStatus.pos.x, 300)
   T.eq(t.body.x, 300); T.eq(t.body.y, 90); T.eq(t.body.z, -200)
   T.eq(stoneLeft(w), stone, "never dug anything")
   -- carried back onto his dock: he picks up where he was
@@ -85,7 +85,7 @@ T.test("miner moved: saying no to the new dock leaves him waiting, not tunnellin
   t:type("2"); t:key(257)
   w:run(30)
   T.running(t)
-  T.contains(f.env._G.lastStatus.msg, "Carry me back")
+  T.contains(f.G.lastStatus.msg, "Carry me back")
   T.eq(t.body.x, 40); T.eq(t.body.y, 120)
   T.eq(stoneLeft(w), stone)
   T.eq(t:readTable("miner.state").home.x, 0, "still his old dock")
@@ -96,7 +96,7 @@ T.test("miner moved: carried a few blocks along his own level he waits for an or
   carry(w, t, 3, 64, 2)
   w:run(20)
   T.running(t)
-  T.contains(f.env._G.lastStatus.msg, "Moved by hand")
+  T.contains(f.G.lastStatus.msg, "Moved by hand")
   T.absent(t.screen, "I'VE BEEN MOVED")
 end)
 
@@ -147,7 +147,7 @@ T.test("miner: unloaded mid-turn on a dock with no free side, he finds his headi
   local s = t:readTable("miner.state")
   T.falsy(s.lost, "not lost")
   T.eq(s.h, 0); T.eq(t.body.facing, 0, "faces the way he faced at setup")
-  T.absent(f.env._G.lastStatus.msg, "Can't tell")
+  T.absent(f.G.lastStatus.msg, "Can't tell")
   MS.order(f)
   T.waitFor(w, MS.finished(f), 1200, "never mined after finding himself")
 end)
@@ -158,14 +158,14 @@ T.test("miner: a re-dock from his Foreman sets his dock up where he stands, keep
   w:setBlock(4, 64, -1, "minecraft:barrel", MS.barrel())
   t.body.x, t.body.y, t.body.z = 3, 64, -1
   t:reboot(); w:run(10)
-  T.contains(f.env._G.lastStatus.msg, "Moved by hand")
-  f.env._G.redock = 1
-  f.env._G.order = { want = "dock", seq = 9 }
+  T.contains(f.G.lastStatus.msg, "Moved by hand")
+  f.G.redock = 1
+  f.G.order = { want = "dock", seq = 9 }
   w:run(15)
   local s = t:readTable("miner.state")
   T.eq(s.home.x, 3); T.eq(s.home.z, -1); T.eq(s.dockDir, 1); T.eq(s.num, 1)
   T.contains(t:output(), "Re-docked here")
-  T.eq(f.env._G.lastStatus.redockDone, 1)
+  T.eq(f.G.lastStatus.redockDone, 1)
 end)
 
 T.test("miner: lost with no GPS he still takes a reboot or a re-dock from his Foreman", function()
@@ -176,11 +176,11 @@ T.test("miner: lost with no GPS he still takes a reboot or a re-dock from his Fo
   st.x, st.z = 5, 5                                   -- lost out in his area, no GPS to find himself
   t:writeTable("miner.state", st)
   t:reboot(); w:run(10)
-  T.contains(f.env._G.lastStatus.msg, "Lost")
-  f.env._G.redock = 2
-  f.env._G.order = { want = "dock", seq = 7 }
+  T.contains(f.G.lastStatus.msg, "Lost")
+  f.G.redock = 2
+  f.G.order = { want = "dock", seq = 7 }
   w:run(10)
   T.contains(t:output(), "an order from my Foreman came in")
-  T.eq(f.env._G.lastStatus.redockDone, 2, "the re-dock got through")
+  T.eq(f.G.lastStatus.redockDone, 2, "the re-dock got through")
   T.running(t)
 end)

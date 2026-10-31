@@ -109,7 +109,7 @@ T.test("storage docks: dock_report is acked as unassigned, then assigned once /a
   c:run("storage"); w:run(5)
   local t = turtleSending(w, 5, "Woodpecker-01", "lumberjack", 0, 64, -1)
   t:run("send"); w:run(5)
-  local acks = t.env._G.acks
+  local acks = t.G.acks
   T.eq(#acks, 1, "an ack came back")
   T.eq(acks[1].assigned, nil, "nothing linked yet: unassigned dock")
   -- Link the barrel to that turtle (what /assign does), then reboot Storage to read it
@@ -118,11 +118,11 @@ T.test("storage docks: dock_report is acked as unassigned, then assigned once /a
   c:reboot(); c:run("storage"); w:run(10)
   local t2 = turtleSending(w, 6, "Woodpecker-01", "lumberjack", 0, 64, -1)
   t2:run("send"); w:run(5)
-  T.eq(t2.env._G.acks[1].assigned, DOCK, "the linked barrel is named")
+  T.eq(t2.G.acks[1].assigned, DOCK, "the linked barrel is named")
   -- Same turtle, dock moved: the link no longer matches
   local t3 = turtleSending(w, 7, "Woodpecker-01", "lumberjack", 5, 64, 5)
   t3:run("send"); w:run(5)
-  T.eq(t3.env._G.acks[1].assigned, nil, "a moved dock is not assigned")
+  T.eq(t3.G.acks[1].assigned, nil, "a moved dock is not assigned")
 end)
 
 T.test("storage docks: a miner's dock report is answered but never listed (its Foreman owns that dock)", function()
@@ -130,8 +130,8 @@ T.test("storage docks: a miner's dock report is answered but never listed (its F
   c:run("storage"); w:run(5)
   local t = turtleSending(w, 5, "Canary-01", "miner", 10, 253, 10)
   t:run("send"); w:run(5)
-  T.eq(#t.env._G.acks, 1)
-  T.eq(t.env._G.acks[1].assigned, nil)
+  T.eq(#t.G.acks, 1)
+  T.eq(t.G.acks[1].assigned, nil)
   local saved = c:readTable("storage.cfg")
   T.eq(saved.dockReports and saved.dockReports["Canary-01"], nil, "not remembered")
 end)

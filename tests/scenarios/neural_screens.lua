@@ -22,7 +22,7 @@ local function demo(w, h, cfg, opts)
   world:run(0.5)
   return world, c, mon
 end
-local function nd(c) return c.env._G.nd end
+local function nd(c) return c.G.nd end
 -- Tap a label on a monitor, or (comp given) click it on the computer's own screen
 local function tapOn(world, scr, label, comp)
   local x, y = scr:find(label)

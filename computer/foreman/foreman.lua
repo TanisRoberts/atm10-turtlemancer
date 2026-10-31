@@ -21,7 +21,7 @@
 
 -- The Foreman engine (shared/fm*.lua) does the work; this is what makes it the Overworld's remote.
 -- What it shows is computer/foreman/foreman_screens.lua, on the UI kit (docs/systems/foreman.md).
-dofile("fm.lua")({
+require("fm")({
   title = "FOREMAN", short = "FOREMAN", name = "the Foreman", place = "the Overworld",
   bird = "Starling", birds = "miners", one = "miner", unit = "miner", birdNames = { Canary = true, Starling = true },
   protocol = "tanis-miner", config = "foreman.cfg", regKey = "canaries", oldKey = "diggers", oldPrefix = "Digger", oldBird = "Canary",

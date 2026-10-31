@@ -43,7 +43,7 @@ local function fg(scr, x, y) local f = scr:colourAt(x, y); return f end
 
 T.test("motion: ui.beat steps with the clock and ui.loadAnim keeps what is there", function()
   local world, c = frame(30, 4, [[ v:put(1, 1, "x", "fg", "bg") ]])
-  local ui = c.env.require("ui")
+  local ui = c.require("ui")
   local b0 = ui.beat(2); world:run(0.5); T.eq(ui.beat(2), b0 + 1, "2 beats a second")
   local b1 = ui.beat(4); world:run(0.25); T.eq(ui.beat(4), b1 + 1, "4 beats a second")
   T.eq(ui.setAnim("calm"), "calm"); T.eq(ui.setAnim("bogus"), "full"); T.eq(ui.setAnim("OFF"), "off")
@@ -117,7 +117,7 @@ end
 
 T.test("motion: a view draws at most 24 moving glyphs; the rest show their still frame", function()
   local world, c = frame(60, 30, [[ for i = 1, 25 do v:glyph(2 + (i - 1) * 2, 3, "working") end ]])
-  local scr, e = c.screen, c.env._G
+  local scr, e = c.screen, c.prog
   T.eq(e.v.glyphN, 24, "24 counted")
   T.eq(scr.ch[3][2 + 24 * 2], "\\", "the 25th is the still first frame")
   local seen = {}

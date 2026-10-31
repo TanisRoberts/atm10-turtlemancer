@@ -1,4 +1,4 @@
--- assignui.lua  --  the "/assign" screen, shared by storage and the Nether Foreman. Loaded with dofile().
+-- assignui.lua  --  the "/assign" screen, shared by storage and the Nether Foreman. Loaded with require("assignui"), not dofile(): it uses require.
 -- Built only from the UI kit (shared/ui*.lua, docs/systems/ui.md); design: docs/design/storage.md.
 --
 -- Which inventory on the wired cable does what. List -> tap one to edit (job, nickname, delete);

@@ -103,7 +103,7 @@ T.test("map: save and load, old files load, sizes", function()
   ]])
   c:run("t")
   w:run(1)
-  local r = c.env._G.RESULT
+  local r = c.G.RESULT
   T.eq(r.same, true)
   T.eq(r.conv, r.new)
   T.eq(r.ocean < 10, true)

@@ -60,9 +60,9 @@ function MS.foreman(w, o)
     end
   ]]):format(o.protocol or "tanis-miner"))
   f:run("foreman")
-  f.env._G.docks = o.dock or {}
-  f.env._G.kind = o.kind or "canary"
-  f.env._G.requests = 0
+  f.G.docks = o.dock or {}
+  f.G.kind = o.kind or "canary"
+  f.G.requests = 0
   return f
 end
 
@@ -123,18 +123,18 @@ function MS.listen(w, protocol, id)
     end
   ]]):format(protocol or "tanis-miner"))
   c:run("listen")
-  return function(mid) return c.env._G.last[mid] end
+  return function(mid) return c.G.last[mid] end
 end
 
 function MS.order(f, o)
   o = o or {}
-  f.env._G.order = { want = o.want or "run", minY = o.minY or 60, maxY = o.maxY or 63, seq = o.seq or 1, c2 = o.c2 }
+  f.G.order = { want = o.want or "run", minY = o.minY or 60, maxY = o.maxY or 63, seq = o.seq or 1, c2 = o.c2 }
 end
 
 -- pred: the miner has finished its range and is back at its dock
 function MS.finished(f)
   return function()
-    local s = f.env._G.lastStatus
+    local s = f.G.lastStatus
     return s and s.state == "docked" and s.msg and s.msg:find("Range finished") ~= nil
   end
 end

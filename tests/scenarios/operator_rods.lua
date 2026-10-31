@@ -70,7 +70,7 @@ T.test("operator rods: a draining buffer takes the rods out in steps, no faster 
   for _, s in ipairs(seen) do top = math.max(top, s.level) end
   T.eq(top, 100, "should reach full power while the buffer is below the ON threshold")
   T.eq(seen[1].level, 20)
-  T.eq(mf.env._G.last.units[1].rodCount, 5)
+  T.eq(mf.G.last.units[1].rodCount, 5)
 end)
 
 T.test("operator rods: a filling buffer takes them in, and at steady load they stop moving", function()
@@ -79,7 +79,7 @@ T.test("operator rods: a filling buffer takes them in, and at steady load they s
   local seen = watch(w, r, 100)
   T.truthy(#seen >= 2, "rods never moved in")
   T.truthy(level(r) < 100 and level(r) >= 10, "level not between the limits")
-  T.eq(mf.env._G.last.units[1].levelWhy, "buffer filling")
+  T.eq(mf.G.last.units[1].levelWhy, "buffer filling")
   T.truthy(r.on, "reactor must stay on inside the band")
   -- settled around the load (33% of 3000 FE/t = 1000): the level only drifts inside the LEVEL_BAND, a few
   -- small steps, never a swing
@@ -110,7 +110,7 @@ T.test("operator rods: a manual level in operator.cfg, and the lowest and highes
   c:run("operator")
   w:run(8)
   T.eq(level(r), 60)
-  T.eq(mf.env._G.last.units[1].levelWhy, "manual")
+  T.eq(mf.G.last.units[1].levelWhy, "manual")
   -- limits: lowest 40, highest 80, buffer low wants full power
   local w2, _, r2, mf2, c2 = setup{ stored = 100000, active = true, prod = 3000, demand = 2000, rodLevel = 100 }
   c2:writeTable("operator.cfg", { nextNum = { reactor = 1 }, units = { ["BigReactors-Reactor_0"] =
@@ -127,12 +127,12 @@ T.test("operator rods: a level from the mainframe holds, then Auto takes over af
   send(w, { type = "operator_cmd", level = 80 })
   w:run(4)
   T.eq(level(r), 80)
-  local u = mf.env._G.last.units[1]
+  local u = mf.G.last.units[1]
   T.eq(u.mode, "on"); T.truthy(u.holdLeft and u.holdLeft > 500, "no hold countdown")
   w:run(560)
   T.eq(level(r), 80, "hold ended early")
   w:run(60)
-  u = mf.env._G.last.units[1]
+  u = mf.G.last.units[1]
   T.eq(u.mode, "auto"); T.eq(u.holdLeft, nil)
   T.truthy(c:readFile("operator.log"):find("back to Auto", 1, true), "hold end not logged")
   -- a mode command is saved
@@ -149,7 +149,7 @@ T.test("operator rods: a reactor with no rod methods, or RODS=off, is left alone
   T.waitFor(w, function() return r.on end, 20, "never switched on")
   w:run(20)
   T.eq(c.error, nil)
-  T.eq(mf.env._G.last.units[1].level, nil)
+  T.eq(mf.G.last.units[1].level, nil)
   local w2, _, r2, _, c2 = setup{ stored = 200000, active = true, prod = 3000, demand = 2000, rodLevel = 90 }
   c2:writeFile("operator.env", "RODS=off\n")
   c2:run("operator")

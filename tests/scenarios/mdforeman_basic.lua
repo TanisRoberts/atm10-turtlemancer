@@ -175,7 +175,7 @@ T.test("md foreman: a Canary ignores an order that isn't for a Canary", function
   w:run(10)
   MS.order(f)
   w:run(20)
-  T.eq(f.env._G.lastStatus.state, "docked")
+  T.eq(f.G.lastStatus.state, "docked")
   T.eq(t.body.y, 64)
 end)
 

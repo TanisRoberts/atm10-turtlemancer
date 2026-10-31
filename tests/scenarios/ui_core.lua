@@ -166,24 +166,24 @@ T.test("ui: tapping buttons, and the bigger tap area", function()
   local world, c = demo(51, 19)
   local scr = c.screen
   tap(world, c, 4, 4)                                   -- on Pause
-  T.eq(c.env._G.demo.paused, true)
+  T.eq(c.G.demo.paused, true)
   T.contains(scr:line(1), "waiting"); T.eq(fg(scr, 51 - 3, 1), COL.orange, "waiting is orange")
   tap(world, c, 4, 3)                                   -- the row above Pause: its extra area
-  T.eq(c.env._G.demo.paused, false, "extra row above")
+  T.eq(c.G.demo.paused, false, "extra row above")
   tap(world, c, 8, 5)                                   -- the row below (Off is nearer its own cells)
-  T.eq(c.env._G.demo.paused, true, "extra row below")
+  T.eq(c.G.demo.paused, true, "extra row below")
   tap(world, c, 4, 7)                                   -- three rows down: nothing there
-  T.eq(c.env._G.demo.paused, true)
+  T.eq(c.G.demo.paused, true)
   local rx = inRow(scr, 4, "Reboot")
   tap(world, c, rx + 2, 4)
-  T.eq(c.env._G.demo.reboots, 1)
+  T.eq(c.G.demo.reboots, 1)
   tap(world, c, rx - 2, 4)                              -- the gap before Reboot is Pause's or Reboot's, never lost
-  T.truthy(c.env._G.demo.reboots + (c.env._G.demo.paused and 0 or 1) >= 2, "gap tap landed on a neighbour")
+  T.truthy(c.G.demo.reboots + (c.G.demo.paused and 0 or 1) >= 2, "gap tap landed on a neighbour")
   local ox = inRow(scr, 5, "Off")
   tap(world, c, ox, 5)
-  T.eq(c.env._G.demo.off, nil, "a disabled button ignores taps")
+  T.eq(c.G.demo.off, nil, "a disabled button ignores taps")
   tap(world, c, 49, 1)                                  -- the state word
-  T.eq(c.env._G.demo.stateTaps, 1)
+  T.eq(c.G.demo.stateTaps, 1)
 end)
 
 T.test("ui: tap-twice confirm: Sure?, runs on the second tap, times out after 4 seconds", function()
@@ -191,7 +191,7 @@ T.test("ui: tap-twice confirm: Sure?, runs on the second tap, times out after 4 
   local scr, d = c.screen, nil
   local fx = inRow(scr, 4, "Forget")
   tap(world, c, fx, 4)
-  d = c.env._G.demo
+  d = c.G.demo
   T.eq(d.forgotten, 0, "first tap only arms")
   T.truthy(inRow(scr, 4, "Sure?"), "label becomes Sure?")
   T.eq(bg(scr, inRow(scr, 4, "Sure?"), 4), COL.red, "danger stays red when armed")
@@ -220,7 +220,7 @@ end)
 
 T.test("ui: keys: Tab focus, Enter twice confirms, hotkey, Esc, Backspace goes back", function()
   local world, c = demo(51, 19)
-  local scr, d = c.screen, c.env._G.demo
+  local scr, d = c.screen, c.G.demo
   c:key(258); world:run(0.2)                            -- Tab: Pause
   T.eq(scr.ch[4][1], ">", "focused button gets a > in the free cell before it")
   T.eq(fg(scr, 1, 4), COL.white)
@@ -252,7 +252,7 @@ end)
 
 T.test("ui: stepper taps, limits, pending value and keys", function()
   local world, c = demo(51, 19)
-  local scr, d = c.screen, c.env._G.demo
+  local scr, d = c.screen, c.G.demo
   local sx, sy = scr:find("40")
   local function press(txt) tap(world, c, inRow(scr, sy, txt) + 1, sy) end
   press(" - ");  T.eq(d.depth, 39); T.eq(fg(scr, scr:find("39"), sy), COL.yellow, "pending value is gold")
@@ -338,7 +338,7 @@ T.test("ui: an error notice stays until tapped; the next notice replaces it; act
   local ux = inRow(scr, 2, " Undo ")
   T.truthy(ux, "the action is drawn at the right")
   tap(world, c, ux + 2, 2)
-  T.eq(c.env._G.undone, 1)
+  T.eq(c.G.undone, 1)
   T.eq(scr.ch[2][1], RULE, "running the action dismisses the notice")
 end)
 
@@ -356,7 +356,7 @@ T.test("ui: no colour: [ Label ] buttons, - rule, bracketed chip, no crash", fun
   T.truthy(inRow(scr, 5, "Off"))
   T.truthy(inRow(scr, 19, "[ < ] Back"))
   tap(world, c, 6, 4)
-  T.eq(c.env._G.demo.paused, true, "taps work without colour")
+  T.eq(c.G.demo.paused, true, "taps work without colour")
   local fx = inRow(scr, 4, "Forget")
   tap(world, c, fx + 1, 4)
   T.truthy(inRow(scr, 4, "[ Sure?"), "armed")
@@ -369,13 +369,13 @@ T.test("ui: a monitor gets text scale 0.5 and its own taps; notices go to every 
   T.eq(mon:paletteHex(COL.yellow), 0xF2B71F, "monitor palette")
   T.truthy(inRow(mon, 4, " Pause "), "monitor drawn")
   mon:touch(4, 4); world:run(0.2)
-  T.eq(c.env._G.demo.paused, true, "monitor_touch on the monitor view")
+  T.eq(c.G.demo.paused, true, "monitor_touch on the monitor view")
   T.contains(mon:line(1), "waiting"); T.contains(c.screen:line(1), "waiting", "both views redraw")
   local mx = inRow(mon, 4, "Reboot")
   mon:touch(mx + 1, 4); world:run(0.2)
   T.contains(mon:line(2), "Reboot sent"); T.contains(c.screen:line(2), "Reboot sent", "the same notice on every view")
   tap(world, c, 4, 4)                                    -- a click on the computer does not tap the monitor view
-  T.eq(c.env._G.demo.paused, false)
+  T.eq(c.G.demo.paused, false)
 end)
 
 T.test("ui: resize redraws at the new size class", function()
@@ -409,7 +409,7 @@ end)
 
 T.test("ui: a flood of unrelated events does not redraw the screen over and over", function()
   local world, c = demo(51, 19, { anim = "off" })
-  local scr, v = c.screen, c.env._G.demo.view
+  local scr, v = c.screen, c.G.demo.view
   local frames0, writes0 = v.frames, scr.writes
   for i = 1, 300 do c:queue("rednet_message", 99, "chatter " .. i, "somebody-elses-protocol") end
   world:run(1)
@@ -419,7 +419,7 @@ T.test("ui: a flood of unrelated events does not redraw the screen over and over
   -- input is still shown at once
   local f1 = v.frames
   tap(world, c, 4, 4)
-  T.truthy(v.frames > f1 and c.env._G.demo.paused, "a tap redraws immediately")
+  T.truthy(v.frames > f1 and c.G.demo.paused, "a tap redraws immediately")
 end)
 
 T.test("ui: a resize shows every row again", function()

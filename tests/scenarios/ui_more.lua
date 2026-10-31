@@ -47,7 +47,7 @@ local function pure()
   env.require = function(n) return assert(loadfile(cc.ROOT .. "/shared/" .. n .. ".lua", "t", env))() end
   return assert(loadfile(cc.ROOT .. "/shared/ui.lua", "t", env))()
 end
-local function d2(c) return c.env._G.d2 end
+local function d2(c) return c.G.d2 end
 
 ---------------------------------------------------------------------------------------------------------
 T.test("ui2: layout.tiles columns, width, height, rows", function()

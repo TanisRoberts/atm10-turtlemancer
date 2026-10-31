@@ -38,7 +38,7 @@ local function room(opts)
   end
   return w, c, floor
 end
-local function dbg(c) return c.env._G.CARTO_DEBUG end
+local function dbg(c) return c.G.CARTO_DEBUG end
 local function bgCount(scr, colour)
   local n = 0
   for y = 1, scr.h do for x = 1, scr.w do local _, b = scr:colourAt(x, y); if b == colour then n = n + 1 end end end
@@ -54,8 +54,8 @@ T.test("cartographer: takes a whole region from Seagull, saves it, says region_o
   w:run(10)
   T.eq(dbg(c).store:regionCount(), 1)
   T.truthy(c.files["regions/0_0.map"], "the region is saved as regions/0_0.map")
-  T.truthy(#s.env._G.oks >= 1, "Seagull was told region_ok")
-  T.eq(s.env._G.oks[1].region[1], 0); T.eq(s.env._G.oks[1].region[2], 0)
+  T.truthy(#s.G.oks >= 1, "Seagull was told region_ok")
+  T.eq(s.G.oks[1].region[1], 0); T.eq(s.G.oks[1].region[2], 0)
   -- the computer's own screen
   local scr = c.screen
   T.contains(scr:text(), "CARTOGRAPHER"); T.contains(scr:text(), "1 region")
@@ -121,25 +121,25 @@ T.test("cartographer: MAP, DOCK, tap-twice next region and typed commands reach 
   local scr = c.screen
   local x, y = scr:find("MAP")
   c:click(x + 1, y); w:run(5)
-  T.eq(s.env._G.cmds[#s.env._G.cmds].want, "map")
+  T.eq(s.G.cmds[#s.G.cmds].want, "map")
   x, y = scr:find("DOCK")
   c:click(x + 1, y); w:run(5)
-  T.eq(s.env._G.cmds[#s.env._G.cmds].want, "dock")
+  T.eq(s.G.cmds[#s.G.cmds].want, "dock")
   -- tap an unexplored region on the small map twice (north-east corner of the thumbnail is far from 0,0)
-  local tn = #s.env._G.cmds
+  local tn = #s.G.cmds
   c:click(2, 4); w:run(1)
   T.contains(scr:text(), "tap again to map it next")
   c:click(2, 4); w:run(5)
-  T.eq(#s.env._G.cmds > tn, true, "the second tap queued the region")
-  local cmd = s.env._G.cmds[#s.env._G.cmds]
+  T.eq(#s.G.cmds > tn, true, "the second tap queued the region")
+  local cmd = s.G.cmds[#s.G.cmds]
   T.truthy(type(cmd.next) == "table" and cmd.next[1] and cmd.next[2], "cmd carries next = {rx, rz}")
   T.eq(dbg(c).st.nextRegion.rx, cmd.next[1])
   -- typed
   c:type("/next 3,-2"); c:key(257); w:run(5)
-  cmd = s.env._G.cmds[#s.env._G.cmds]
+  cmd = s.G.cmds[#s.G.cmds]
   T.eq(cmd.next[1], 3); T.eq(cmd.next[2], -2)
   c:type("/next clear"); c:key(257); w:run(5)
-  cmd = s.env._G.cmds[#s.env._G.cmds]
+  cmd = s.G.cmds[#s.G.cmds]
   T.eq(cmd.next, false, "next = false clears it")
   c:type("/help"); c:key(257); w:run(1)
   T.contains(scr:text(), "/map")
@@ -212,7 +212,7 @@ T.test("cartographer: refuses to ack a region it cannot save", function()
   T.waitFor(w, function() return dbg(c) and dbg(c).store:count() == 256 end, 300)
   w:run(30)
   T.running(c)
-  T.eq(#s.env._G.oks, 0, "no region_ok when the region is not safe on a disk")
+  T.eq(#s.G.oks, 0, "no region_ok when the region is not safe on a disk")
 end)
 
 T.test("art controller: no World map screen any more; the others still work", function()

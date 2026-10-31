@@ -408,7 +408,7 @@ function Computer:run(cmd)
   local words = {}
   for w in cmd:gmatch("%S+") do words[#words + 1] = w end
   self.co = coroutine.create(function()
-    local ok, err = xpcall(function() return env.shell.run(table.unpack(words)) end, function(e)
+    local ok, err = xpcall(function() return self.shell.run(table.unpack(words)) end, function(e)
       if type(e) == "table" then return e end
       return debug.traceback(tostring(e), 2)
     end)

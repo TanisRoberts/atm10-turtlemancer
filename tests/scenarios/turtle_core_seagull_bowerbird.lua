@@ -40,7 +40,7 @@ T.test("Seagull: drinks the lava bucket at his dock, hands the empty back, and r
   T.eq(t.body.fuel >= 1900, true, "he drank both lava buckets at boot (fuel " .. tostring(t.body.fuel) .. ")")
   T.eq(dock:count("minecraft:lava_bucket"), 0)
   T.eq(dock:count("minecraft:bucket"), 2, "the empties are back in the dock")
-  local rep = s.env._G.reports and s.env._G.reports[1]
+  local rep = s.G.reports and s.G.reports[1]
   T.eq(rep ~= nil, true, "Storage heard a dock report")
   if rep then
     T.eq(rep.label, "Seagull-01"); T.eq(rep.x, 0); T.eq(rep.y, 64); T.eq(rep.z, -1)
@@ -60,7 +60,7 @@ T.test("Bowerbird: reports a bottom dock to Storage, from his GPS fix", function
   local s = storage(w)
   w:run(1)
   t:run("crafter"); w:run(20)
-  local rep = s.env._G.reports and s.env._G.reports[1]
+  local rep = s.G.reports and s.G.reports[1]
   T.eq(rep ~= nil, true, "Storage heard a dock report")
   if rep then
     T.eq(rep.x, 10); T.eq(rep.y, 63); T.eq(rep.z, 10); T.eq(rep.role, "crafter")

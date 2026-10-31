@@ -54,7 +54,7 @@ local function build(opts)
   canary(22, 7, "Canary-07", "waiting", opts.quiet)
   for i = 1, (opts.canaries or 0) do canary(30 + i, 10 + i, ("Canary-%02d"):format(10 + i), "working") end
   if opts.visitors ~= false then
-    world:at(3, function() mf.env._G.WALL_VISITORS = VISITORS end)
+    world:at(3, function() mf.G.WALL_VISITORS = VISITORS end)
   end
   return world, mf, mon
 end

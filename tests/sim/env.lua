@@ -567,31 +567,55 @@ function Env.build(world, c)
                     formatTime = formatTime }
 
   ------------------------------------------------------------------ shell, require
+  -- Like CraftOS: `env` is the computer's _G. Each program run by the shell gets its own globals table that falls
+  -- back to _G and holds `shell`, `require` and `package` (CC's createShellEnv). So `require` and `shell` are NOT
+  -- globals: a file loaded with dofile() or os.run() runs in _G and sees neither, nor the program's own globals.
   local running = {}
   local shell = {}
-  env.shell = shell
+  c.shell = shell              -- for the harness (Computer:run); programs reach it only through their own env
   local function findProgram(name)
     name = norm(name)
     for _, cand in ipairs({ name, name .. ".lua" }) do
       if c.files[cand] then return cand, c.files[cand] end
     end
   end
+  local function makeRequire(penv)
+    local loaded = {}
+    local package = { loaded = loaded, path = "?;?.lua" }
+    local function require(name)
+      if loaded[name] ~= nil then return loaded[name] end
+      local path, src = findProgram((name:gsub("%.", "/")))
+      if not path then error("module '" .. name .. "' not found", 2) end
+      local fn = assert(load(src, "@" .. path, "t", penv))   -- CC loads modules in the requiring program's env
+      local r = fn(name, path)
+      if r == nil then r = true end
+      loaded[name] = r
+      return r
+    end
+    return require, package
+  end
+  local function programEnv()
+    local penv = setmetatable({ shell = shell }, { __index = env })
+    penv.require, penv.package = makeRequire(penv)
+    return penv
+  end
   function shell.run(name, ...)
     local path, src = findProgram(name)
     if not path then env.printError("No such program: " .. tostring(name)); return false end
-    local fn, err = load(src, "@" .. path, "t", env)
+    local penv = programEnv()
+    if #running == 0 then c.prog, c.require = penv, penv.require end   -- the main program's globals, for tests
+    local fn, err = load(src, "@" .. path, "t", penv)
     if not fn then env.printError(err); return false end
     running[#running + 1] = path
     local res = pack(fn(...))
     running[#running] = nil
     return true
   end
-  -- os.run(env, path, ...): run a program with its own globals (they fall back to the computer's)
+  -- os.run(env, path, ...): run a program with its own globals (they fall back to _G: no `require`, no `shell`)
   function os.run(tEnv, path, ...)
     local p, src = findProgram(path)
     if not p then env.printError("No such program: " .. tostring(path)); return false end
-    -- like CC: the globals, but no `require` (that comes with the shell's own programs)
-    local e = setmetatable(tEnv or {}, { __index = function(_, k) if k ~= "require" then return env[k] end end })
+    local e = setmetatable(tEnv or {}, { __index = env })
     local fn, err = load(src, "@" .. p, "t", e)
     if not fn then env.printError(err); return false end
     local ok, perr = pcall(fn, ...)
@@ -602,23 +626,20 @@ function Env.build(world, c)
   function shell.resolve(p) return norm(p) end
   function shell.dir() return "" end
   function shell.exit() end
+  -- like CC's dofile: the file runs in _G, never in the calling program's env
   function env.dofile(p)
     local path, src = findProgram(p)
     if not path then error("File not found: " .. tostring(p), 2) end
     return assert(load(src, "@" .. path, "t", env))()
   end
-  local loaded = {}
-  env.package = { loaded = loaded, path = "?;?.lua" }
-  function env.require(name)
-    if loaded[name] ~= nil then return loaded[name] end
-    local path, src = findProgram((name:gsub("%.", "/")))
-    if not path then error("module '" .. name .. "' not found", 2) end
-    local fn = assert(load(src, "@" .. path, "t", env))
-    local r = fn(name, path)
-    if r == nil then r = true end
-    loaded[name] = r
-    return r
-  end
+  c.prog = programEnv()                 -- until a program runs
+  c.require = c.prog.require
+  -- c.G, for tests: the main program's own globals, else _G (what a name in the program resolves to). A write goes
+  -- to the program's own global if it has one, else to _G (seen both by `x` and by `_G.x` in the program).
+  c.G = setmetatable({}, {
+    __index = function(_, k) local v = rawget(c.prog, k); if v == nil then v = env[k] end return v end,
+    __newindex = function(_, k, v) if rawget(c.prog, k) ~= nil then rawset(c.prog, k, v) else env[k] = v end end,
+  })
 
   if c.body then env.turtle = require("sim.turtle").api(world, c) end
   return env

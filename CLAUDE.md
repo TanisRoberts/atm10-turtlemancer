@@ -42,6 +42,7 @@ Most files are big (smelter 109 KB, storage 88 KB, miner 74 KB, nether 72 KB, ne
 - FTB Chunks allows 25 force-loaded chunks. Miners mine chunk by chunk and swap an Advanced Peripherals chunky upgrade onto their modem slot.
 - A Functional Storage controller gets one modem. Modems on its drawers too would count every item twice.
 - `pushItems` and `pullItems` move at most one stack per call.
+- **`dofile()` runs a file in `_G`, where CraftOS has no `require` or `shell`** (they live in each program's own env), nor the program's globals. A file that uses `require` must itself be loaded with `require()`. `tests/run.py` checks this and the simulator enforces it.
 - Tunables live in auto-generated `.env`-style files on each device: missing keys are appended, existing lines are never overwritten.
 - **Leaves break instantly** (a mod on the server) as soon as no log is left around them, and drop their items at once. Don't cut or wait for leaves to rot: remove the logs and the leaves clear themselves.
 - Fuel = ticks = time: a move saved is both fuel and time saved.

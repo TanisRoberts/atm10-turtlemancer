@@ -72,7 +72,7 @@ T.test("weaver: at the gap limit he waits for stock instead of restocking in a l
   t:run("weaver")
   w:run(900)
   T.running(t)
-  local needs = spy.env._G.needs
+  local needs = spy.G.needs
   assert(needs <= 8, "he went back to the dock " .. needs .. " times for the same blocks")
 end)
 

@@ -146,7 +146,7 @@ T.test("screens: resize and detach of an owned monitor send screens_changed", fu
   m1:setSize(164, 81)
   w:run(1)
   T.contains(c:output(), "changed wall")
-  T.eq(c.env._G.s.size.wall.w, 164, "re-measured")
+  T.eq(c.G.s.size.wall.w, 164, "re-measured")
   net:remove("monitor_1")
   w:run(1)
   T.eq(select(2, c:output():gsub("changed wall", "")), 2)

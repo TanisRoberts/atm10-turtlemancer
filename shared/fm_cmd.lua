@@ -123,7 +123,7 @@ function draw()
 end
 
 -- /assign: the same screen as storage's (assignui.lua). It takes over the computer's own screen.
-AUI = dofile("assignui.lua")
+AUI = require("assignui")
 assignRunning = false
 openAssign = function()
   if ui ~= termUi or assignRunning then

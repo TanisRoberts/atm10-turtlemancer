@@ -21,7 +21,7 @@
 -- (/help lists them all). What it shows is computer/nether/nether_screens.lua, on the UI kit.
 
 -- The Foreman engine (shared/fm*.lua) does the work; this is what makes it the Nether's.
-dofile("fm.lua")({
+require("fm")({
   title = "NETHER FOREMAN", short = "NETHER", name = "the Nether Foreman", place = "the Nether",
   bird = "Firecrest", birds = "Firecrests", one = "firecrest", unit = "firecrest", kind = "firecrest", birdNames = { Firecrest = true },
   protocol = "tanis-nether", config = "nether.cfg", regKey = "firecrests", oldKey = "diggers", oldPrefix = "Pigger",

@@ -97,7 +97,7 @@ local function setup()
   return w, t, carto, dock, scanner
 end
 
-local function G(c) return c.env._G end
+local function G(c) return c.G end
 local function order(c, o) G(c).order = o end
 
 T.test("seagull: MAP maps the home region chunk by chunk, hands it over whole, forgets it", function()

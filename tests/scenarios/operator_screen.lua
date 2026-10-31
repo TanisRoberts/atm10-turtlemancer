@@ -61,7 +61,7 @@ local function touchIn(world, m, rowText, pat)           -- the pattern in the r
   assert(x, "no " .. pat .. " in row " .. y .. ": " .. m:line(y))
   press(world, m, x + 1, y)
 end
-local function rec(c) return c.env._G and c.env._G.last end
+local function rec(c) return c.G and c.G.last end
 local function level(r) return 100 - r.rodLevel end
 
 T.test("operator screen: overview at 51x19 with the Power Grid column and a tile per reactor", function()

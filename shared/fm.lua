@@ -1,6 +1,6 @@
 -- fm.lua  --  the Foreman engine: what the MD Foreman, the Nether Foreman and the Overworld Foreman share
 -- (docs/systems/miner.md). A Foreman program is a profile plus:
---   dofile("fm.lua")(P)
+--   require("fm")(P)   -- require, not dofile: the parts use require (they run in the program's env)
 -- The parts (fm_reg, fm_barrels, fm_draw, fm_pages, fm_edit, fm_cmd, fm_net, fm_remote) are loaded into ONE shared
 -- environment, so a top-level name in one part (cfg, say, draw ...) is seen by all of them, as if they were one
 -- file. Globals of the computer (term, rednet, colours ...) show through it. The profile is P.

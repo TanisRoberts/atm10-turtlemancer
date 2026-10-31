@@ -71,7 +71,7 @@ local function bg(scr, x, y) local _, b = scr:colourAt(x, y); return b end
 local function tap(scr, w, x, y) scr:touch(x, y); w:run(1) end
 local function tapQ(scr, w, x, y) scr:touch(x, y); w:run(0.2) end
 local function click(w, c, x, y) c:click(x, y); w:run(1) end
-local function cmds(stub) return stub.env._G.cmds or {} end
+local function cmds(stub) return stub.G.cmds or {} end
 local function lastCmd(stub) local l = cmds(stub); return l[#l] end
 -- first cell with this background colour
 local function findBg(scr, colour, x1, x2)

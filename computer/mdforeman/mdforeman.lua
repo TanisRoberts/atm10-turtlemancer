@@ -21,7 +21,7 @@
 -- Typed on the computer: /keep /assign /presets /rules (/help lists them all). docs/systems/miner.md.
 
 -- The Foreman engine (shared/fm*.lua) does the work; this is what makes it the Mining Dimension's.
-dofile("fm.lua")({
+require("fm")({
   title = "MD FOREMAN", short = "MD", name = "the MD Foreman", place = "the Mining Dimension",
   bird = "Canary", birds = "Canaries", kind = "canary", birdNames = { Canary = true },
   ownKinds = { canary = true }, registers = { Canary = true },

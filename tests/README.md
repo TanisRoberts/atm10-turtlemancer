@@ -60,7 +60,7 @@ Handy calls:
 
 - **Computers:** `w:computer{id=, label=, w=, h=}`, `c:run("prog")`, `c:reboot()` (runs `startup.lua` if there is one; files survive),
   `c:type("text")`, `c:key(257)` (Enter), `c:click(x, y)`, `c:writeFile / readFile / writeTable / readTable`,
-  `c:output()` (everything `print`ed), `c.screen:text()`, `c.screen:dump()` to see a layout, `c.env._G.x` for a program's globals.
+  `c:output()` (everything `print`ed), `c.screen:text()`, `c.screen:dump()` to see a layout, `c.G.x` for the running program's globals (its own, else `_G`) (`c.env` is the computer's `_G`: like CraftOS, `require` and `shell` live only in each program's env, so a `dofile()`d file can't use them).
 - **Turtles:** `w:turtle{id=, x=, y=, z=, facing=0..3 (N,E,S,W), fuel=, left=, right=, items={[slot]={name,count}}}`.
   World blocks: `w:setBlock(x,y,z,"minecraft:stone", inv?)`, `w:fill(x1,y1,z1,x2,y2,z2,block)`, `w:getBlock`, `w:count(name, box)`.
   `w.gpsOn = true` makes `gps.locate()` answer with the true position.

@@ -76,7 +76,7 @@ T.test("turtle core: GPS falls back to the last fix on a timeout, and says it's 
   t:run("probe"); w:run(1)
   w.gpsOn = false                      -- the GPS goes away after the first fix
   w:run(5)
-  local r = t.env._G.result
+  local r = t.G.result
   T.eq(r.first[1], true); T.eq(r.first[5], false); T.eq(r.first[2], 0); T.eq(r.first[3], 64)
   T.eq(r.second[1], true, "the last fix is still returned"); T.eq(r.second[5], true, "but marked stale")
   T.eq(r.second[4], 0)
@@ -85,7 +85,7 @@ end)
 T.test("turtle core: no GPS and no earlier fix is ok = false", function()
   local w, t = setup({ gps = false, body = 'result.r = { core.gps.locate(1) }' })
   t:run("probe"); w:run(3)
-  T.eq(t.env._G.result.r[1], false)
+  T.eq(t.G.result.r[1], false)
 end)
 
 -- A stand-in Storage: answers a dock_report with an ack
@@ -117,11 +117,11 @@ T.test("turtle core: reports its dock to Storage and gets the assigned barrel ba
   local s = storage(w)
   w:run(1)
   t:run("probe"); w:run(10)
-  local rep = s.env._G.reports[1]
+  local rep = s.G.reports[1]
   T.truthy(rep, "storage got the report")
   T.eq(rep.type, "dock_report"); T.eq(rep.id, 5); T.eq(rep.x, 0); T.eq(rep.y, 64); T.eq(rep.z, -1); T.eq(rep.dir, "north")
   T.eq(rep.role, "lumberjack")
-  T.eq(t.env._G.result.ack.assigned, "minecraft:barrel_3")
+  T.eq(t.G.result.ack.assigned, "minecraft:barrel_3")
 end)
 
 T.test("turtle core: a silent Storage only costs a short wait, no error", function()
@@ -134,7 +134,7 @@ T.test("turtle core: a silent Storage only costs a short wait, no error", functi
   t:attach("right", cc.wireless{ ender = true })
   storage(w, true)
   t:run("probe"); w:run(10)
-  local r = t.env._G.result
+  local r = t.G.result
   T.eq(r.ack, nil); T.eq(r.why, "no answer")
   T.truthy(r.t < 5, "gave up after two short tries")
 end)
@@ -147,7 +147,7 @@ T.test("turtle core: dock.visit runs the way back even if the job fails", functi
     result.log, result.ok = table.concat(log, ","), ok
   ]] })
   t:run("probe"); w:run(2)
-  T.eq(t.env._G.result.log, "go,job,back"); T.eq(t.env._G.result.ok, false)
+  T.eq(t.G.result.log, "go,job,back"); T.eq(t.G.result.ok, false)
 end)
 
 T.test("farmbot (Woodpecker, Partridge) runs on the core: GPS fixes, dock position, no old copies", function()
@@ -161,7 +161,7 @@ T.test("farmbot (Woodpecker, Partridge) runs on the core: GPS fixes, dock positi
     result.fuel = B.fuel()
   ]] })
   t:run("probe"); w:run(2)
-  local r = t.env._G.result
+  local r = t.G.result
   T.truthy(r.core); T.eq(r.x, 0); T.eq(r.y, 64); T.eq(r.fuel, 100)
   -- home 2,3 facing north is z-1: local (2,0,2); anchor turned one quarter: (x,z) -> (-z,x) = (-2, 2)
   T.eq(r.dock[1], 98); T.eq(r.dock[2], 64); T.eq(r.dock[3], 202)
@@ -204,7 +204,7 @@ T.test("Woodpecker on the core: low on fuel it goes to its dock, drinks the lava
   T.eq(dock:count("minecraft:lava_bucket"), 0)
   T.eq(dock:count("minecraft:bucket"), 1, "the empty bucket is back in the dock")
   T.eq(slotsOf(t, "minecraft:bucket"), 0)
-  local rep = s.env._G.reports and s.env._G.reports[1]
+  local rep = s.G.reports and s.G.reports[1]
   T.truthy(rep, "Storage was told where his dock is")
   T.eq(rep.label, "Woodpecker-01"); T.eq(rep.x, 0); T.eq(rep.y, 64); T.eq(rep.z, -1)
 end)
@@ -223,7 +223,7 @@ T.test("turtle core: chunk.ensure swaps the controller on in a new chunk and put
     result.swaps, result.note = core.chunk.swaps, core.chunk.note
   ]] })
   t:run("probe"); w:run(60)
-  local r = t.env._G.result
+  local r = t.G.result
   T.eq(r.have, true)
   T.eq(r.first, true, "a first chunk loads")
   T.eq(r.again, false, "the same chunk soon after: no swap")
@@ -243,9 +243,9 @@ T.test("turtle core: chunk notes when the controller or the modem is missing", f
     result.note = core.chunk.note
   ]] })
   t:run("probe"); w:run(5)
-  T.eq(t.env._G.result.have, false)
-  T.eq(t.env._G.result.ok, false)
-  T.eq(t.env._G.result.note, "Chunk controller missing")
+  T.eq(t.G.result.have, false)
+  T.eq(t.G.result.ok, false)
+  T.eq(t.G.result.note, "Chunk controller missing")
 
   local w2, t2 = setup({ items = { [2] = { CHUNKY, 1 } }, body = [[
     turtle.select(1); turtle.equipRight()             -- the modem goes into the bag
@@ -253,8 +253,8 @@ T.test("turtle core: chunk notes when the controller or the modem is missing", f
     result.note = core.chunk.note
   ]] })
   t2:run("probe"); w2:run(5)
-  T.eq(t2.env._G.result.ok, false)
-  T.eq(t2.env._G.result.note, "No modem to swap with")
+  T.eq(t2.G.result.ok, false)
+  T.eq(t2.G.result.note, "No modem to swap with")
 end)
 
 T.test("turtle core: chunk.restore puts the modem back after a swap cut short", function()
@@ -264,7 +264,7 @@ T.test("turtle core: chunk.restore puts the modem back after a swap cut short", 
     result.fixed = core.chunk.restore()
   ]] })
   t:run("probe"); w:run(5)
-  T.eq(t.env._G.result.fixed, true)
+  T.eq(t.G.result.fixed, true)
   T.eq(t.body.up.right, "computercraft:wireless_modem_advanced")
   T.eq(slotsOf(t, CHUNKY), 1)
   T.falsy(t:readFile("chunkswap.txt"))

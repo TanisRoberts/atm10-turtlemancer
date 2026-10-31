@@ -21,7 +21,7 @@ local function demo(w, h, cfg, opts)
   world:run(0.5)
   return world, c, mon
 end
-local function pd(c) return c.env._G.pd end
+local function pd(c) return c.G.pd end
 
 for _, s in ipairs(SIZES) do
   local W, H = s[1], s[2]

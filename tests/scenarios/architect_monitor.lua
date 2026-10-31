@@ -33,7 +33,7 @@ end)
 T.test("architect: the monitor follows Weaver to the next layer, whatever tab the terminal is on", function()
   local w, a, s, mon = setup(36, 24)
   a:type("log"); a:key(257); w:run(2)
-  s.env._G.STATUS.layer = 2; s.env._G.STATUS.placed = 90
+  s.G.STATUS.layer = 2; s.G.STATUS.placed = 90
   w:run(8)
   T.contains(mon, "75%")
   T.contains(mon, "Y 64")                      -- layer 2 is sea 62 + ybase 1 + 2 - 1

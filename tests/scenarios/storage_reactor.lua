@@ -30,7 +30,7 @@ local function base(opts)
   l:run("l")
   return w, c, inv, chest, l
 end
-local function last(l) return l.env._G.last end
+local function last(l) return l.G.last end
 
 T.test("reactor fuel: filled to 64 units from blocks first, then ingots when the blocks run out", function()
   local w, c, inv, chest = base()
@@ -111,9 +111,9 @@ T.test("reactor fuel: the report counts what is left in storage and names the fu
   T.eq(m.supply, 363)
   T.eq(m.best, INGOT)
   T.eq(m.chests[1].units, 64)
-  local n1 = l.env._G.n
+  local n1 = l.G.n
   w:run(30)
-  T.eq(l.env._G.n - n1 >= 2 and true or false, true, "reported again every 10 s")
+  T.eq(l.G.n - n1 >= 2 and true or false, true, "reported again every 10 s")
 end)
 
 T.test("reactor fuel: REACTOR_FUEL and REACTOR_FUEL_KEEP take effect live", function()
@@ -137,6 +137,6 @@ T.test("reactor fuel: with no Reactor fuel chest assigned, nothing is reported",
   inv[2]:give(INGOT, 20, nil, { tags = ITAGS })
   c:run("storage")
   w:run(30)
-  T.eq(l.env._G.n, 0)
+  T.eq(l.G.n, 0)
   T.eq(chest:count(INGOT), 0)
 end)
