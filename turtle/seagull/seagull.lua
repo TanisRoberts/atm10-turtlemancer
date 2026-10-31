@@ -45,6 +45,7 @@ local DEFAULTS = {
   { "DOCK_WAIT", 30, "Seconds he waits at the dock for Storage to bring more fuel before he goes with what he has." },
   { "FUEL_RESERVE", 200, "Spare fuel kept on top of the trip home." },
   { "MAX_Y", 300, "He never flies higher than this; places that would need it are skipped." },
+  { "CRUISE_Y", 0, "Lowest Y he flies at between his dock and the region he maps (0 = off: CLEARANCE over the ground)." },
 }
 
 ---------------------------------------------------------------------------
@@ -355,13 +356,22 @@ local function groundNear(x, z, r)
   return best
 end
 
--- Fly one block towards compass direction h, keeping CLEARANCE above the ground ahead.
+-- Cruising: outside the region he is mapping (on the way to it or home) he flies at CRUISE_Y or higher.
+-- Inside it, CLEARANCE over the ground as usual. Defined further down (needs the region plan).
+local inWorkRegion
+local function floorAt(x, z)
+  local c = tonumber(E.CRUISE_Y) or 0
+  if c <= 0 or (inWorkRegion and inWorkRegion(x, z)) then return -math.huge end
+  return math.min(c, E.MAX_Y)
+end
+
+-- Fly one block towards compass direction h, keeping CLEARANCE above the ground ahead (and CRUISE_Y on the way).
 -- Returns true, or false + reason ("unloaded", "high", "stuck", "fuel")
 local function hop(h)
   if turtle.getFuelLevel() == 0 then return false, "fuel" end
   local nx, nz = pos.x + DX[h], pos.z + DZ[h]
   local g = groundNear(nx, nz, 0)
-  local want = g and (g + 1 + E.CLEARANCE) or pos.y
+  local want = math.max(g and (g + 1 + E.CLEARANCE) or pos.y, floorAt(nx, nz))
   if want > E.MAX_Y then return false, "high" end
   while pos.y < want do
     if not up() then break end
@@ -371,7 +381,7 @@ local function hop(h)
     if forward() then
       -- Sink back down to the right height over lower ground (one block at a time, never into things)
       local g2 = groundNear(pos.x, pos.z, 0)
-      local want2 = g2 and (g2 + 1 + E.CLEARANCE) or pos.y
+      local want2 = math.max(g2 and (g2 + 1 + E.CLEARANCE) or pos.y, floorAt(pos.x, pos.z))
       while pos.y > want2 and not turtle.detectDown() do
         if not down() then break end
       end
@@ -447,7 +457,8 @@ local function scanAndSettle()
   while topAt(pos.x, pos.z) == nil and guard < 60 do
     guard = guard + 1
     local sank = 0
-    while sank < E.RADIUS - 1 and pos.y > -60 and not turtle.detectDown() do
+    local floor = floorAt(pos.x, pos.z)    -- cruising: the ground may be out of reach below; that's fine
+    while sank < E.RADIUS - 1 and pos.y > -60 and pos.y - 1 >= floor and not turtle.detectDown() do
       if not down() then break end
       sank = sank + 1
     end
@@ -470,7 +481,8 @@ end
 local function scanIfUnknown()
   local ahead = heading and topAt(pos.x + DX[heading] * 4, pos.z + DZ[heading] * 4)
   if topAt(pos.x, pos.z) == nil or ahead == nil then
-    if not lastScanAt or math.abs(pos.x - lastScanAt.x) + math.abs(pos.z - lastScanAt.z) >= 4
+    local every = floorAt(pos.x, pos.z) > -math.huge and E.RADIUS or 4   -- cruising: a scan sees RADIUS ahead
+    if not lastScanAt or math.abs(pos.x - lastScanAt.x) + math.abs(pos.z - lastScanAt.z) >= every
       or math.abs(pos.y - lastScanAt.y) > E.RADIUS then
       scanAndSettle()
     end
@@ -490,6 +502,13 @@ local function regionChunks()
     chunkList, chunkListFor = plan.chunks(S.region[1], S.region[2], E.REGION_CHUNKS), k
   end
   return chunkList
+end
+
+inWorkRegion = function(x, z)
+  local r = S.region
+  if not r then return false end
+  local rx, rz = plan.regionOf(math.floor(x / 16), math.floor(z / 16), E.REGION_CHUNKS)
+  return rx == r[1] and rz == r[2]
 end
 
 inRegion = function(key, r)
@@ -663,8 +682,8 @@ local function refuel(wait)
     setStatus("docked", ("Refuelling %d / %d"):format(turtle.getFuelLevel(), target))
     sleep(3)
     once()
-    local now = turtle.getFuelLevel()
-    if now > last then last, lastGain = now, os.clock() end
+    local lvl = turtle.getFuelLevel()
+    if lvl > last then last, lastGain = lvl, os.clock() end
   end
 end
 
@@ -708,6 +727,8 @@ local function enoughFuelFor(tx, tz)
   if not pos then return true end
   local there = math.abs(tx - pos.x) + math.abs(tz - pos.z) + 2 * E.CLEARANCE + 20
   local back = math.abs(tx - S.home.x) + math.abs(tz - S.home.z) + math.abs(pos.y - S.home.y) + 40
+  local cruise = tonumber(E.CRUISE_Y) or 0
+  if cruise > 0 then back = back + 2 * math.max(0, math.min(cruise, E.MAX_Y) - math.min(pos.y, S.home.y)) end
   return turtle.getFuelLevel() >= there + back + E.FUEL_RESERVE
 end
 

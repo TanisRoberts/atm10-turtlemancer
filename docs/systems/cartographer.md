@@ -28,18 +28,19 @@ Kept from the old art-controller protocol, plus what Seagull's region work (#68)
 
 - Cartographer -> Seagull `have {revs}` (rev of every chunk it holds); Seagull answers `chunks {chunks, more}` in batches of 24; while `more` the next `have` follows at once. Seagull also pushes fresh chunks unasked.
 - Cartographer -> Seagull `cmd {want = "map" | "dock", next = {rx, rz} | false, seq}`, repeated every 2 s until Seagull's status `seq` echoes it (30 s at most). `next` names the region to map next; `false` clears it.
-- Seagull `status` may carry `done_region = {rx, rz}`. Once the Cartographer holds all 256 chunks of it **and has saved the region to a disk**, it sends `{type = "region_ok", to = <seagull>, region = {rx, rz}}` (again on each status that still names it). If the region cannot be saved (storage full) it does not answer and shows an error.
+- Seagull `status` may carry `done_region = {rx, rz}`. Once the Cartographer holds all 256 chunks of it **and has saved the region to a disk**, it sends `{type = "region_ok", to = <seagull>, region = {rx, rz}}` (again on each status that still names it). If the region cannot be saved (storage full) it does not answer and shows an error. For a **re-survey** (`/resurvey`, or two taps on a mapped region) the region is already complete, so `region_ok` also waits until every chunk of it is newer than the re-survey request (`resurvey.cfg`, `{[rkey] = os.epoch("utc")}`; Seagull's revs are his scan times); while he names it done and the new chunks aren't in, the Cartographer asks for them (`have`) every 10 s.
 - `scan_region = {rx, rz}`, `scan_started` (epoch seconds or ms) and `scan_secs` give the scan percentage; without them the outline says "scanning" with no %. Without `scan_region` the region under Seagull's position is used.
 - Mainframe: every 5 s `{type = "cartographer", regions, chunks, seagull = {...}}` on `tanis-base`. The board shows one Cartographer row (Seagull's state, regions, chunks, fuel) and hides Seagull's own `carto` row while a Cartographer is on the air.
 
 ## Seagull's side (`turtle/seagull/seagull.lua`, `shared/regionplan.lua`)
 
-- **One region per MAP.** The region is `cmd.next` if the Cartographer sent one (tap), else the first region not on his `done` list in rings round the region holding his home (the same order the Cartographer shows as "spiral"). `cmd.next = false` clears the tap. `REGION_CHUNKS` in `seagull.env` (16) is the region side; leave it.
+- **One region per MAP.** The region is `cmd.next` if the Cartographer sent one (tap, `/next`, `/resurvey`; even one on his `done` list), else the first region not on his `done` list in rings round the region holding his home (the same order the Cartographer shows as "spiral"). `cmd.next = false` clears the tap. `REGION_CHUNKS` in `seagull.env` (16) is the region side; leave it.
 - **Chunk by chunk.** He flies a snake over the region's 256 chunks to each chunk's middle (`plan.centre`), keeps it loaded with `core.chunk.ensure` (a chunk controller in his bag swapped onto his modem's side for a moment, see `turtle.md`), and scans with radius 8: that covers the whole chunk. Quarters of a chunk with unseen columns (a pit or cliff beyond the scan's height) get a second scan from their middle (`plan.extras`). A chunk that cannot be entered ("chunk not loaded") is retried 3 times, then skipped and counted in `skipped`; the Cartographer then never gets all 256 chunks and keeps waiting.
 - **Held back until whole.** While he scans a region its chunks are not sent (not pushed, not in `have` answers), so the region appears at once. Ground seen outside the region (on the way) is kept in memory only, for flying.
 - **Hand-over.** The last chunk done, he sets `done_region`, queues the region's chunks, flies home and waits for `region_ok` (queuing them again every minute). Then he deletes the region's chunks from `seagull.map`, adds it to his `done` list and idles. MAP while he waits does nothing.
 - **Status** (`tanis-carto`): `scan_region`, `scan_started` (epoch ms, set when the first chunk is reached), `scan_secs` (the whole region's expected time: elapsed over chunks done, so the Cartographer's % is the real progress; the last region's time before chunk 5), `done_region`, `next_region`, plus `wp`/`wps` = chunk number / 256 for the mainframe board.
 - **Reboot.** The state file keeps region, chunk number and a checkpoint every 8 chunks (the map is saved then); on boot he returns to the checkpoint and carries on. Fuel: he goes home when the trip to the next chunk and back is not covered, refuels and returns to the same chunk. At the dock he fills to `FUEL_PCT` of his fuel limit (`seagull.env`, default 90: 90,000 on an advanced turtle, 90 lava buckets). A dock holds 27, so he stays while Storage refills it (`DOCK_LAVA_SEAGULL`) and sets off once he is full or no fuel has come for `DOCK_WAIT` seconds (30). Docked and idle, he tops up from whatever is in the dock without waiting.
+- **Cruising height.** `CRUISE_Y` in `seagull.env` (0 = off): outside the region he is mapping (to it, home, or with no region) he flies at that Y or higher; inside it `CLEARANCE` over the ground. At cruising height he doesn't sink to find ground the scanner can't reach, and scans every `RADIUS` blocks. The fuel check counts the climb.
 - He stays on the radio while scanning (the modem is off for 0.15 s per swap), so DOCK and tap orders arrive mid-region.
 
 ## Floor
@@ -51,13 +52,13 @@ Kept from the old art-controller protocol, plus what Seagull's region work (#68)
 
 ## Computer screen
 
-Header (state, regions), a small copy of the floor's view on the left (tap mapped ground to centre; tap an unmapped region twice within 4 s to queue it as the next region), Seagull / Next / Storage on the right, buttons `MAP DOCK < > ^ v - + FIT`, the command bar, `Key` for the colour key. Next shows the queued pick (`you`) or the next unmapped region in rings round Seagull's home (`spiral`).
+Header (state, regions), a small copy of the floor's view on the left (tap mapped ground to centre; tap an unmapped region twice within 4 s to queue it as the next region; tap a mapped region twice to queue a re-survey of it), Seagull / Next / Storage on the right, buttons `MAP DOCK < > ^ v - + FIT`, the command bar, `Key` for the colour key. Next shows the queued pick (`you`, `again` for a re-survey; the floor outline says `AGAIN`) or the next unmapped region in rings round Seagull's home (`spiral`).
 
 Keys (command bar empty): arrows pan, `-` / `+` zoom, `f` fits.
 
 ### Commands (shared slash module, with or without the `/`)
 
-`/map`, `/dock`, `/next X,Z` (region numbers), `/next clear`, `/goto x z` (blocks), `/fit`, `/fill on|off`, `/storage`, `/status`, `/help`.
+`/map`, `/dock`, `/next X,Z` (region numbers), `/next clear`, `/resurvey X,Z` (map a mapped region again, next), `/goto x z` (blocks), `/fit`, `/fill on|off`, `/storage`, `/status`, `/help`.
 
 ## Settings (`cartographer.env`)
 

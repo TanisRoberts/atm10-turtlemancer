@@ -73,7 +73,7 @@ local STUB = [==[
   end
 ]==]
 
-local function setup()
+local function setup(envExtra)
   local w = cc.world()
   w.gpsOn = true
   w:fill(-20, 60, -20, 60, 63, 60, "minecraft:stone")
@@ -87,7 +87,7 @@ local function setup()
   t:attach("right", cc.wireless{ ender = true })
   local scanner = geoScanner(function() return t.body end)
   t:attach("left", scanner)
-  t:writeFile("seagull.env", "REGION_CHUNKS=2\n")
+  t:writeFile("seagull.env", "REGION_CHUNKS=2\n" .. (envExtra or ""))
   local carto = w:computer{ id = 3, label = "Cartographer" }
   carto:attach("top", cc.wireless{ ender = true })
   carto:writeFile("stub.lua", STUB)
@@ -150,6 +150,48 @@ T.test("seagull: MAP again goes to the next region in the spiral; a tapped regio
   order(carto, { type = "cmd", to = 7, want = "map", seq = 3 })
   T.waitFor(w, function() return #G(carto).oks >= 3 end, 3500)
   T.eq(G(carto).oks[3], "1,-1")
+end)
+
+T.test("seagull: CRUISE_Y: between his dock and the region he flies at that height or higher, inside it low", function()
+  local w, t, carto = setup("CRUISE_Y=80\n")
+  w:run(30)
+  order(carto, { type = "cmd", to = 7, want = "map", seq = 1, next = { 1, 0 } })   -- region 1,0: x 32 .. 63
+  local outside, inside = math.huge, math.huge
+  T.waitFor(w, function()
+    local b = t.body
+    if b.x >= 3 and b.x <= 28 then outside = math.min(outside, b.y) end
+    if b.x >= 36 and b.x <= 60 then inside = math.min(inside, b.y) end
+    return #G(carto).oks >= 1
+  end, 2500, "region 1,0 was never finished")
+  T.eq(G(carto).oks[1], "1,0")
+  T.eq(outside >= 80, true, "on the way he never went below CRUISE_Y (lowest " .. tostring(outside) .. ")")
+  T.eq(inside < 80, true, "over the region he flies low to scan (lowest " .. tostring(inside) .. ")")
+  -- home at cruising height, no dipping to look for ground the scanner can't reach
+  local dips = 0
+  for _ = 1, 60 do
+    w:run(1)
+    local b = t.body
+    if b.x >= 3 and b.x <= 28 and b.y < 80 then dips = dips + 1 end
+  end
+  T.eq(dips, 0, "on the way home he stayed at CRUISE_Y")
+  T.eq(t.body.x .. "," .. t.body.y .. "," .. t.body.z, "0,64,0", "home on his dock")
+end)
+
+T.test("seagull: a region on his done list is mapped again when the Cartographer names it (re-survey)", function()
+  local w, t, carto = setup()
+  w:run(30)
+  order(carto, { type = "cmd", to = 7, want = "map", seq = 1 })
+  T.waitFor(w, function() return #G(carto).oks >= 1 end, 1500)
+  w:run(20)
+  T.truthy(t:readTable("seagull.state").done["0,0"])
+  G(carto).scanRegions = {}
+  order(carto, { type = "cmd", to = 7, want = "map", seq = 2, next = { 0, 0 } })
+  T.waitFor(w, function() return G(carto).scanRegions["0,0"] end, 300, "he never scanned 0,0 again")
+  T.waitFor(w, function()
+    local st = t:readTable("seagull.state")
+    return st and st.region == nil and st.mapping == false
+  end, 1500, "the re-survey never finished")
+  T.truthy(t:readTable("seagull.state").done["0,0"])
 end)
 
 T.test("seagull: a reboot mid-region carries on with the same region; nothing is skipped", function()

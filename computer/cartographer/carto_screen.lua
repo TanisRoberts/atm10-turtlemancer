@@ -110,7 +110,7 @@ function S.new(sh)
     local n1 = st.nextRegion
     local up = sh.upcoming and sh.upcoming(2) or {}
     if not n1 and up[1] then n1 = { rx = up[1][1], rz = up[1][2] } end
-    kv(n1 and ("Region %d,%d"):format(n1.rx, n1.rz) or "Nothing left near", st.nextRegion and "you" or "spiral",
+    kv(n1 and ("Region %d,%d"):format(n1.rx, n1.rz) or "Nothing left near", st.nextRegion and (st.nextRegion.again and "again" or "you") or "spiral",
        st.nextRegion and "fg" or "dim")
     local after = st.nextRegion and up[1] or up[2]
     if after and y <= maxY then kv("then", ("%d,%d (spiral)"):format(after[1], after[2]), "dim") end

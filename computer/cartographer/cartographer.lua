@@ -210,20 +210,56 @@ function act.order(want)
   say(want == "map" and "MAP sent: Seagull maps the next region." or "DOCK sent: Seagull flies home.", "good")
 end
 
-local function setNext(rx, rz)
+-- Re-surveys: [rkey] = os.epoch("utc") when it was asked for. A mapped region is complete here already, so
+-- region_ok waits until every chunk of it is newer than that (Seagull's revs are his scan times, same clock).
+local RESURVEY_FILE = "resurvey.cfg"
+local resurvey = {}
+do
+  local f = fs.open(RESURVEY_FILE, "r")
+  if f then resurvey = textutils.unserialize(f.readAll()) or {}; f.close() end
+end
+local function saveResurvey()
+  local f = fs.open(RESURVEY_FILE, "w")
+  if f then f.write(textutils.serialize(resurvey)); f.close() end
+end
+-- Complete here, and (for a re-survey) every chunk from the new scan
+local function regionFresh(rx, rz)
+  if not store:complete(rx, rz) then return false end
+  local since = resurvey[R.rkey(rx, rz)]
+  if not since then return true end
+  local r = store.regions[R.rkey(rx, rz)]
+  for key in pairs(r and r.keys or {}) do
+    if (tonumber(store.revs[key]) or 0) < since then return false end
+  end
+  return true
+end
+act.regionFresh = regionFresh
+
+local function setNext(rx, rz, again)
   if not st.seagullId then say("No Seagull heard yet.", "warn"); return end
-  st.nextRegion = rx and { rx = rx, rz = rz } or nil
+  if again and rx then resurvey[R.rkey(rx, rz)] = os.epoch("utc"); saveResurvey() end
+  st.nextRegion = rx and { rx = rx, rz = rz, again = again or nil } or nil
   st.pick = nil
   newOrder().next = rx and { rx, rz } or false
-  if rx then say(("Next: region %d,%d."):format(rx, rz), "good") else say("Next region cleared: back to the spiral.", "good") end
+  if rx then say(("Next: %sregion %d,%d."):format(again and "re-survey of " or "", rx, rz), "good")
+  else say("Next region cleared: back to the spiral.", "good") end
 end
 act.setNext = setNext
 
 -- A tap on the computer's small map: ground that is mapped centres the view; an unmapped region needs two taps
+-- A mapped region: the first tap centres it, a second tap on it within 4 s queues a re-survey.
 function act.tapMap(wx, wz, rx, rz)
-  if store:has(rx, rz) then act.centre(wx, wz); st.pick = nil; return end
   local pk = st.pick
-  if pk and pk.rx == rx and pk.rz == rz and os.clock() - pk.t < 4 then
+  local again = pk and pk.rx == rx and pk.rz == rz and os.clock() - pk.t < 4
+  if store:complete(rx, rz) then
+    if again then setNext(rx, rz, true); return end
+    act.centre(wx, wz)
+    st.pick = { rx = rx, rz = rz, t = os.clock() }
+    say(("Region %d,%d is mapped: tap it again to re-survey it."):format(rx, rz), "plain")
+    return
+  end
+  if store:has(rx, rz) then act.centre(wx, wz); st.pick = nil; return end
+  if again then
     setNext(rx, rz)
   else
     st.pick = { rx = rx, rz = rz, t = os.clock() }
@@ -246,9 +282,17 @@ cmds:add({ name = "next", args = "X,Z | clear", help = "map region X,Z next (reg
     if a:is(1, "clear") then setNext(nil); return true, "Next region cleared" end
     local x, z = regionArg(a, 1)
     if not x then return false, z end
-    if store:complete(x, z) then return false, ("Region %d,%d is already mapped"):format(x, z) end
+    if store:complete(x, z) then return false, ("Region %d,%d is already mapped: /resurvey %d,%d maps it again"):format(x, z, x, z) end
     setNext(x, z)
     return true, ("Next: region %d,%d"):format(x, z)
+  end })
+cmds:add({ name = "resurvey", args = "X,Z", help = "map region X,Z again, next (it changed)", min = 1, max = 2,
+  run = function(a)
+    local x, z = regionArg(a, 1)
+    if not x then return false, z end
+    if not st.seagullId then return false, "No Seagull heard yet" end
+    setNext(x, z, store:complete(x, z))
+    return true, ("Next: re-survey of region %d,%d"):format(x, z)
   end })
 cmds:add({ name = "goto", args = "x z", help = "centre the map on a block", min = 2, max = 2,
   run = function(a)
@@ -287,7 +331,7 @@ cmds:add({ name = "status", help = "regions, Seagull, what is next", max = 0,
   end })
 local sh = { store = store, painter = painter, st = st, act = act, cmds = cmds, upcoming = upcoming }
 local screen = Screen.new(sh)
-_G.CARTO_DEBUG = { st = st, store = store, sh = sh }   -- for the simulator scenarios
+_G.CARTO_DEBUG = { st = st, store = store, sh = sh, act = act }   -- for the simulator scenarios
 
 ---------------------------------------------------------------------------
 -- Monitors
@@ -371,17 +415,23 @@ local function absorb(list)
 end
 
 -- A finished region Seagull names is safe once it is complete here and on disk: tell him he may drop it.
+local syncSoon = false
 local function checkDone(msg, from)
   local dr = msg.done_region
   if type(dr) ~= "table" then return end
   local rx, rz = tonumber(dr[1] or dr.rx), tonumber(dr[2] or dr.rz)
-  if not rx or not store:complete(rx, rz) then return end
+  if not rx then return end
+  if not regionFresh(rx, rz) then
+    if resurvey[R.rkey(rx, rz)] then syncSoon = true end   -- a re-survey he says is done: fetch the new chunks
+    return
+  end
   local rk = R.rkey(rx, rz)
   if store.dirty[rk] then store:save() end
   if store.dirty[rk] then st.err = "Can't save region " .. rk .. ": storage is full. Add a disk drive with a floppy."; return end
   if os.clock() - (lastOkSent[rk] or -100) > 3 then
     lastOkSent[rk] = os.clock()
     rednet.send(from, { type = "region_ok", to = from, region = { rx, rz } }, CARTO)
+    if resurvey[rk] then resurvey[rk] = nil; saveResurvey() end   -- the new scan is in and saved
   end
 end
 
@@ -418,9 +468,10 @@ local function netLoop()
       end
     end
     -- Catch up with Seagull's map (on start, then every few minutes, faster while he has more)
-    if st.seagullId and (os.clock() - lastSync > 180 or (syncMore and os.clock() - lastSync > 0.2)) then
+    if st.seagullId and (os.clock() - lastSync > 180 or (syncMore and os.clock() - lastSync > 0.2)
+                         or (syncSoon and os.clock() - lastSync > 10)) then
       rednet.send(st.seagullId, { type = "have", to = st.seagullId, revs = store.revs }, CARTO)
-      lastSync, syncMore = os.clock(), false
+      lastSync, syncMore, syncSoon = os.clock(), false, false
     end
     -- Orders: repeat until his status shows he took it
     if ord then

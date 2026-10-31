@@ -147,7 +147,7 @@ function F.overlay(pane, gfx, st, labels, view)
   end
   local sc = st.scan
   if sc then box({ sc.rx, sc.rz }, K.cyan, sc.pct and ("~%d%%"):format(sc.pct) or "scanning") end
-  if st.nextRegion then box({ st.nextRegion.rx, st.nextRegion.rz }, K.white, "NEXT") end
+  if st.nextRegion then box({ st.nextRegion.rx, st.nextRegion.rz }, K.white, st.nextRegion.again and "AGAIN" or "NEXT") end
   for _, p in pairs(st.pylons or {}) do
     local x, y = pane:w2p(p.x, p.z, view)
     pane:plus(px, x, y, K.red)

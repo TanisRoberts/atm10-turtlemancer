@@ -152,6 +152,33 @@ T.test("cartographer: MAP, DOCK, tap-twice next region and typed commands reach 
   T.contains(scr:text(), "room for")
 end)
 
+T.test("cartographer: /resurvey queues a mapped region again; region_ok waits for the new scan", function()
+  local w, c = room({ floor = false })
+  c:run("cartographer")
+  local s = seagull(w, { { 0, 0, "island" } }, { done = { 0, 0 }, state = "docked" })
+  T.waitFor(w, function() return #(s.G.oks or {}) >= 1 end, 120, "the first region_ok never came")
+  w:run(5)
+  c:type("/next 0,0"); c:key(257); w:run(2)
+  T.contains(c.screen:text(), "/resurvey 0,0")
+  c:type("/resurvey 0,0"); c:key(257); w:run(5)
+  local cmd = s.G.cmds[#s.G.cmds]
+  T.eq(cmd.next[1], 0); T.eq(cmd.next[2], 0)
+  T.eq(dbg(c).st.nextRegion.again, true)
+  T.contains(c.screen:text(), "again")
+  T.truthy(c.files["resurvey.cfg"], "the re-survey is remembered across a reboot")
+  -- Seagull names it done before the new chunks are in: no region_ok (he would drop the new scan)
+  local n = #s.G.oks
+  s.G.redo = { 0, 0 }
+  w:run(20)
+  T.eq(#s.G.oks, n, "no region_ok while the Cartographer still holds only the old chunks")
+  T.eq(dbg(c).act.regionFresh(0, 0), false)
+  -- the new scan arrives: region_ok, and the re-survey is done
+  s.G.redo = { 0, 0, fresh = true }
+  T.waitFor(w, function() return #s.G.oks > n end, 120, "region_ok never came for the new scan")
+  T.eq(c:readTable("resurvey.cfg")["0,0"], nil, "the re-survey is cleared")
+  T.running(c)
+end)
+
 T.test("cartographer: scanning region shows ~% (or just 'scanning' when Seagull sends no times)", function()
   local w, c, floor = room()
   c:run("cartographer")

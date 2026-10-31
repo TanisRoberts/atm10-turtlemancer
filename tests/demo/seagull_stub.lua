@@ -2,7 +2,7 @@
 -- Reads stub.cfg = { regions = { { rx, rz, kind } }, status = {...}, doneRegion = { rx, rz } }. kind "island" is
 -- mostly ocean with an island in the middle, "noisy" is land whose height changes every 8 columns (about 47 KB a region), "ocean" is all deep water.
 -- Serves `have` in batches of 24 like Seagull, broadcasts a status every 3 s, keeps every order in _G.cmds and every
--- region_ok in _G.oks, and clears done_region once the Cartographer has said region_ok.
+-- region_ok in _G.oks, and clears done_region once the Cartographer has said region_ok. _G.redo: see the loop.
 local mc = require("mapchunk")
 local f = fs.open("stub.cfg", "r"); local cfg = textutils.unserialise(f.readAll()); f.close()
 peripheral.find("modem", function(n) rednet.open(n); return false end)
@@ -62,6 +62,18 @@ while true do
       _G.oks[#_G.oks + 1] = msg
       if status.done_region and msg.region[1] == status.done_region[1] and msg.region[2] == status.done_region[2] then
         status.done_region = nil
+      end
+    end
+  end
+  -- A test sets _G.redo = { rx, rz, fresh = bool }: name that region as done again (a re-survey), with every
+  -- chunk of it re-scanned now (fresh) or not yet
+  if _G.redo then
+    local r = _G.redo; _G.redo = nil
+    status.done_region = { r[1], r[2] }
+    if r.fresh then
+      for k, c in pairs(chunks) do
+        local cx, cz = k:match("^(-?%d+),(-?%d+)$")
+        if math.floor(tonumber(cx) / 16) == r[1] and math.floor(tonumber(cz) / 16) == r[2] then c.rev = os.epoch("utc") end
       end
     end
   end
