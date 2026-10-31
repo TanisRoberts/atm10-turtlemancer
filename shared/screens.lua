@@ -163,10 +163,13 @@ function S:handle(ev, a, b, c, d)
     end
     if self.onPeer then self.onPeer() end
   elseif ev == "monitor_resize" then
+    -- A program changing the text scale (Storage's padlock) also fires monitor_resize: that is not a changed
+    -- monitor, and rebooting for it loops (the padlock is drawn again at boot). Only a resize at the same scale is.
     local slot = self:slotOf(a)
     if slot then
-      self:measure(slot)
-      os.queueEvent("screens_changed", slot)
+      local old = self.size[slot]
+      local new = self:measure(slot)
+      if not (old and new and old.scale ~= new.scale) then os.queueEvent("screens_changed", slot) end
     end
   elseif ev == "peripheral_detach" then
     local slot = self:slotOf(a)
@@ -195,7 +198,8 @@ function S:measure(id)
   local r = self.res[id]
   if r then
     local w, h = r.mon.getSize()
-    self.size[id] = { w = w, h = h }
+    local ok, sc = pcall(function() return r.mon.getTextScale and r.mon.getTextScale() end)
+    self.size[id] = { w = w, h = h, scale = ok and sc or nil }
   end
   return self.size[id]
 end

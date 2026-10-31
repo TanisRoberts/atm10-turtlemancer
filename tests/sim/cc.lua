@@ -311,9 +311,11 @@ function Term:touch(x, y)
 end
 
 -- Resize a screen as the game does (monitor blocks added or removed; a window resized): the program gets
--- term_resize (its own screen) or monitor_resize (a monitor).
-function Term:setSize(w, h)
+-- term_resize (its own screen) or monitor_resize (a monitor). A text scale change comes here too (term.lua),
+-- keeping the size it scales from (keepBase).
+function Term:setSize(w, h, keepBase)
   self:resize(w, h)
+  if not keepBase and self.baseScale then self.baseScale, self.baseW, self.baseH = self.scale, w, h end
   if self.comp then self.comp:_queue("monitor_resize", self.side)
   elseif self.net then
     for _, m in ipairs(self.net.modems) do m.comp:_queue("monitor_resize", self.netName) end

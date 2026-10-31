@@ -55,7 +55,18 @@ function Term:getPaletteColour(c)
 end
 function Term:paletteHex(c) return self.pal and self.pal[c] end   -- test helper
 
-function Term:setTextScale(s) self.scale = s end
+-- Like CC, a new text scale changes how many characters fit and fires monitor_resize. The w, h a test gives are the
+-- size at the first scale the program sets (most set 0.5 at start); later changes scale from there.
+function Term:setTextScale(s)
+  s = tonumber(s)
+  if not s or s < 0.5 or s > 5 or (s * 2) % 1 ~= 0 then error("Expected number in range 0.5-5", 2) end
+  if not self.baseScale then self.baseScale, self.baseW, self.baseH, self.scale = s, self.w, self.h, s; return end
+  if s == self.scale then return end
+  self.scale = s
+  local w = math.max(1, math.floor(self.baseW * self.baseScale / s + 0.5))
+  local h = math.max(1, math.floor(self.baseH * self.baseScale / s + 0.5))
+  if self.setSize then self:setSize(w, h, true) else self:resize(w, h) end   -- setSize (cc.lua) fires the event
+end
 function Term:getTextScale() return self.scale end
 Term.setTextColor, Term.setBackgroundColor = Term.setTextColour, Term.setBackgroundColour
 Term.getTextColor, Term.getBackgroundColor = Term.getTextColour, Term.getBackgroundColour

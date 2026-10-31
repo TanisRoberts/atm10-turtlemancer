@@ -162,6 +162,24 @@ T.test("storage screens: a pick on the list assigns the job, Delete takes it awa
   T.running(c)
 end)
 
+T.test("storage screens: on a big monitor the padlock's bigger text scale doesn't reboot Storage (no reboot loop)", function()
+  local w, c, inv, mon = base(51, 19, false)
+  mon = c:monitor("right", 164, 81)               -- an 8 x 6 wall at scale 0.5: the padlock goes to a bigger scale
+  boot(w, c, inv)
+  local booted = c.bootAt
+  c:type("/lock"); c:key(257); w:run(5)
+  T.contains(mon, "LOCKED")
+  T.eq(mon.scale > 0.5, true, "the padlock is drawn at a bigger text scale")
+  T.eq(c.bootAt, booted, "a text scale change of our own is not a resized monitor: no reboot")
+  c:type("/unlock"); c:key(257); w:run(5)
+  T.eq(mon.scale, 0.5, "back to the list's scale")
+  T.contains(mon, "Iron Ingot")
+  T.eq(c.bootAt, booted, "still no reboot")
+  -- a real resize (blocks added) still reboots, so the screen is fitted again
+  mon:setSize(100, 81); w:run(5)
+  T.eq(c.bootAt ~= booted, true, "a monitor that really changed size reboots Storage")
+end)
+
 T.test("storage screens: /lock shows the padlock on the monitor and ignores taps, /unlock brings the list back", function()
   local w, c, inv, mon = base()
   boot(w, c, inv)
