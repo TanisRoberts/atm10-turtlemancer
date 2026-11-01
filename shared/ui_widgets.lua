@@ -342,6 +342,7 @@ end
 -- Paged list rows (4.9)
 ---------------------------------------------------------------------------------------------------------
 -- v:list(rows, { on = fn(row), input = true if a search bar sits below, top = first row to use (default 3) })  rows: { name, value, state, id, tone }.
+-- note = grey text after the name (what it is, what is in it), so the name stands out.
 -- tone = the value's colour role (default cyan: you can open it); use it where the value is a state word.
 -- once = true: one tap opens a row (a pick list); the default is tap to select, tap again to open.
 -- name left, value right (cyan: you can open it), a one-cell stripe in the stock-state colour (not on narrow),
@@ -372,7 +373,12 @@ function View:list(rows, o)
     local val = row.value ~= nil and tostring(row.value) or ""
     local vx = W - #val
     local nx = sx and 3 or 2
-    self:put(nx, y, fit(row.name or "", vx - 1 - nx), ink, rb)
+    local nw = vx - 1 - nx
+    local nm = fit(row.name or "", nw)
+    self:put(nx, y, nm, ink, rb)
+    if row.note and row.note ~= "" and #nm + 1 < nw then
+      self:put(nx + #nm, y, fit(" " .. row.note, nw - #nm), sel and "bg" or "dim", rb)
+    end
     if #val > 0 then
       self:put(vx, y, val, sel and "bg" or row.tone or "info", rb)
       self:_box({ vx, y, W, y }, nil, { id = "val:" .. idx, fn = function() self.sel = idx; if o.on then o.on(row) end end })

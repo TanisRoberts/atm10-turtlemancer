@@ -414,8 +414,9 @@ function A.run(o)
       local job = #t.label <= jw and t.label or t.short
       local line = fit(cutName(r.name, nw), nw)
       line = line .. (" "):rep(nw - #line + 1) .. fit(job, jw)
-      if W >= 39 then line = line .. (" "):rep(jw - #job + 1) .. info end
-      rows[#rows + 1] = { name = line, value = d.missing and "-" or fmt(d.count or 0), state = ROLE[t.col] or "info",
+      local note
+      if W >= 39 then line = line .. (" "):rep(jw - #job); note = info end
+      rows[#rows + 1] = { name = line, note = note, value = d.missing and "-" or fmt(d.count or 0), state = ROLE[t.col] or "info",
         tone = d.missing and "warn" or "info", id = r.name }
     end
     if #shown == 0 then
@@ -432,18 +433,32 @@ function A.run(o)
     search("search by name or contents")
   end
 
+  -- One pill per kind with what it does beside it in grey (below it on narrow screens), a free row between.
   local function drawKind()
     v:header("ADD", { state = "what kind?", color = "dim" })
-    v:put(2, 3, fit("A depot keeps a container filled with one thing.", v.W - 2), "dim", "bg")
-    local rows = {}
-    for _, d in ipairs(o.depots) do
-      rows[#rows + 1] = { name = d.kind .. (v.W >= 39 and ("  " .. d.about) or ""), id = d.key, state = "idle" }
+    local W = v.W
+    v:put(2, 3, fit("A depot keeps a container filled with one thing.", W - 2), "dim", "bg")
+    local kinds = {}
+    for _, d in ipairs(o.depots) do kinds[#kinds + 1] = { label = d.kind, about = d.about, id = d.key } end
+    kinds[#kinds + 1] = { label = "Other job", about = "input, output, dock, fuel, drawers...", id = false }
+    local lw = 0
+    for _, k in ipairs(kinds) do lw = math.max(lw, #k.label) end
+    local bottom, y = v.H - 1, 5
+    for _, k in ipairs(kinds) do
+      if y > bottom then break end
+      local x = v:buttons(2, y, { { label = k.label .. (" "):rep(lw - #k.label), id = "kind:" .. tostring(k.id),
+        fn = function() st.depotFlow = k.id; go("pick") end } })
+      local beside = W - x - 1 >= 16
+      local tw, maxL = beside and W - x - 1 or W - 3, (beside and v.H >= 16) and 2 or 1
+      local lines = wrapText(k.about, tw)
+      if #lines > maxL then lines[maxL] = fit(lines[maxL] .. " " .. lines[maxL + 1], tw) end
+      while #lines > maxL do lines[#lines] = nil end
+      for i, l in ipairs(lines) do
+        local ly = beside and y + i - 1 or y + i
+        if ly <= bottom then v:put(beside and x + 1 or 3, ly, fit(l, beside and W - x - 1 or W - 3), "dim", "bg") end
+      end
+      y = y + (beside and #lines or #lines + 1) + (v.H >= 16 and 1 or 0)
     end
-    rows[#rows + 1] = { name = "Other job" .. (v.W >= 39 and "  input, output, dock, fuel, drawers..." or ""), id = false }
-    v:list(rows, { top = 5, once = true, on = function(row)
-      st.depotFlow = row.id
-      go("pick")
-    end })
     v:footer({ back = function() go("list") end })
   end
 
@@ -551,7 +566,7 @@ function A.run(o)
     for _, ty in ipairs(types) do opts[#opts + 1] = { id = ty.key, label = ty.label, short = ty.short } end
     local _, last = v:switch(2, y, opts, e.key, function(id) e.key = id end, { id = "job", maxx = W - 1 })
     y = last + 1
-    if y <= bottom and not ruleDepot(e.key) and v.H >= 20 then
+    if y <= bottom and not ruleDepot(e.key) and v.H >= 19 then
       for _, l in ipairs(wrapText(t.about, W - 2, 2)) do line(l, ROLE[t.col]) end
     end
     -- What saving this will do

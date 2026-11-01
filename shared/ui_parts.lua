@@ -51,9 +51,9 @@ end
 ---------------------------------------------------------------------------------------------------------
 -- 10.4 Segmented switch
 ---------------------------------------------------------------------------------------------------------
--- v:switch(x, y, options, current, on_pick, { id, maxx })
+-- v:switch(x, y, options, current, on_pick, { id, maxx, gap })
 -- options: ids (strings) or { id, label, short }; current is an id; on_pick(id, option). Touching pills, the
--- current one gold. Squeeze: short labels, then a second row. Tap a segment to pick it. Focused (Tab): Left/Right
+-- current one gold; with more than 4 options a black cell parts them (gap = 1), or the grey run reads as one bar. Squeeze: short labels, then a second row. Tap a segment to pick it. Focused (Tab): Left/Right
 -- move a cursor (wraps), Enter picks it. Returns the next free x and the last row.
 function View:switch(x, y, options, current, on_pick, o)
   o = o or {}
@@ -65,9 +65,10 @@ function View:switch(x, y, options, current, on_pick, o)
   end
   local id = o.id or ("switch:" .. x .. ":" .. y)
   local maxx = o.maxx or (self.W - 1)
+  local gap = o.gap or (#opts > 4 and 1 or 0)
   local function total(short)
-    local n = 0
-    for _, op in ipairs(opts) do n = n + #((short and op.short) or op.label) + 2 end
+    local n = -gap
+    for _, op in ipairs(opts) do n = n + #((short and op.short) or op.label) + 2 + gap end
     return n
   end
   local allShort = #opts > 0
@@ -97,7 +98,7 @@ function View:switch(x, y, options, current, on_pick, o)
     end
     self:_box({ cx, cy, cx + w - 1, cy }, { cx, cy - 1, cx + w - 1, cy + 1 },
       { id = id .. ":" .. i, fn = function() pick(i) end })
-    cx = cx + w; lastx = cx - 1
+    cx = cx + w; lastx = cx - 1; cx = cx + gap
   end
   if focused and x > 1 then self:put(x - 1, y, ">", "fg", "bg") end
   local n = #opts

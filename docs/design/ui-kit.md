@@ -616,7 +616,7 @@ Orange, red, and a neutral line.
 
 ### 10.4 Segmented switch
 
-One choice of a few, drawn as touching pills; the current one is gold. For modes (AUTO / ON / OFF), rules (No rule / Keep N stacks / Smelt all) and sort order. Tap a segment; Left/Right move, Enter picks. Squeeze: labels shorten, then the switch wraps to a second row.
+One choice of a few, drawn as touching pills; the current one is gold. With more than 4 options (storage's job picker) one black cell parts the pills, because in game a long grey run reads as one bar. For modes (AUTO / ON / OFF), rules (No rule / Keep N stacks / Smelt all) and sort order. Tap a segment; Left/Right move, Enter picks. Squeeze: labels shorten, then the switch wraps to a second row.
 
 
 ```text w=51

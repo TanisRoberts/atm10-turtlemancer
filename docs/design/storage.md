@@ -247,7 +247,7 @@ Mockup legend: every block is exactly the width in its `w=` tag. A space is a bl
 ░<░ Back                                                 
 ```
 
-- Job buttons 3 per row (gold = current). Warning line when the job is single-only (`Replaces ...`). Nickname is a text field. `Delete` is tap-twice.
+- Job buttons as a switch, a black cell between them (gold = current); what the job does in grey below it whenever the screen has 19 rows or more. Warning line when the job is single-only (`Replaces ...`). Nickname is a text field. `Delete` is tap-twice.
 
 
 ## Report page (/fuelinfo, /drawers)

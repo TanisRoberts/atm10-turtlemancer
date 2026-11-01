@@ -222,6 +222,23 @@ T.test("ui3: switch wraps to a second row when even the short labels do not fit;
   tap(world, c, 20, 4); T.eq(c.G.picked, "c", "and beside it")
 end)
 
+T.test("ui3: a switch of more than 4 options parts its pills with a black cell, so they do not read as one bar", function()
+  local world = cc.world()
+  local c = world:computer{ id = 1, w = 51, h = 8 }
+  install(c)
+  c:writeFile("t.lua", [[
+    local ui = require("ui")
+    ui.run(ui.view(term.current()), function(v)
+      _G.r = { v:switch(2, 3, { "Input", "Output", "Dock", "Fuel", "Depot" }, "Dock", function(id) _G.picked = id end) }
+    end)]])
+  c:run("t"); world:run(0.5)
+  local scr = c.screen
+  T.truthy(inRow(scr, 3, " Input   Output   Dock   Fuel   Depot "))
+  T.eq(bg(scr, 9, 3), COL.black, "a black cell after Input")
+  T.eq(bg(scr, 10, 3), COL.grey, "Output starts grey")
+  tap(world, c, 12, 3); T.eq(c.G.picked, "Output")
+end)
+
 T.test("ui3: kv cuts the key first and the value last; alert and section clip to their width", function()
   local world, c = frame(30, 8, [[
     v:kv(2, 3, 20, "A long key here", "value", nil)
