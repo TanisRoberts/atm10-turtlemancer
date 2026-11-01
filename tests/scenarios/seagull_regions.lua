@@ -73,10 +73,11 @@ local STUB = [==[
   end
 ]==]
 
-local function setup(envExtra)
+local function setup(envExtra, build)
   local w = cc.world()
   w.gpsOn = true
   w:fill(-20, 60, -20, 60, 63, 60, "minecraft:stone")
+  if build then build(w) end
   local dock = cc.Inv.new{ size = 27, types = BARREL }
   w:setBlock(0, 64, -1, "minecraft:barrel", dock)
   dock:give("minecraft:lava_bucket", 4)
@@ -192,6 +193,63 @@ T.test("seagull: a region on his done list is mapped again when the Cartographer
     return st and st.region == nil and st.mapping == false
   end, 1500, "the re-survey never finished")
   T.truthy(t:readTable("seagull.state").done["0,0"])
+end)
+
+-- A launch tube: stone walls round his spot from y 64 to 75 (the dock barrel is the north wall at y 64), open sky above
+local function tube(w)
+  for y = 64, 75 do
+    for _, d in ipairs({ { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 } }) do
+      if not (y == 64 and d[1] == 0 and d[2] == -1) then w:setBlock(d[1], y, d[2], "minecraft:stone") end
+    end
+  end
+end
+
+T.test("seagull: in a launch tube he finds his facing at the top, climbs straight out, and comes home down it", function()
+  local w, t, carto = setup(nil, tube)          -- no CRUISE_Y: the tube's walls alone decide how high he climbs
+  w:run(60)
+  T.contains(t.screen:text(), "Ready")
+  T.eq(t.body.x .. "," .. t.body.y .. "," .. t.body.z, "0,64,0", "back on his dock after finding his facing")
+  order(carto, { type = "cmd", to = 7, want = "map", seq = 1, next = { 1, 0 } })
+  local leftLow = false
+  T.waitFor(w, function()
+    local b = t.body
+    if (b.x ~= 0 or b.z ~= 0) and math.abs(b.x) <= 1 and math.abs(b.z) <= 1 and b.y <= 75 then leftLow = true end
+    return #G(carto).oks >= 1
+  end, 2500, "region 1,0 was never finished")
+  T.eq(leftLow, false, "he never moved sideways inside the tube")
+  T.eq(t:readTable("seagull.state").skipped or 0, 0, "no chunk skipped")
+  w:run(90)
+  T.eq(t.body.x .. "," .. t.body.y .. "," .. t.body.z, "0,64,0", "home down the tube")
+end)
+
+T.test("seagull: boxed in (nothing open, not even up) he says so and skips nothing", function()
+  local w, t, carto = setup()
+  w:run(30)
+  tube(w); w:setBlock(0, 65, 0, "minecraft:stone")       -- a lid right above him
+  order(carto, { type = "cmd", to = 7, want = "map", seq = 1, next = { 1, 0 } })
+  w:run(120)
+  T.contains(t.screen:text(), "Can't climb straight up")
+  local st = t:readTable("seagull.state")
+  T.eq(st.skipped or 0, 0, "no chunk skipped while he can't move")
+  T.eq(st.ci, 1, "still on the first chunk")
+end)
+
+T.test("seagull: chunks with no map after the first pass get one more try before the region is handed over", function()
+  local w, t, carto = setup()
+  w:run(30)
+  order(carto, { type = "cmd", to = 7, want = "map", seq = 1 })
+  T.waitFor(w, function() local st = t:readTable("seagull.state"); return st and st.region and (st.ci or 0) >= 3 end, 1500)
+  -- as if chunks 1 and 2 had been skipped: no map for them, and the first pass carries on from chunk 3
+  t:_stop()
+  local st = t:readTable("seagull.state")
+  st.cp, st.ci = 3, 3
+  t:writeTable("seagull.state", st)
+  t.files["seagull.map"] = nil
+  t:reboot(); t:run("seagull")
+  T.waitFor(w, function() return #G(carto).oks >= 1 end, 2500, "the region was never handed over")
+  local n = 0
+  for _ in pairs(G(carto).held) do n = n + 1 end
+  T.eq(n, 4, "all four chunks arrived, the two missing ones from the second try")
 end)
 
 T.test("seagull: a reboot mid-region carries on with the same region; nothing is skipped", function()

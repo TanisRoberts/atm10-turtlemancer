@@ -12,14 +12,18 @@ function M.regionOf(cx, cz, size)
 end
 
 -- The chunks of a region in scanning order: rows of constant cz, every other row back the other way, so each
--- hop to the next chunk is one chunk long.
-function M.chunks(rx, rz, size)
+-- hop to the next chunk is one chunk long. Starts in the north-west corner; flipX / flipZ start from the east /
+-- south side instead (Seagull starts at the corner nearest him).
+function M.chunks(rx, rz, size, flipX, flipZ)
   size = size or M.SIZE
   local out = {}
   for row = 0, size - 1 do
     for col = 0, size - 1 do
       local c = (row % 2 == 0) and col or (size - 1 - col)
-      out[#out + 1] = { cx = rx * size + c, cz = rz * size + row }
+      local r = row
+      if flipX then c = size - 1 - c end
+      if flipZ then r = size - 1 - r end
+      out[#out + 1] = { cx = rx * size + c, cz = rz * size + r }
     end
   end
   return out

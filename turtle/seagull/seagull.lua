@@ -299,26 +299,24 @@ local function findHeading()
   local x0, y0, z0 = locate(3)
   if not x0 then return false end
   pos = { x = x0, y = y0, z = z0 }
-  for attempt = 1, 2 do
-    for turns = 0, 3 do
+  -- Boxed in on all four sides (a launch tube): go up until a side is open, then back down to where he was
+  local climbed, found = 0, false
+  for _ = 1, 48 do
+    for _ = 0, 3 do
       if not turtle.detect() and turtle.forward() then
         local x1, _, z1 = locate(3)
         turtle.back()
-        if x1 and (x1 ~= x0 or z1 ~= z0) then
-          heading = dirOf(x1 - x0, z1 - z0)
-          local x2, y2, z2 = locate(3)
-          if x2 then pos = { x = x2, y = y2, z = z2 } end
-          return true
-        end
+        if x1 and (x1 ~= x0 or z1 ~= z0) then heading = dirOf(x1 - x0, z1 - z0); found = true; break end
       end
       turtle.turnRight()
     end
-    -- Boxed in on all four sides: go up one and try again
-    if attempt == 1 then
-      if turtle.up() then pos.y = pos.y + 1 else break end
-    end
+    if found or not turtle.up() then break end
+    climbed = climbed + 1
   end
-  return false
+  for _ = 1, climbed do turtle.down() end
+  local x2, y2, z2 = locate(3)
+  pos = x2 and { x = x2, y = y2, z = z2 } or { x = x0, y = y0, z = z0 }
+  return found
 end
 
 local function turnTo(h)
@@ -393,8 +391,31 @@ local function hop(h)
   return false, "stuck"
 end
 
+-- Leaving the dock: straight up until he is CLEARANCE above everything round him (a launch tube's walls) and at
+-- CRUISE_Y, before any sideways move. Scans again on the way up, as walls can reach past one scan.
+local scan   -- defined with the scanning below
+local function launch()
+  local scannedAt = nil
+  for _ = 1, 400 do
+    if scanner and (not scannedAt or pos.y - scannedAt >= math.floor(E.RADIUS / 2)) then
+      scan(); scannedAt = pos.y
+    end
+    local walls = groundNear(pos.x, pos.z, 1)
+    local want = math.max(walls and (walls + 1 + E.CLEARANCE) or pos.y, floorAt(pos.x, pos.z))
+    if want > E.MAX_Y then return false, "high" end
+    if pos.y >= want then return true end
+    if turtle.getFuelLevel() == 0 then return false, "fuel" end
+    if not up() then return false, "stuck" end
+  end
+  return false, "stuck"
+end
+
 -- Fly to column (tx, tz), long axis first. onHop is called after every block.
 local function flyTo(tx, tz, onHop)
+  if S.home and pos.x == S.home.x and pos.z == S.home.z and (pos.x ~= tx or pos.z ~= tz) then
+    local ok, why = launch()
+    if not ok then return false, why == "fuel" and "fuel" or "launch" end
+  end
   local guard = 0
   while pos.x ~= tx or pos.z ~= tz do
     guard = guard + 1
@@ -428,7 +449,7 @@ local function findScanner()
   return scanner
 end
 
-local function scan()
+scan = function()
   if not scanner and not findScanner() then return false, "No Geo Scanner" end
   for _ = 1, 12 do
     local ok, res, err = pcall(scanner.scanBlocks, E.RADIUS)
@@ -497,9 +518,10 @@ local function regionKey(r) return r and plan.key(r[1], r[2]) end
 -- Chunks of the region he is on, in scanning order (rebuilt on demand; 256 small tables)
 local chunkList, chunkListFor = nil, nil
 local function regionChunks()
-  local k = regionKey(S.region) .. ":" .. E.REGION_CHUNKS
+  local cn = S.corner or {}
+  local k = regionKey(S.region) .. ":" .. E.REGION_CHUNKS .. ":" .. tostring(cn[1]) .. tostring(cn[2])
   if chunkListFor ~= k then
-    chunkList, chunkListFor = plan.chunks(S.region[1], S.region[2], E.REGION_CHUNKS), k
+    chunkList, chunkListFor = plan.chunks(S.region[1], S.region[2], E.REGION_CHUNKS, cn[1], cn[2]), k
   end
   return chunkList
 end
@@ -548,7 +570,7 @@ local function statusMsg()
     type = "status", role = ROLE, id = os.getComputerID(), label = os.getComputerLabel(),
     state = status, msg = note, seq = S.seq, pos = pos and { x = pos.x, y = pos.y, z = pos.z } or nil,
     home = S.home, gps = gpsOk, fuel = turtle.getFuelLevel(), fuelLimit = turtle.getFuelLimit(),
-    wp = S.region and (S.ci or 1) or nil, wps = S.region and #regionChunks() or nil, pass = S.pass or 0,
+    wp = S.region and math.min(S.ci or 1, #regionChunks()) or nil, wps = S.region and #regionChunks() or nil, pass = S.pass or 0,
     mapping = S.mapping, chunks = chunkCount(), scan = lastScanAt, skipped = S.skipped,
     scan_region = S.mapping and S.region or nil, scan_started = S.mapping and S.rstart or nil, scan_secs = scanSecs,
     done_region = S.doneRegion, next_region = S.nextReg or nil,
@@ -805,7 +827,12 @@ end
 local function startRegion()
   local r, tapped = pickRegion()
   if not r then setStatus("error", "No region left to map"); return end
-  S.region, S.ci, S.cp, S.mapping, S.skipped, S.retry = r, 1, 1, true, 0, nil
+  S.region, S.ci, S.cp, S.mapping, S.skipped, S.retry, S.redo = r, 1, 1, true, 0, nil, nil
+  -- Start at the region's corner nearest him (saved, so a reboot keeps the same order)
+  local from = pos or S.home or { x = 0, z = 0 }
+  local size = E.REGION_CHUNKS * 16
+  local x0, z0 = r[1] * size, r[2] * size
+  S.corner = { from.x >= x0 + size / 2, from.z >= z0 + size / 2 }
   S.rstart, S.doneRegion = nil, nil
   if tapped then S.nextReg = nil end
   S.chunky = core.chunk.have()
@@ -834,7 +861,7 @@ local function forgetRegion()
   S.done = S.done or {}
   S.done[rk] = true
   if S.rstart then S.lastSecs = (now() - S.rstart) / 1000 end
-  S.region, S.doneRegion, S.rstart, S.ci, S.cp, S.retry = nil, nil, nil, nil, nil, nil
+  S.region, S.doneRegion, S.rstart, S.ci, S.cp, S.retry, S.redo, S.corner = nil, nil, nil, nil, nil, nil, nil, nil
   S.pass = (S.pass or 0) + 1
   mapDirty = true
   saveMap(true); save()
@@ -858,9 +885,29 @@ local function scanChunk(cx, cz)
 end
 
 -- One chunk of the region: fly to its middle, keep it loaded, scan it
+-- Chunks of the region that have no map yet (skipped on the first pass): each gets one more try at the end
+local function missingChunks()
+  local out = {}
+  for _, ch in ipairs(regionChunks()) do
+    if not chunks[mc.key(ch.cx, ch.cz)] then out[#out + 1] = { cx = ch.cx, cz = ch.cz } end
+  end
+  return out
+end
+
+-- The region is done once the first pass is over and every chunk has had its second try
+local function regionPassDone()
+  if S.ci <= #regionChunks() then return false end
+  if not S.redo then S.redo = missingChunks(); save() end
+  return #S.redo == 0
+end
+
 local function mapOneChunk()
   local list = regionChunks()
-  local ch = list[S.ci]
+  local redo = S.ci > #list           -- second try at a chunk the first pass skipped
+  local ch = redo and S.redo[1] or list[S.ci]
+  local function nextChunk()
+    if redo then table.remove(S.redo, 1) else S.ci = S.ci + 1 end
+  end
   local tx, tz = plan.centre(ch.cx, ch.cz)
   if not enoughFuelFor(tx, tz) then
     if dockAndRefuel("Refuelling", true) then
@@ -873,8 +920,10 @@ local function mapOneChunk()
     end
     return
   end
-  setStatus("mapping", ("Region %s, chunk %d/%d"):format(regionKey(S.region), S.ci, #list))
+  setStatus("mapping", redo and ("Region %s, a skipped chunk again (%d left)"):format(regionKey(S.region), #S.redo)
+    or ("Region %s, chunk %d/%d"):format(regionKey(S.region), S.ci, #list))
   loadHere(true)
+  local x0, y0, z0 = pos.x, pos.y, pos.z
   local ok, why = flyTo(tx, tz, loadHere)
   if ok then
     loadHere(true)
@@ -885,8 +934,9 @@ local function mapOneChunk()
       waitOrder(20)
       return
     end
-    S.ci = S.ci + 1
-    if S.ci % 8 == 0 then checkpoint() else save() end
+    if redo and (S.skipped or 0) > 0 then S.skipped = S.skipped - 1 end
+    nextChunk()
+    if redo or S.ci % 8 == 0 then checkpoint() else save() end
   elseif why == "fuel" then
     setStatus("error", "Out of fuel")
     S.mapping = false
@@ -895,11 +945,17 @@ local function mapOneChunk()
     S.retry = (S.retry or 0) + 1   -- a neighbouring chunk that is not loaded yet: wait, load mine again, retry
     os.sleep(1)
     loadHere(true)
+  elseif why == "launch" or (pos.x == x0 and pos.y == y0 and pos.z == z0) then
+    -- He couldn't move at all (boxed in): that says nothing about the chunk, so don't skip it. Wait and try again.
+    setStatus("error", why == "launch" and ("Can't climb straight up out of my dock at %d %d %d: is the sky open above it?"):format(pos.x, pos.y, pos.z)
+      or ("Can't move from %d %d %d (%s): clear the way or reboot me"):format(pos.x, pos.y, pos.z, tostring(why)))
+    waitOrder(30)
   else
-    S.skipped = (S.skipped or 0) + 1
-    log(("Skipped chunk %d,%d (%s)"):format(ch.cx, ch.cz, why == "unloaded" and "chunk not loaded" or tostring(why)))
+    if not redo then S.skipped = (S.skipped or 0) + 1 end
+    log(("Skipped chunk %d,%d (%s)%s"):format(ch.cx, ch.cz, why == "unloaded" and "chunk not loaded" or tostring(why),
+      redo and ", again" or ": I'll try it again at the end"))
     S.retry = nil
-    S.ci = S.ci + 1
+    nextChunk()
     save()
   end
   if ok then S.retry = nil end
@@ -937,7 +993,7 @@ local function mapLoop()
         waitOrder(5)
       end
     elseif S.mapping and S.region then
-      if S.ci > #regionChunks() then finishRegion()
+      if regionPassDone() then finishRegion()
       else mapOneChunk() end
     else
       if atHome() then
