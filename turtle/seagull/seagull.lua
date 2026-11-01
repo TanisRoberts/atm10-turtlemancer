@@ -27,7 +27,7 @@
 
 local mc = dofile("mapchunk.lua")
 local plan = dofile("regionplan.lua")
-local route = dofile("seagull_nav.lua")()  -- the way round cliffs, ledges and caves (A* through his scans)
+local fly            -- how he flies (seagull_fly.lua), made below once the movement functions exist
 local core = dofile("turtlecore.lua")   -- fuel, dock and GPS shared by every turtle (docs/systems/turtle.md)
 
 local PROTO      = "tanis-carto"
@@ -35,13 +35,14 @@ local BASE       = "tanis-base"
 local ENV_FILE   = "seagull.env"
 local STATE_FILE = "seagull.state"
 local MAP_FILE   = "seagull.map"
+local PITS_FILE  = "seagull.pits"
+local FLY_VERSION = 1      -- bumped when how he flies changes so much that his old map can't be trusted (see boot)
 local ROLE       = "seagull"
 
 local DEFAULTS = {
   { "REGION_CHUNKS", 16, "Chunks along one side of a region. Leave at 16: the Cartographer expects 16 x 16." },
   { "CLEARANCE", 3, "How high above the ground (or trees, water) he flies." },
   { "RADIUS", 8, "Scan radius. 8 is free and covers a whole chunk from its middle; up to 16 costs fuel per scan." },
-  { "DETOUR_RADIUS", 16, "Scan radius for the one wide scan when a detour starts (8 = off, up to 16). Costs fuel past 8, only on detours." },
   { "SHALLOW", 4, "Water this deep or less counts as shallow (lighter blue)." },
   { "FUEL_PCT", 90, "Fuel he tops up to at the dock, as % of his fuel limit (an advanced turtle holds 100,000)." },
   { "DOCK_WAIT", 30, "Seconds he waits at the dock for Storage to bring more fuel before he goes with what he has." },
@@ -89,7 +90,6 @@ local function readEnv()
     if type(d[2]) == "number" then E[d[1]] = tonumber(v) or d[2] else E[d[1]] = v end
   end
   E.RADIUS = math.max(8, math.min(16, math.floor(E.RADIUS)))
-  E.DETOUR_RADIUS = math.max(8, math.min(16, math.floor(E.DETOUR_RADIUS)))
   E.REGION_CHUNKS = math.max(1, math.floor(E.REGION_CHUNKS))
   envStamp = stampOf(ENV_FILE)
 end
@@ -175,10 +175,31 @@ local function topAt(x, z)
   return (mc.unpack(mc.get(c.data, lx, lz)))
 end
 
+local function savePits()
+  if not fly.pitsDirty then return end
+  local f = fs.open(PITS_FILE .. ".new", "w")
+  if not f then return end
+  f.write(textutils.serialize(fly.pits)); f.close()
+  if fs.exists(PITS_FILE) then fs.delete(PITS_FILE) end
+  fs.move(PITS_FILE .. ".new", PITS_FILE)
+  fly.pitsDirty = false
+end
+
+local function loadPits()
+  for _, p in ipairs({ PITS_FILE, PITS_FILE .. ".new" }) do
+    if fs.exists(p) then
+      local f = fs.open(p, "r"); local t = textutils.unserialize(f.readAll()); f.close()
+      if type(t) == "table" then fly.setPits(t); return end
+    end
+  end
+  fly.setPits({})
+end
+
 local function saveMap(force)
-  if not mapDirty then return end
+  if not mapDirty and not fly.pitsDirty then return end
   if not force and os.clock() - mapSavedAt < 30 then return end
-  mc.save(MAP_FILE, chunks)
+  if mapDirty then mc.save(MAP_FILE, chunks) end
+  savePits()
   mapDirty, mapSavedAt = false, os.clock()
 end
 
@@ -201,15 +222,23 @@ local function isFluff(b)
   return n:find("torch") ~= nil or n:find("carpet") ~= nil
 end
 
--- Columns over a hole deeper than a scan reaches (ravine, sinkhole, cave mouth): ["x,z"] = the height to fly over
--- them at. In memory only. He never sinks into one to look; the map says "low ground" there.
-local pits, pitCount = {}, 0
-local lastSeen = 0       -- columns of the last scan's cube that had a block in them
+-- Columns over a hole deeper than a scan reaches (ravine, sinkhole, cave mouth) are "pits" (seagull_fly.lua keeps
+-- them, seagull.pits saves them with the map). He never sinks into one to look; the map says "low ground" there.
 
 local function round(v) return math.floor((tonumber(v) or 0) + 0.5) end
 
 -- Turn one scan into column tops and write them into the map
 local function absorb(blocks, ox, oy, oz, R)
+  -- Never map from underground: anything solid right over him (a cave, an overhang) and nothing is written
+  fly.roofed = false
+  for _, b in ipairs(blocks) do
+    if type(b) == "table" and type(b.name) == "string" and round(b.x) == 0 and round(b.z) == 0 and round(b.y) > 0
+      and b.name ~= "minecraft:air" and not isWater(b.name) and not isFluff(b) and not b.name:find("lava")
+      and not b.name:find("computercraft:turtle") then
+      fly.roofed = true
+      return
+    end
+  end
   local cols = {}   -- [dx * 64 + dz] = { top, topName, floor (highest non-water below a water top) }
   for _, b in ipairs(blocks) do
     if type(b) == "table" and type(b.name) == "string" then
@@ -266,21 +295,21 @@ local function absorb(blocks, ox, oy, oz, R)
         end
         -- The cube reaches R above us: a top at the very edge may continue higher
         setCol(x, z, mc.pack(oy + c.top, kind), c.top < R)
+        if c.top < R then fly.seeTop(x, z, oy + c.top) end      -- seen, with air above it in the cube
       end
     end
   end
   -- Some ground in the cube but not in these columns: they are a hole, not far-off ground. Mark them low (below the
   -- cube) and remember the height he flew over them at, so a second scan never sends him down to look.
   for _ in pairs(cols) do seen = seen + 1 end
-  lastSeen = seen
-  if seen > 0 and seen * 3 >= (2 * R + 1) ^ 2 then
+  local mostly = seen > 0 and seen * 3 >= (2 * R + 1) ^ 2     -- ground nearly all round: holes in it are real holes
+  fly.scanned(seen, mostly)
+  if mostly then
     for dx = -R, R do
       for dz = -R, R do
         if not cols[(dx + 32) * 64 + (dz + 32)] and topAt(ox + dx, oz + dz) == nil then
           setCol(ox + dx, oz + dz, mc.pack(oy - R - 1, mc.LAND))
-          if pitCount > 4000 then pits, pitCount = {}, 0 end
-          pits[(ox + dx) .. "," .. (oz + dz)] = oy - 1 - E.CLEARANCE
-          pitCount = pitCount + 1
+          fly.markPit(ox + dx, oz + dz)
         end
       end
     end
@@ -367,20 +396,6 @@ local function forward()
   return false
 end
 
--- Highest known top around (x, z), radius r
-local function groundNear(x, z, r)
-  local best = nil
-  for dx = -r, r do
-    for dz = -r, r do
-      local t = topAt(x + dx, z + dz)
-      local pt = pits[(x + dx) .. "," .. (z + dz)]
-      if pt and (not t or pt > t) then t = pt end
-      if t and (not best or t > best) then best = t end
-    end
-  end
-  return best
-end
-
 -- He is either scanning (low, CLEARANCE over the ground: the hop to the next chunk, a second scan in a chunk)
 -- or cruising (CRUISE_Y or higher: home, out to a region, back to his chunk after refuelling, a retried chunk).
 -- flyTo sets `cruising` for each flight; once there he drops straight down to the ground to scan.
@@ -392,37 +407,26 @@ local function floorAt(x, z)
   return math.min(c, E.MAX_Y)
 end
 
--- Fly one block towards compass direction h, keeping CLEARANCE above the ground ahead (and CRUISE_Y on the way).
--- Returns true, or false + reason ("unloaded", "high", "stuck", "fuel")
-local function hop(h)
-  if turtle.getFuelLevel() == 0 then return false, "fuel" end
-  local nx, nz = pos.x + DX[h], pos.z + DZ[h]
-  local g = groundNear(nx, nz, 0)
-  local want = math.max(g and (g + 1 + E.CLEARANCE) or pos.y, floorAt(nx, nz))
-  if want > E.MAX_Y then return false, "high" end
-  while pos.y < want do
-    if not up() then break end
-  end
-  turnTo(h)
-  for _ = 1, 24 do
-    if forward() then
-      -- Sink back down to the right height over lower ground (one block at a time, never into things)
-      local g2 = groundNear(pos.x, pos.z, 0)
-      local want2 = math.max(g2 and (g2 + 1 + E.CLEARANCE) or pos.y, floorAt(pos.x, pos.z))
-      while pos.y > want2 and not turtle.detectDown() do
-        if not down() then break end
-      end
-      return true
-    end
-    if blockedWhy:lower():find("loaded") then return false, "unloaded" end
-    if pos.y >= E.MAX_Y or not up() then return false, "stuck" end
-  end
-  return false, "stuck"
-end
+-- How he flies: seagull_fly.lua (heights from the heightmap, down only onto seen ground, up when blocked)
+local scan   -- defined with the scanning below
+fly = dofile("seagull_fly.lua")({
+  E = E,
+  pos = function() return pos end,
+  heading = function() return heading end,
+  up = up, down = down,
+  step = function(h) turnTo(h); return forward() end,
+  blockedWhy = function() return blockedWhy end,
+  detectDown = function() return turtle.detectDown() end,
+  fuel = function() return turtle.getFuelLevel() end,
+  floorAt = floorAt,
+  mapTop = function(x, z) return topAt(x, z) end,
+  scan = function() return scan() end,
+  status = function() return status, note end,
+  setStatus = setStatus,
+})
 
 -- Leaving the dock: straight up before any sideways move: to CRUISE_Y, or with no cruising height until he is
 -- CLEARANCE above everything round him (a launch tube's walls; scanned on the way up, walls can reach past a scan).
-local scan   -- defined with the scanning below
 local function launch()
   -- With a cruising height: straight up to it, no scanning (the sky over the dock is always open)
   local cruise = tonumber(E.CRUISE_Y) or 0
@@ -440,7 +444,7 @@ local function launch()
     if scanner and (not scannedAt or pos.y - scannedAt >= math.floor(E.RADIUS / 2)) then
       scan(); scannedAt = pos.y
     end
-    local walls = groundNear(pos.x, pos.z, 1)
+    local walls = fly.groundNear(pos.x, pos.z, 1)
     local want = math.max(walls and (walls + 1 + E.CLEARANCE) or pos.y, floorAt(pos.x, pos.z))
     if want > E.MAX_Y then return false, "high" end
     if pos.y >= want then return true end
@@ -450,52 +454,10 @@ local function launch()
   return false, "stuck"
 end
 
--- Blocked (a cliff, a ledge over him, a cave roof): find a way with seagull_nav to a spot up to RADIUS blocks on
--- towards (tx, tz), at his flying height there (higher if that is taken), and walk it.
-local navIO = {
-  pos = function() return pos end,
-  move = function(dir)
-    local ok, why
-    if dir == "up" then ok, why = turtle.up(); if ok then pos.y = pos.y + 1 end
-    elseif dir == "down" then ok, why = turtle.down(); if ok then pos.y = pos.y - 1 end
-    else
-      turnTo(dir)
-      ok, why = turtle.forward()
-      if ok then pos.x, pos.z = pos.x + DX[dir], pos.z + DZ[dir] end
-    end
-    return ok, why
-  end,
-  scan = function() return scan() end,   -- (no argument: normal radius)
-}
-local function detour(tx, tz, onHop)
-  navIO.maxY, navIO.onStep = E.MAX_Y, onHop
-  local dist = math.abs(tx - pos.x) + math.abs(tz - pos.z)
-  -- One wide scan as the detour starts (not on replans inside it): enough picture to plan round a big cliff in
-  -- one go. If it fails (fuel, cooldown) he carries on with what he has.
-  local wide = E.DETOUR_RADIUS > E.RADIUS and scan(E.DETOUR_RADIUS) and E.DETOUR_RADIUS or E.RADIUS
-  navIO.margin = wide > E.RADIUS and wide + 8 or nil   -- room to plan round what the wide scan showed
-  for _, reach in ipairs({ wide, E.RADIUS, 4, 1 }) do
-    local gx, gz = tx, tz
-    if dist > reach then
-      gx = pos.x + math.floor((tx - pos.x) * reach / dist + 0.5)
-      gz = pos.z + math.floor((tz - pos.z) * reach / dist + 0.5)
-    end
-    local g = groundNear(gx, gz, 0)
-    local base = math.max(g and (g + 1 + E.CLEARANCE) or pos.y, floorAt(gx, gz))
-    for _, extra in ipairs({ 0, 4, 10 }) do
-      local gy = math.min(base + extra, E.MAX_Y)
-      while gy < E.MAX_Y and route.isSolid(gx, gy, gz) do gy = gy + 1 end
-      local ok, why = route.go({ x = gx, y = gy, z = gz }, navIO)
-      if ok then return true end
-      if why == "unloaded" or why == "fuel" then return false, why end
-    end
-  end
-  return false, "stuck"
-end
-
 -- Fly to column (tx, tz), long axis first. onHop is called after every block. home = true: going home, always
 -- cruising; otherwise cruising unless it is a short hop between scans (SCAN_HOP).
 local flyTo1
+local scanAndSettle   -- defined with the scanning below
 local function flyTo(tx, tz, onHop, home)
   cruising = home or math.abs(tx - pos.x) + math.abs(tz - pos.z) > SCAN_HOP
   local ok, why = flyTo1(tx, tz, onHop)
@@ -507,7 +469,8 @@ flyTo1 = function(tx, tz, onHop)
     local ok, why = launch()
     if not ok then return false, why == "fuel" and "fuel" or "launch" end
   end
-  local guard, detours = 0, 0
+  local guard = 0
+  local scanning = not cruising and scanner ~= nil   -- low flights between scans are part of scanning: look every RADIUS - 1
   while pos.x ~= tx or pos.z ~= tz do
     guard = guard + 1
     if guard > 4000 then return false, "stuck" end
@@ -518,21 +481,13 @@ flyTo1 = function(tx, tz, onHop)
     if keepX or keepZ then h = heading
     elseif math.abs(tx - pos.x) >= math.abs(tz - pos.z) then h = tx > pos.x and 1 or 3
     else h = tz > pos.z and 2 or 0 end
-    local ok, why = hop(h)
-    if not ok then
-      -- Try the other axis once before giving up (goes round a pylon or tree)
-      local h2
-      if h == 1 or h == 3 then h2 = (tz ~= pos.z) and (tz > pos.z and 2 or 0) or nil
-      else h2 = (tx ~= pos.x) and (tx > pos.x and 1 or 3) or nil end
-      if why == "stuck" and h2 then ok, why = hop(h2) end
-      if not ok and (why == "stuck" or why == "high") then
-        detours = detours + 1
-        if detours > 40 then return false, "stuck" end
-        ok, why = detour(tx, tz, onHop)
-      end
-      if not ok then return false, why end
-    end
+    local ok, why = fly.hop(h)       -- over what is ahead, never round or under it
+    if not ok then return false, why end
     if onHop then onHop() end
+    if scanning and (not lastScanAt or math.abs(pos.x - lastScanAt.x) + math.abs(pos.z - lastScanAt.z) >= E.RADIUS - 1) then
+      local sok, serr = scanAndSettle(false)
+      if not sok then return false, serr end
+    end
   end
   return true
 end
@@ -552,7 +507,6 @@ scan = function(radius)
     local ok, res, err = pcall(scanner.scanBlocks, R)
     if ok and type(res) == "table" then
       absorb(res, pos.x, pos.y, pos.z, R)
-      route.observe(res, pos.x, pos.y, pos.z, R)
       if not radius then lastScanAt = { x = pos.x, y = pos.y, z = pos.z, r = R, t = now() } end
       return true
     end
@@ -568,56 +522,16 @@ scan = function(radius)
   return false, "Scanner keeps failing"
 end
 
--- Never under a roof. If a scan shows anything solid above him (a cave, an overhang), or he is far below the known
--- top of his column, get out to open sky before doing anything else (seagull_nav's escape).
-local function openSky()
-  local t = topAt(pos.x, pos.z)
-  local roof = route.covered(pos.x, pos.y, pos.z)
-  if not roof and not (t and pos.y < t - E.RADIUS) then return true end
-  local st0, note0 = status, note
-  setStatus("error", ("Underground at %d %d %d, climbing out"):format(pos.x, pos.y, pos.z))
-  navIO.maxY, navIO.onStep = E.MAX_Y, nil
-  local ok, why = route.escape(navIO)
-  if ok and not roof and t then       -- no roof in the scans but far below the known ground: straight up
-    while pos.y < t + 1 + E.CLEARANCE and up() do end
-  end
-  if not ok then
-    setStatus("error", ("Underground at %d %d %d, no way out (%s)"):format(pos.x, pos.y, pos.z, tostring(why)))
-    return false, "Underground at " .. pos.x .. " " .. pos.y .. " " .. pos.z
-  end
-  setStatus(st0, note0)
-  return true
-end
-
--- Scan, and if the ground under him is still out of sight (he climbed over a pylon, or he's never
--- been here), sink until a scan can see it. Without this he'd stay up high over unknown ground.
-local function scanAndSettle()
+-- Scan, get out from under a roof if the scan shows one, then settle: up to his flying height here, down only onto
+-- ground a scan has seen (seagull_fly.lua).
+-- drop = false: a scan on the way (he is already at his flying height); otherwise an arrival, where he may have to
+-- come down from cruise.
+scanAndSettle = function(drop)
   local ok, err = scan()
   if not ok then return false, err end
-  ok, err = openSky()
+  ok, err = fly.openSky()
   if not ok then return false, err end
-  local guard = 0
-  while topAt(pos.x, pos.z) == nil and guard < 60 do
-    guard = guard + 1
-    local sank = 0
-    local floor = floorAt(pos.x, pos.z)    -- cruising: the ground may be out of reach below; that's fine
-    while sank < E.RADIUS - 1 and pos.y > -60 and pos.y - 1 >= floor and not turtle.detectDown() do
-      if not down() then break end
-      sank = sank + 1
-    end
-    ok, err = scan()
-    if not ok then return false, err end
-    if sank == 0 then break end   -- standing on something the scan doesn't count (a tuft): fine
-  end
-  return true
-end
-
--- Scan whenever the last scan is a STEP behind: keeps the ground ahead known
-local function scanIfDue()
-  if not lastScanAt or math.abs(pos.x - lastScanAt.x) + math.abs(pos.z - lastScanAt.z) >= E.STEP
-    or math.abs(pos.y - lastScanAt.y) > E.RADIUS then
-    scanAndSettle()
-  end
+  return fly.settle(drop ~= false)
 end
 
 -- On the way home: only scan when the ground under him or a few blocks ahead isn't on the map yet
@@ -627,7 +541,7 @@ local function scanIfUnknown()
     local every = floorAt(pos.x, pos.z) > -math.huge and E.RADIUS or 4   -- cruising: a scan sees RADIUS ahead
     if not lastScanAt or math.abs(pos.x - lastScanAt.x) + math.abs(pos.z - lastScanAt.z) >= every
       or math.abs(pos.y - lastScanAt.y) > E.RADIUS then
-      scanAndSettle()
+      scanAndSettle(false)
     end
   end
 end
@@ -977,6 +891,10 @@ local function forgetRegion()
   for k in pairs(chunks) do
     if inRegion(k, r) then chunks[k] = nil; dirtyKeys[k] = nil end
   end
+  fly.dropPits(function(x, z)
+    local cx, cz = mc.locate(x, z)
+    return inRegion(mc.key(cx, cz), r)
+  end)
   S.done = S.done or {}
   S.done[rk] = true
   if S.rstart then S.lastSecs = (now() - S.rstart) / 1000 end
@@ -1064,7 +982,7 @@ local function mapOneChunk()
     S.retry = (S.retry or 0) + 1   -- a neighbouring chunk that is not loaded yet: wait, load mine again, retry
     os.sleep(1)
     loadHere(true)
-  elseif why == "launch" or (pos.x == x0 and pos.y == y0 and pos.z == z0) then
+  elseif why == "launch" or (why ~= "high" and pos.x == x0 and pos.y == y0 and pos.z == z0) then
     -- He couldn't move at all (boxed in): that says nothing about the chunk, so don't skip it. Wait and try again.
     setStatus("error", why == "launch" and ("Can't climb straight up out of my dock at %d %d %d: is the sky open above it?"):format(pos.x, pos.y, pos.z)
       or ("Can't move from %d %d %d (%s): clear the way or reboot me"):format(pos.x, pos.y, pos.z, tostring(why)))
@@ -1145,6 +1063,7 @@ end
 local function boot()
   readEnv()
   load()
+  loadPits()
   term.clear(); term.setCursorPos(1, 2)
   print("Seagull the cartographer. M = map now, D = dock.")
   print("Hold Ctrl+T to stop him where he is.")
@@ -1162,7 +1081,7 @@ local function boot()
   end
   log(("At %d %d %d facing %s"):format(pos.x, pos.y, pos.z, COMPASS[heading]))
   -- Rebooted under a roof (a cave)? Out to open sky before anything else
-  if scanner and scan() then openSky() end
+  if scanner and scan() then fly.openSky() end
   if not S.home then
     local d = findDock()
     while d == nil do
@@ -1175,6 +1094,25 @@ local function boot()
     S.seq = S.seq or 0
     save()
     log(("Home set at %d %d %d, dock %s"):format(pos.x, pos.y, pos.z, type(d) == "number" and COMPASS[d] or d))
+  end
+  -- First boot of this way of flying (#114): the region he is on holds readings from cave trips, so it starts again
+  if S.flyV ~= FLY_VERSION then
+    S.flyV = FLY_VERSION
+    if S.region and not S.doneRegion then
+      local r = S.region
+      for k in pairs(chunks) do
+        if inRegion(k, r) then chunks[k] = nil; dirtyKeys[k] = nil end
+      end
+      fly.dropPits(function(x, z)
+        local cx, cz = mc.locate(x, z)
+        return inRegion(mc.key(cx, cz), r)
+      end)
+      S.ci, S.cp, S.redo, S.retry, S.skipped, S.rstart = 1, 1, nil, nil, 0, nil
+      mapDirty = true
+      saveMap(true)
+      log(("New way of flying: region %s starts again at chunk 1"):format(regionKey(r)))
+    end
+    save()
   end
   if S.region and not S.doneRegion then
     S.ci = S.cp or 1   -- the map was saved at the checkpoint: carry on from there

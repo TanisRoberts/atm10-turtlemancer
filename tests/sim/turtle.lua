@@ -113,6 +113,7 @@ function Turtle.api(world, c)
       if blockAt(dir) then return false, "Movement obstructed" end
       b.x, b.y, b.z = x, y, z
       if b.fuel ~= "unlimited" then b.fuel = b.fuel - 1 end
+      if b.onMove then b.onMove(dir) end      -- a scenario can watch every move (tests/sim/flycheck.lua)
       return true
     end
   end

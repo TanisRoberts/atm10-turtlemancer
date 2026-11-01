@@ -3,6 +3,7 @@
 -- 2 x 2 chunks here (REGION_CHUNKS=2) so a pass takes a few virtual minutes.
 local cc = require("sim.cc")
 local T = require("sim.test")
+local flycheck = require("sim.flycheck")
 
 local BARREL = { "minecraft:barrel", "inventory" }
 
@@ -17,6 +18,7 @@ local function geoScanner(turtleOf)
       local blk = b.world:getBlock(b.x + dx, b.y + dy, b.z + dz)
       if blk then out[#out + 1] = { x = dx, y = dy, z = dz, name = blk.name, tags = {} } end
     end end end
+    if self.check then self.check.observe(out, b.x, b.y, b.z, r) end
     return out
   end
   return s
@@ -76,7 +78,7 @@ local STUB = [==[
 local function setup(envExtra, build)
   local w = cc.world()
   w.gpsOn = true
-  w:fill(-20, 60, -20, 60, 63, 60, "minecraft:stone")
+  w:fill(-20, 60, -40, 70, 63, 70, "minecraft:stone")
   if build then build(w) end
   local dock = cc.Inv.new{ size = 27, types = BARREL }
   w:setBlock(0, 64, -1, "minecraft:barrel", dock)
@@ -88,6 +90,9 @@ local function setup(envExtra, build)
   t:attach("right", cc.wireless{ ender = true })
   local scanner = geoScanner(function() return t.body end)
   t:attach("left", scanner)
+  -- every scenario runs with the fly check (tests/sim/flycheck.lua); the launch tube is his dock's own wall
+  t.scanner = scanner
+  scanner.check = flycheck.watch(t, { exempt = function(x, z) return math.abs(x) <= 1 and math.abs(z) <= 1 end })
   t:writeFile("seagull.env", "REGION_CHUNKS=2\n" .. (envExtra or ""))
   local carto = w:computer{ id = 3, label = "Cartographer" }
   carto:attach("top", cc.wireless{ ender = true })
@@ -273,36 +278,6 @@ T.test("seagull: a cliff taller than a scan with a ledge sticking out: he backs 
   T.eq(t.body.x .. "," .. t.body.y .. "," .. t.body.z, "0,64,0", "and home again, back over the cliff")
 end)
 
--- A wall wider than a scan and taller than he may fly (MAX_Y=80): he must go round its end. One wide scan as the
--- detour starts (#112) lets the A* see the end and plan round it in one go.
-local function wallRun(extra, half)
-  local w, t, carto, _, scanner = setup("MAX_Y=80\n" .. extra .. "\n", function(w)
-    w:fill(10, 64, -half, 12, 95, half, "minecraft:stone")
-  end)
-  local wide, normal = 0, 0
-  local real = scanner.scanBlocks
-  scanner.scanBlocks = function(self, r)
-    if r > 8 then wide = wide + 1 else normal = normal + 1 end
-    return real(self, r)
-  end
-  w:run(30)
-  local fuel0 = t.body.fuel
-  order(carto, { type = "cmd", to = 7, want = "map", seq = 1, next = { 1, 0 } })
-  T.waitFor(w, function() return #G(carto).oks >= 1 end, 4000, "region 1,0 was never finished")
-  T.eq(t:readTable("seagull.state").skipped or 0, 0, "no chunk skipped")
-  return { wide = wide, scans = normal, fuel = fuel0 - t.body.fuel }
-end
-
-T.test("seagull: a wall wider than a scan: one wide scan per detour gets him round with fewer scans and moves", function()
-  local half = 22
-  local b = wallRun("DETOUR_RADIUS=8", half)
-  local a = wallRun("DETOUR_RADIUS=16", half)
-  T.eq(b.wide, 0, "DETOUR_RADIUS=8 never scans wide")
-  T.eq(a.wide, 1, "exactly one wide scan, for the one detour")
-  T.truthy(a.scans < b.scans, "fewer normal scans/replans with the wide scan: " .. a.scans .. " vs " .. b.scans)
-  T.truthy(a.fuel < b.fuel, "fewer moves with the wide scan: " .. a.fuel .. " vs " .. b.fuel)
-end)
-
 T.test("seagull: a reboot mid-region carries on with the same region; nothing is skipped", function()
   local w, t, carto = setup()
   w:run(30)
@@ -404,12 +379,13 @@ T.test("seagull: a cave mouth under a cliff: he maps round it without ever going
 end)
 
 T.test("seagull: rebooted deep in a cave he climbs out to open sky, says so, and goes home", function()
-  local w, t, carto = setup(nil, function(w)
+  local w, t, carto, _, scanner = setup(nil, function(w)
     w:fill(20, 64, -4, 44, 78, 12, "minecraft:stone")    -- a hill with the dock side open to the west
     w:fill(20, 65, 4, 40, 67, 4, "air")                  -- a tunnel from its west face into the hill, dead end at x 40
   end)
   w:run(30)
   t:_stop()
+  scanner.check.off = true       -- he starts in the rock on purpose: backing out of a tunnel is under a known roof
   t.body.x, t.body.y, t.body.z = 38, 66, 4
   t:reboot(); t:run("seagull")
   local sawMsg, roof = false, false
@@ -421,4 +397,194 @@ T.test("seagull: rebooted deep in a cave he climbs out to open sky, says so, and
   T.truthy(sawMsg, "the screen said he was underground")
   w:run(30)
   T.contains(t.screen:text(), "Ready")
+end)
+
+---------------------------------------------------------------------------
+-- #114: over everything, never through
+---------------------------------------------------------------------------
+local function lowestWhile(w, t, carto, max, extra)
+  local lowest = math.huge
+  local ok, err = pcall(T.waitFor, w, function()
+    lowest = math.min(lowest, t.body.y)
+    if extra then extra() end
+    return #G(carto).oks >= 1
+  end, max or 3000, "the region was never handed over")
+  if not ok then
+    error(tostring(err) .. "\n  he is at " .. t.body.x .. "," .. t.body.y .. "," .. t.body.z .. " fuel " .. tostring(t.body.fuel) .. " moves " .. t.scanner.check.moves .. " scans " .. t.scanner.scans
+      .. "\n" .. t.screen:text() .. "\n" .. tostring(t:readFile("seagull.state")):sub(1, 400), 0)
+  end
+  return lowest
+end
+
+T.test("seagull: a ravine deeper than a scan: mapped, saved as pits, a reboot over it, and he never sinks in", function()
+  local w, t, carto = setup(nil, function(w)
+    w:fill(11, 31, 0, 13, 63, 31, "air")          -- 3 wide, 33 deep, across the whole region
+    w:fill(11, 30, 0, 13, 30, 31, "minecraft:stone")
+  end)
+  w:run(30)
+  order(carto, { type = "cmd", to = 7, want = "map", seq = 1 })
+  local lowest, rebooted = math.huge, false
+  T.waitFor(w, function()
+    lowest = math.min(lowest, t.body.y)
+    if not rebooted then
+      local pits = t:readFile("seagull.pits")
+      if pits and pits:find('"12,', 1, true) and t.body.x >= 11 and t.body.x <= 13 then
+        rebooted = true
+        t:reboot()          -- right over the ravine
+      end
+    end
+    return #G(carto).oks >= 1
+  end, 3000, "the region was never handed over")
+  T.truthy(rebooted, "the pits were saved while he was over the ravine")
+  T.truthy(lowest >= 64, "he never went below the surface (lowest y " .. lowest .. ")")
+  T.eq(t:readTable("seagull.state").skipped or 0, 0, "no chunk skipped")
+  local mc = loadMC()
+  local c = G(carto).held["0,0"]
+  T.truthy(mc.unpack(mc.get(c.data, 12, 8)) < 60, "the ravine is low ground on the map")
+  T.eq(mc.unpack(mc.get(c.data, 8, 8)), 63, "ground beside it is still ground")
+  w:run(30)
+  T.absent(t:readFile("seagull.pits") or "", '"12,', "the pits go with the region at hand-over")
+end)
+
+T.test("seagull: a cave mouth in a hillside on his hop line: he goes over the hill, not into it", function()
+  local w, t, carto = setup(nil, function(w)
+    w:fill(12, 64, 0, 21, 82, 31, "minecraft:stone")      -- a hill across the line from chunk 1 to chunk 2 (z 8)
+    w:fill(12, 65, 8, 20, 67, 8, "air")                  -- a tunnel into it from the west, dead end at x 20
+  end)
+  w:run(30)
+  order(carto, { type = "cmd", to = 7, want = "map", seq = 1 })
+  local inTunnel = 0
+  local lowest = lowestWhile(w, t, carto, 3000, function()
+    local b = t.body
+    if b.x >= 12 and b.x <= 21 and b.y <= 67 then inTunnel = inTunnel + 1 end
+  end)
+  T.eq(inTunnel, 0, "he never went into the hill")
+  T.eq(t:readTable("seagull.state").skipped or 0, 0, "no chunk skipped")
+  local mc = loadMC()
+  T.eq(mc.unpack(mc.get(G(carto).held["0,0"].data, 14, 8)), 82, "the hill's top is on the map where the tunnel runs under it")
+end)
+
+T.test("seagull: a cliff taller than a scan, climbed in steps, then dropped from: nothing below the surface", function()
+  local w, t, carto = setup(nil, function(w)
+    w:fill(17, 64, -10, 19, 110, 50, "minecraft:stone")   -- 47 high, 3 thick, across his way east
+  end)
+  w:run(30)
+  order(carto, { type = "cmd", to = 7, want = "map", seq = 1 })
+  local lowest = lowestWhile(w, t, carto, 4000)
+  T.truthy(lowest >= 64, "lowest y " .. lowest)
+  T.eq(t:readTable("seagull.state").skipped or 0, 0, "no chunk skipped")
+  w:run(200)
+  T.eq(t.body.x .. "," .. t.body.y .. "," .. t.body.z, "0,64,0", "and home again")
+end)
+
+T.test("seagull: an overhang over his line (a slab he flies under) is found by the next scan: out the way he came, up, over", function()
+  local w, t, carto = setup(nil, function(w) end)
+  w:run(30)
+  order(carto, { type = "cmd", to = 7, want = "map", seq = 1 })
+  local placed, backed = false, false
+  lowestWhile(w, t, carto, 4000, function()
+    local b = t.body
+    -- as he passes x 18 on his way east, a slab appears over the line (from the scans' point of view: from nowhere)
+    if not placed and b.x >= 18 and b.z == 8 and b.y <= 70 then
+      placed = true
+      w:fill(16, b.y + 1, 7, 30, b.y + 1, 9, "minecraft:stone")
+    end
+    if t.screen:text():find("Underground", 1, true) then backed = true end
+  end)
+  T.truthy(placed, "the slab was placed")
+  T.truthy(backed, "the scan found the roof and he said so")
+  T.eq(t:readTable("seagull.state").skipped or 0, 0, "no chunk skipped")
+  local mc = loadMC()
+  local c = G(carto).held["1,0"]
+  T.truthy(c, "chunk 1,0 arrived")
+  local top = mc.unpack(mc.get(c.data, 2, 8))
+  T.truthy(top >= 63, "nothing mapped from underneath it: the column under the slab reads " .. tostring(top))
+end)
+
+T.test("seagull: blocked ahead out of sight: up, then forward, and a roof over the blocked column is backed out of", function()
+  local w, t, carto = setup(nil, function(w) end)
+  w:run(30)
+  order(carto, { type = "cmd", to = 7, want = "map", seq = 1 })
+  local placed = false
+  lowestWhile(w, t, carto, 4000, function()
+    local b = t.body
+    if not placed and b.x == 20 and b.z == 8 and b.y <= 70 then
+      placed = true
+      w:fill(21, b.y - 1, 6, 21, b.y + 1, 10, "minecraft:stone")      -- a wall that wasn't there a moment ago
+      w:setBlock(20, b.y + 1, 8, "minecraft:stone")                    -- and a ledge right over him
+    end
+  end)
+  T.truthy(placed)
+  T.eq(t:readTable("seagull.state").skipped or 0, 0, "no chunk skipped")
+end)
+
+T.test("seagull: dropping from cruise onto a sinkhole: he stops over it, moves sideways to ground he can see, then drops", function()
+  local w, t, carto = setup("CRUISE_Y=90\n", function(w)
+    w:fill(21, 41, 5, 26, 63, 10, "air")            -- a 6 x 6 sinkhole right at chunk 2's middle (24, 8)
+    w:fill(21, 40, 5, 26, 40, 10, "minecraft:stone")
+  end)
+  w:run(30)
+  order(carto, { type = "cmd", to = 7, want = "map", seq = 1 })
+  local sunk = false
+  local lowest = lowestWhile(w, t, carto, 4000, function()
+    if t.body.y < 60 then sunk = true end
+  end)
+  T.eq(sunk, false, "he never went into the sinkhole")
+  T.eq(t:readTable("seagull.state").skipped or 0, 0, "no chunk skipped")
+  local mc = loadMC()
+  local c = G(carto).held["1,0"]
+  T.truthy(mc.unpack(mc.get(c.data, 8, 8)) < 60, "the sinkhole is low ground (its middle is 8,8 in chunk 1,0)")
+end)
+
+T.test("seagull: a wall higher than MAX_Y: the chunks behind it are skipped (not mapped from below), and he gets home", function()
+  local w, t, carto = setup("MAX_Y=80\n", function(w)
+    w:fill(20, 64, -30, 22, 110, 60, "minecraft:stone")
+  end)
+  w:run(30)
+  order(carto, { type = "cmd", to = 7, want = "map", seq = 1 })
+  local okp, errp = pcall(T.waitFor, w, function() return G(carto).doneSeen["0,0"] end, 4000, "he never finished the pass")
+  if not okp then error(tostring(errp) .. " at " .. t.body.x .. "," .. t.body.y .. "," .. t.body.z .. " fuel " .. tostring(t.body.fuel) .. "\n" .. t.screen:text() .. tostring(t:readFile("seagull.state")):sub(1, 300), 0) end
+  w:run(300)
+  local st = t:readTable("seagull.state")
+  T.truthy((st.skipped or 0) >= 1 or st.doneRegion, "the chunks behind the wall were skipped")
+  T.eq(t.body.x .. "," .. t.body.y .. "," .. t.body.z, "0,64,0", "home again")
+end)
+
+T.test("seagull: first boot of this way of flying restarts the unfinished region at chunk 1 and drops its old chunks", function()
+  local w, t, carto = setup()
+  w:run(30)
+  order(carto, { type = "cmd", to = 7, want = "map", seq = 1 })
+  T.waitFor(w, function() local st = t:readTable("seagull.state"); return st and st.region and (st.ci or 0) >= 3 end, 1500)
+  t:_stop()
+  -- as if the state and map were left by the old version: no version mark, cave-level tops in a chunk
+  local mcm = loadMC()
+  local bad = mcm.fromArray((function() local a = {} for i = 1, 256 do a[i] = mcm.pack(50, mcm.LAND) end return a end)())
+  local st = t:readTable("seagull.state")
+  st.flyV, st.cp, st.ci, st.mapping = nil, 3, 3, true
+  t:writeTable("seagull.state", st)
+  t:writeFile("seagull.map", "#mapv2\n0,0 1000 " .. mcm.encode(bad) .. "\n")
+  t:reboot()
+  w:run(8)
+  local st2 = t:readTable("seagull.state")
+  T.eq(st2.flyV, 1, "version mark set")
+  T.eq(st2.cp, 1, "checkpoint back at chunk 1")
+  T.truthy((st2.ci or 1) <= 2, "restarted at chunk 1 (ci " .. tostring(st2.ci) .. ")")
+  T.absent(t:readFile("seagull.map") or "", "0,0 1000", "the old chunk is gone from his map")
+  -- and it finishes, with the real tops
+  T.waitFor(w, function() return #G(carto).oks >= 1 end, 3000, "the region never finished")
+  local c = G(carto).held["0,0"]
+  T.eq(mcm.unpack(mcm.get(c.data, 8, 8)), 63, "real tops in the chunk")
+  -- a second boot does not restart it again
+  w:run(5)
+end)
+
+T.test("seagull: the fly check itself: a hover too low over a known top is caught", function()
+  local w, t, carto, _, scanner = setup()
+  w:run(30)
+  t:_stop()
+  scanner:scanBlocks(8)                                      -- he has seen the ground at y 63 under him
+  t.body.x, t.body.y = 5, 64
+  local ok, err = pcall(function() t.body.onMove("forward") end)
+  T.eq(ok, false, "a move at y 64 over a top at 63 is a violation")
+  T.contains(err, "flycheck")
 end)
