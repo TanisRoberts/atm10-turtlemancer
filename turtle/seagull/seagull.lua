@@ -694,7 +694,18 @@ local function reportDock()
   local x, y, z = S.home.x, S.home.y, S.home.z
   if d == "up" then y = y + 1 elseif d == "down" then y = y - 1 else x, z = x + DX[d], z + DZ[d] end
   core.dock.set({ x = x, y = y, z = z }, d)
-  core.dock.maybeReport({ role = "cartographer" })
+  local ack, why = core.dock.maybeReport({ role = "cartographer" })
+  -- Say on his screen how it went (once per change), so a dock missing from Storage's /assign list can be traced
+  local text
+  if ack then
+    text = ack.assigned and ("Storage has my dock (" .. ack.assigned .. ")")
+      or ("Dock %d %d %d reported to Storage: link it in /assign, Dock line"):format(x, y, z)
+  elseif why == "no answer" then
+    text = "Storage didn't answer my dock report: is it on, with an ender modem? Trying again in 3 min"
+  elseif why == "no modem" then
+    text = "Dock report: no modem open"
+  end
+  if text and text ~= S.lastReportText then S.lastReportText = text; log(text) end
 end
 
 ---------------------------------------------------------------------------

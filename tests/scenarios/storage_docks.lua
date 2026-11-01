@@ -148,3 +148,34 @@ T.test("storage docks: a miner's dock report is answered but never listed (its F
   local saved = c:readTable("storage.cfg")
   T.eq(saved.dockReports and saved.dockReports["Canary-01"], nil, "not remembered")
 end)
+
+T.test("storage docks: the real Seagull on a chest below him reports his dock to the real Storage", function()
+  local w, c, inv = base()
+  local chest = cc.Inv.new{ size = 27, types = { "enderstorage:ender_chest", "inventory" } }
+  w:setBlock(0, 63, 5, "enderstorage:ender_chest", chest)
+  chest:give("minecraft:lava_bucket", 4)
+  c:run("storage"); w:run(5)
+  local t = w:turtle{ id = 7, label = "Seagull-01", x = 0, y = 64, z = 5, facing = 0, fuel = 0,
+                      right = "computercraft:wireless_modem_advanced" }
+  t:installRole("seagull")
+  t:attach("right", cc.wireless{ ender = true })
+  t:run("seagull"); w:run(60)
+  local rep = (c:readTable("storage.cfg").dockReports or {})["Seagull-01"]
+  T.eq(rep ~= nil, true, "Storage heard Seagull's dock report. Seagull's screen:\n" .. t.screen:text())
+  if rep then T.eq(rep.x .. "," .. rep.y .. "," .. rep.z, "0,63,5"); T.eq(rep.role, "cartographer") end
+  T.contains(t.screen:text(), "reported to Storage", "Seagull says so on his screen")
+end)
+
+T.test("storage docks: Seagull says on his screen when Storage doesn't answer his dock report", function()
+  local w = cc.world()
+  w.gpsOn = true
+  local chest = cc.Inv.new{ size = 27, types = { "enderstorage:ender_chest", "inventory" } }
+  w:setBlock(0, 63, 5, "enderstorage:ender_chest", chest)
+  chest:give("minecraft:lava_bucket", 4)
+  local t = w:turtle{ id = 7, label = "Seagull-01", x = 0, y = 64, z = 5, facing = 0, fuel = 0,
+                      right = "computercraft:wireless_modem_advanced" }
+  t:installRole("seagull")
+  t:attach("right", cc.wireless{ ender = true })
+  t:run("seagull"); w:run(60)
+  T.contains(t.screen:text(), "Storage didn't answer")
+end)
