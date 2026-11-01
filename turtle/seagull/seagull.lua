@@ -890,7 +890,7 @@ local function finishRegion()
   local r = S.region
   local rk = regionKey(r)
   S.mapping = false
-  S.doneRegion = r
+  S.doneRegion = { r[1], r[2] }      -- a copy: the state file can't hold the same table twice (textutils)
   saveMap(true); save()
   for k in pairs(chunks) do
     if inRegion(k, r) then dirtyKeys[k] = true end

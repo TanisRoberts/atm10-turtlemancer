@@ -35,8 +35,11 @@ end
 local function serialize(v, seen)
   local t = type(v)
   if t == "table" then
+    -- Like CC:Tweaked's textutils: a table may appear only once, even when it is no loop
     seen = seen or {}
-    if seen[v] then error("Cannot serialize table with repeated entries", 0) end
+    if seen[v] ~= nil then
+      error(seen[v] and "Cannot serialize table with recursive entries" or "Cannot serialize table with repeated entries", 0)
+    end
     seen[v] = true
     local parts, n = {}, #v
     for i = 1, n do parts[#parts + 1] = serialize(v[i], seen) end
@@ -50,7 +53,7 @@ local function serialize(v, seen)
       if type(k) == "string" and k:match("^[%a_][%w_]*$") then ks = k else ks = "[" .. serialize(k, seen) .. "]" end
       parts[#parts + 1] = ks .. "=" .. serialize(v[k], seen)
     end
-    seen[v] = nil
+    seen[v] = false
     return "{" .. table.concat(parts, ",") .. "}"
   elseif t == "string" then return ("%q"):format(v)
   elseif t == "number" then
