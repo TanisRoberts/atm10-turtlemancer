@@ -273,6 +273,36 @@ T.test("seagull: a cliff taller than a scan with a ledge sticking out: he backs 
   T.eq(t.body.x .. "," .. t.body.y .. "," .. t.body.z, "0,64,0", "and home again, back over the cliff")
 end)
 
+-- A wall wider than a scan and taller than he may fly (MAX_Y=80): he must go round its end. One wide scan as the
+-- detour starts (#112) lets the A* see the end and plan round it in one go.
+local function wallRun(extra, half)
+  local w, t, carto, _, scanner = setup("MAX_Y=80\n" .. extra .. "\n", function(w)
+    w:fill(10, 64, -half, 12, 95, half, "minecraft:stone")
+  end)
+  local wide, normal = 0, 0
+  local real = scanner.scanBlocks
+  scanner.scanBlocks = function(self, r)
+    if r > 8 then wide = wide + 1 else normal = normal + 1 end
+    return real(self, r)
+  end
+  w:run(30)
+  local fuel0 = t.body.fuel
+  order(carto, { type = "cmd", to = 7, want = "map", seq = 1, next = { 1, 0 } })
+  T.waitFor(w, function() return #G(carto).oks >= 1 end, 4000, "region 1,0 was never finished")
+  T.eq(t:readTable("seagull.state").skipped or 0, 0, "no chunk skipped")
+  return { wide = wide, scans = normal, fuel = fuel0 - t.body.fuel }
+end
+
+T.test("seagull: a wall wider than a scan: one wide scan per detour gets him round with fewer scans and moves", function()
+  local half = 22
+  local b = wallRun("DETOUR_RADIUS=8", half)
+  local a = wallRun("DETOUR_RADIUS=16", half)
+  T.eq(b.wide, 0, "DETOUR_RADIUS=8 never scans wide")
+  T.eq(a.wide, 1, "exactly one wide scan, for the one detour")
+  T.truthy(a.scans < b.scans, "fewer normal scans/replans with the wide scan: " .. a.scans .. " vs " .. b.scans)
+  T.truthy(a.fuel < b.fuel, "fewer moves with the wide scan: " .. a.fuel .. " vs " .. b.fuel)
+end)
+
 T.test("seagull: a reboot mid-region carries on with the same region; nothing is skipped", function()
   local w, t, carto = setup()
   w:run(30)

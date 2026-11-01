@@ -41,6 +41,7 @@ local DEFAULTS = {
   { "REGION_CHUNKS", 16, "Chunks along one side of a region. Leave at 16: the Cartographer expects 16 x 16." },
   { "CLEARANCE", 3, "How high above the ground (or trees, water) he flies." },
   { "RADIUS", 8, "Scan radius. 8 is free and covers a whole chunk from its middle; up to 16 costs fuel per scan." },
+  { "DETOUR_RADIUS", 16, "Scan radius for the one wide scan when a detour starts (8 = off, up to 16). Costs fuel past 8, only on detours." },
   { "SHALLOW", 4, "Water this deep or less counts as shallow (lighter blue)." },
   { "FUEL_PCT", 90, "Fuel he tops up to at the dock, as % of his fuel limit (an advanced turtle holds 100,000)." },
   { "DOCK_WAIT", 30, "Seconds he waits at the dock for Storage to bring more fuel before he goes with what he has." },
@@ -88,6 +89,7 @@ local function readEnv()
     if type(d[2]) == "number" then E[d[1]] = tonumber(v) or d[2] else E[d[1]] = v end
   end
   E.RADIUS = math.max(8, math.min(16, math.floor(E.RADIUS)))
+  E.DETOUR_RADIUS = math.max(8, math.min(16, math.floor(E.DETOUR_RADIUS)))
   E.REGION_CHUNKS = math.max(1, math.floor(E.REGION_CHUNKS))
   envStamp = stampOf(ENV_FILE)
 end
@@ -463,12 +465,16 @@ local navIO = {
     end
     return ok, why
   end,
-  scan = function() return scan() end,
+  scan = function() return scan() end,   -- (no argument: normal radius)
 }
 local function detour(tx, tz, onHop)
   navIO.maxY, navIO.onStep = E.MAX_Y, onHop
   local dist = math.abs(tx - pos.x) + math.abs(tz - pos.z)
-  for _, reach in ipairs({ E.RADIUS, 4, 1 }) do
+  -- One wide scan as the detour starts (not on replans inside it): enough picture to plan round a big cliff in
+  -- one go. If it fails (fuel, cooldown) he carries on with what he has.
+  local wide = E.DETOUR_RADIUS > E.RADIUS and scan(E.DETOUR_RADIUS) and E.DETOUR_RADIUS or E.RADIUS
+  navIO.margin = wide > E.RADIUS and wide + 8 or nil   -- room to plan round what the wide scan showed
+  for _, reach in ipairs({ wide, E.RADIUS, 4, 1 }) do
     local gx, gz = tx, tz
     if dist > reach then
       gx = pos.x + math.floor((tx - pos.x) * reach / dist + 0.5)
@@ -539,18 +545,20 @@ local function findScanner()
   return scanner
 end
 
-scan = function()
+scan = function(radius)
   if not scanner and not findScanner() then return false, "No Geo Scanner" end
+  local R = radius or E.RADIUS
   for _ = 1, 12 do
-    local ok, res, err = pcall(scanner.scanBlocks, E.RADIUS)
+    local ok, res, err = pcall(scanner.scanBlocks, R)
     if ok and type(res) == "table" then
-      absorb(res, pos.x, pos.y, pos.z, E.RADIUS)
-      route.observe(res, pos.x, pos.y, pos.z, E.RADIUS)
-      lastScanAt = { x = pos.x, y = pos.y, z = pos.z, r = E.RADIUS, t = now() }
+      absorb(res, pos.x, pos.y, pos.z, R)
+      route.observe(res, pos.x, pos.y, pos.z, R)
+      if not radius then lastScanAt = { x = pos.x, y = pos.y, z = pos.z, r = R, t = now() } end
       return true
     end
     local why = tostring(ok and err or res)
     if why:lower():find("fuel") then return false, "Scanner needs fuel: lower RADIUS to 8" end
+    if radius then return false, why end   -- the wide scan is a bonus: no waiting
     if not why:lower():find("cool") then
       -- Unknown problem: the peripheral may have gone away
       findScanner()

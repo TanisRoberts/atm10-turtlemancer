@@ -8,7 +8,7 @@
 --   nav.covered(x, y, z)                         true when a known solid block is above that cell (a roof, a ledge)
 --   nav.escape(io) -> true | false, why          from under a roof to open sky (known cells, then exploring)
 -- io = { pos = fn -> {x,y,z}, move = fn(dir) -> ok, why  (dir 0-3 compass, "up", "down"), scan = fn -> ok,
---        maxY = n, onStep = fn | nil }
+--        maxY = n, onStep = fn | nil, margin = n | nil (search box round start and goal, default 10) }
 
 return function()
   local N = {}
@@ -64,6 +64,15 @@ return function()
       for k in pairs(colMax) do
         local x, z = k:match("^(-?%d+),(-?%d+)$")
         if math.abs(x - ox) > 40 or math.abs(z - oz) > 40 then colMax[k] = nil end
+      end
+      -- Wide (radius 16) scans can still leave a lot: keep only what is near the newest one
+      local m = 0
+      for _ in pairs(solid) do m = m + 1 end
+      if m > 40000 then
+        for k in pairs(solid) do
+          local x, y, z = k:match("^(-?%d+),(-?%d+),(-?%d+)$")
+          if math.abs(x - ox) > 24 or math.abs(z - oz) > 24 or math.abs(y - oy) > 24 then solid[k] = nil end
+        end
       end
     end
   end
@@ -178,7 +187,7 @@ return function()
       if io.scan and (not lastScan or math.abs(p.x - lastScan.x) + math.abs(p.y - lastScan.y) + math.abs(p.z - lastScan.z) >= 4) then
         io.scan(); lastScan = { x = p.x, y = p.y, z = p.z }
       end
-      local path = N.path(p, goal, { maxY = io.maxY, minY = io.minY })
+      local path = N.path(p, goal, { maxY = io.maxY, minY = io.minY, margin = io.margin })
       if not path then return false, "no way" end
       local surprised, rescan = false, false
       for _, st in ipairs(path) do
