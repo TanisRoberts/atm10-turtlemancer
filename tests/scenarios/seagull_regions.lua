@@ -313,20 +313,82 @@ T.test("seagull: without region_ok he keeps the region and says it again", funct
   T.eq(t:readTable("seagull.state").doneRegion, nil)
 end)
 
-T.test("seagull: a pit deeper than one scan reaches gets a second scan, so no column stays unseen", function()
-  local w, t, carto, dock, scanner = setup()
-  -- a 4 x 4 pit in chunk 0,0 down to y 40: the centre scan (y 59..75) cannot see its floor
-  w:fill(12, 41, 4, 15, 63, 7, "air")
-  w:fill(12, 40, 4, 15, 40, 7, "minecraft:stone")
+local MCENV = { string = string, math = math, table = table, pairs = pairs, ipairs = ipairs, tostring = tostring, tonumber = tonumber, type = type, fs = {}, select = select, pcall = pcall, error = error, setmetatable = setmetatable }
+local function loadMC() return assert(loadfile(cc.ROOT .. "/shared/mapchunk.lua", "t", MCENV))() end
+
+-- Anything solid above (x, y, z) up to 40 blocks: he is under a roof
+local function roofed(w, b)
+  for k = 1, 40 do
+    local blk = w:getBlock(b.x, b.y + k, b.z)
+    if blk and blk.name ~= "minecraft:air" then return true end
+  end
+  return false
+end
+
+T.test("seagull: a pit and a ravine deeper than a scan: he flies over, never sinks in, and the hole is low ground on the map", function()
+  local w, t, carto, dock, scanner = setup(nil, function(w)
+    w:fill(12, 41, 4, 15, 63, 7, "air")          -- a 4 x 4 pit down to y 41 (floor y 40, below)
+    w:fill(12, 40, 4, 15, 40, 7, "minecraft:stone")
+    w:fill(3, 41, 0, 4, 63, 15, "air")           -- a ravine 2 wide across the whole chunk
+    w:fill(3, 40, 0, 4, 40, 15, "minecraft:stone")
+  end)
   w:run(30)
   order(carto, { type = "cmd", to = 7, want = "map", seq = 1 })
-  T.waitFor(w, function() return #G(carto).oks >= 1 end, 2000)
+  local lowest = math.huge
+  T.waitFor(w, function()
+    lowest = math.min(lowest, t.body.y)
+    return #G(carto).oks >= 1
+  end, 2500)
+  T.truthy(lowest >= 64, "he never went below the surface round the holes (lowest y " .. lowest .. ")")
   local c = G(carto).held["0,0"]
   T.truthy(c, "chunk 0,0 arrived")
-  local mc = assert(loadfile(cc.ROOT .. "/shared/mapchunk.lua", "t", { string = string, math = math, table = table, pairs = pairs, ipairs = ipairs, tostring = tostring, tonumber = tonumber, type = type, fs = {}, select = select, pcall = pcall, error = error, setmetatable = setmetatable }))()
-  local unseen = 0
-  for _, v in ipairs(mc.toArray(c.data)) do if v == 0 then unseen = unseen + 1 end end
-  T.eq(unseen, 0, "every column of the chunk is known")
+  local mc = loadMC()
+  for _, v in ipairs(mc.toArray(c.data)) do if v == 0 then T.truthy(false, "an unseen column"); break end end
   local y = mc.unpack(mc.get(c.data, 13, 5))
-  T.eq(y, 40, "the pit floor is on the map")
+  T.truthy(y < 60, "the pit shows as low ground (y " .. tostring(y) .. ")")
+  local r = mc.unpack(mc.get(c.data, 3, 8))
+  T.truthy(r < 60, "so does the ravine (y " .. tostring(r) .. ")")
+  T.eq(mc.unpack(mc.get(c.data, 8, 8)), 63, "ground beside them is still ground")
+  T.eq(t:readTable("seagull.state").skipped or 0, 0, "no chunk skipped")
+end)
+
+T.test("seagull: a cave mouth under a cliff: he maps round it without ever going under the rock", function()
+  local w, t, carto = setup(nil, function(w)
+    w:fill(8, 64, 8, 11, 75, 11, "minecraft:stone")   -- a cliff standing on the ground
+    w:fill(5, 50, 9, 11, 63, 10, "air")               -- a cave under it, open to the sky at x 5..7
+  end)
+  w:run(30)
+  order(carto, { type = "cmd", to = 7, want = "map", seq = 1 })
+  local under, lowest = 0, math.huge
+  T.waitFor(w, function()
+    if roofed(w, t.body) then under = under + 1 end
+    lowest = math.min(lowest, t.body.y)
+    return #G(carto).oks >= 1
+  end, 2500)
+  T.eq(under, 0, "never a roof above him")
+  T.truthy(lowest >= 64, "never below the surface (lowest y " .. lowest .. ")")
+  T.eq(t:readTable("seagull.state").skipped or 0, 0, "no chunk skipped")
+  local mc = loadMC()
+  T.truthy(mc.unpack(mc.get(G(carto).held["0,0"].data, 6, 9)) < 60, "the cave mouth is low ground")
+  T.eq(mc.unpack(mc.get(G(carto).held["0,0"].data, 9, 9)), 75, "the cliff top is on the map")
+end)
+
+T.test("seagull: rebooted deep in a cave he climbs out to open sky, says so, and goes home", function()
+  local w, t, carto = setup(nil, function(w)
+    w:fill(20, 64, -4, 44, 78, 12, "minecraft:stone")    -- a hill with the dock side open to the west
+    w:fill(20, 65, 4, 40, 67, 4, "air")                  -- a tunnel from its west face into the hill, dead end at x 40
+  end)
+  w:run(30)
+  t:_stop()
+  t.body.x, t.body.y, t.body.z = 38, 66, 4
+  t:reboot(); t:run("seagull")
+  local sawMsg, roof = false, false
+  local ok = pcall(T.waitFor, w, function()
+    if t.screen:text():find("Underground") then sawMsg = true end
+    return t.body.x == 0 and t.body.y == 64 and t.body.z == 0
+  end, 1500)
+  T.truthy(ok, "he never got home: at " .. t.body.x .. "," .. t.body.y .. "," .. t.body.z .. " " .. t.screen:text():sub(1, 300))
+  T.truthy(sawMsg, "the screen said he was underground")
+  w:run(30)
+  T.contains(t.screen:text(), "Ready")
 end)

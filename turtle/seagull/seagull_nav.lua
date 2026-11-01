@@ -5,12 +5,15 @@
 --   local nav = dofile("seagull_nav.lua")()
 --   nav.observe(blocks, ox, oy, oz, r)          every scan (block offsets as the scanner gives them)
 --   nav.go(goal, io) -> true | false, why        walk to goal = { x, y, z } (or as near as it says in why)
+--   nav.covered(x, y, z)                         true when a known solid block is above that cell (a roof, a ledge)
+--   nav.escape(io) -> true | false, why          from under a roof to open sky (known cells, then exploring)
 -- io = { pos = fn -> {x,y,z}, move = fn(dir) -> ok, why  (dir 0-3 compass, "up", "down"), scan = fn -> ok,
 --        maxY = n, onStep = fn | nil }
 
 return function()
   local N = {}
   local solid = {}            -- ["x,y,z"] = true: a block he can't fly through
+  local colMax = {}           -- ["x,z"] = highest known solid y in that column (for "is something above this cell?")
   local boxes = {}            -- the last few scanned cubes { x, y, z, r }: inside one, a cell that isn't solid is air
   local MAX_BOXES = 12
   local DX = { [0] = 0, 1, 0, -1 }
@@ -28,11 +31,21 @@ return function()
 
   function N.observe(blocks, ox, oy, oz, r)
     -- Everything inside the scanned cube is now known: clear it, then mark what is there
-    for dx = -r, r do for dy = -r, r do for dz = -r, r do solid[key(ox + dx, oy + dy, oz + dz)] = nil end end end
+    for dx = -r, r do
+      for dz = -r, r do
+        for dy = -r, r do solid[key(ox + dx, oy + dy, oz + dz)] = nil end
+        local ck = (ox + dx) .. "," .. (oz + dz)
+        if colMax[ck] and colMax[ck] <= oy + r then colMax[ck] = nil end   -- a solid above the cube stays
+      end
+    end
     for _, b in ipairs(blocks or {}) do
       if type(b) == "table" and type(b.name) == "string" and not passable(b.name) then
         local x, y, z = math.floor(b.x + 0.5), math.floor(b.y + 0.5), math.floor(b.z + 0.5)
-        if not (x == 0 and y == 0 and z == 0) then solid[key(ox + x, oy + y, oz + z)] = true end
+        if not (x == 0 and y == 0 and z == 0) then
+          solid[key(ox + x, oy + y, oz + z)] = true
+          local ck = (ox + x) .. "," .. (oz + z)
+          if not colMax[ck] or oy + y > colMax[ck] then colMax[ck] = oy + y end
+        end
       end
     end
     table.insert(boxes, 1, { x = ox, y = oy, z = oz, r = r })
@@ -48,11 +61,24 @@ return function()
         local x, y, z = k:match("^(-?%d+),(-?%d+),(-?%d+)$")
         if math.abs(x - ox) > 40 or math.abs(z - oz) > 40 or math.abs(y - oy) > 40 then solid[k] = nil end
       end
+      for k in pairs(colMax) do
+        local x, z = k:match("^(-?%d+),(-?%d+)$")
+        if math.abs(x - ox) > 40 or math.abs(z - oz) > 40 then colMax[k] = nil end
+      end
     end
   end
 
   function N.isSolid(x, y, z) return solid[key(x, y, z)] == true end
-  function N.markSolid(x, y, z) solid[key(x, y, z)] = true end
+  function N.markSolid(x, y, z)
+    solid[key(x, y, z)] = true
+    local ck = x .. "," .. z
+    if not colMax[ck] or y > colMax[ck] then colMax[ck] = y end
+  end
+  -- Something solid is known above this cell: a cave roof, an overhang. Only the scanned cubes tell.
+  function N.covered(x, y, z)
+    local m = colMax[x .. "," .. z]
+    return m ~= nil and m > y
+  end
   function N.known(x, y, z)
     for _, b in ipairs(boxes) do
       if math.abs(x - b.x) <= b.r and math.abs(y - b.y) <= b.r and math.abs(z - b.z) <= b.r then return true end
@@ -126,7 +152,7 @@ return function()
           if x >= x0 and x <= x1 and z >= z0 and z <= z1 and y >= y0 and y <= y1 then
             local k = key(x, y, z)
             if not solid[k] then
-              local cost = c.g + (N.known(x, y, z) and 1 or 3)
+              local cost = c.g + (N.known(x, y, z) and 1 or 3) + (N.covered(x, y, z) and 12 or 0)   -- go over, not under
               if not best[k] or cost < best[k] then
                 best[k] = cost
                 from[k] = { x = x, y = y, z = z, dir = st[4], prev = c.k }
@@ -178,6 +204,63 @@ return function()
         if tries > 12 then return false, "stuck" end
       end
     end
+  end
+
+  ---------------------------------------------------------------------------
+  -- Out from under a roof. Nearest known cell with open sky above it (a clear column of 6 in the last scans);
+  -- if there is none, the nearest edge of what he has scanned (up is cheap), go there, scan, again.
+  ---------------------------------------------------------------------------
+  local function search(s, pred)
+    local open, best, n = {}, { [key(s.x, s.y, s.z)] = 0 }, 0
+    heapPush(open, { x = s.x, y = s.y, z = s.z, f = 0 })
+    while #open > 0 do
+      local c = heapPop(open)
+      local ck = key(c.x, c.y, c.z)
+      if c.f == best[ck] then
+        if pred(c.x, c.y, c.z) then return c end
+        n = n + 1
+        if n > 8000 then return nil end
+        for _, st in ipairs(STEPS) do
+          local x, y, z = c.x + st[1], c.y + st[2], c.z + st[3]
+          local k = key(x, y, z)
+          if not solid[k] and N.known(x, y, z) then
+            local cost = c.f + (st[2] > 0 and 0.7 or st[2] < 0 and 1.4 or 1)
+            if not best[k] or cost < best[k] then
+              best[k] = cost
+              heapPush(open, { x = x, y = y, z = z, f = cost })
+            end
+          end
+        end
+      end
+    end
+    return nil
+  end
+
+  function N.escape(io, rounds)
+    local visited = {}
+    local function sky(x, y, z) return N.known(x, y + 6, z) and not N.covered(x, y, z) end
+    local function edge(x, y, z)
+      if visited[key(x, y, z)] then return false end
+      for _, st in ipairs(STEPS) do
+        local x2, y2, z2 = x + st[1], y + st[2], z + st[3]
+        if not solid[key(x2, y2, z2)] and not N.known(x2, y2, z2) then return true end
+      end
+      return false
+    end
+    for _ = 1, rounds or 40 do
+      local p = io.pos()
+      if sky(p.x, p.y, p.z) then return true end
+      local g = search(p, sky)
+      if not g then
+        g = search(p, edge)
+        if not g then return false, "no way out" end
+        visited[key(g.x, g.y, g.z)] = true
+      end
+      local ok, why = N.go({ x = g.x, y = g.y, z = g.z }, io)
+      if not ok and (why == "unloaded" or why == "fuel") then return false, why end
+      if io.scan then io.scan() end
+    end
+    return false, "stuck"
   end
 
   N.DX, N.DZ = DX, DZ

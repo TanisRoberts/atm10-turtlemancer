@@ -199,6 +199,11 @@ local function isFluff(b)
   return n:find("torch") ~= nil or n:find("carpet") ~= nil
 end
 
+-- Columns over a hole deeper than a scan reaches (ravine, sinkhole, cave mouth): ["x,z"] = the height to fly over
+-- them at. In memory only. He never sinks into one to look; the map says "low ground" there.
+local pits, pitCount = {}, 0
+local lastSeen = 0       -- columns of the last scan's cube that had a block in them
+
 local function round(v) return math.floor((tonumber(v) or 0) + 0.5) end
 
 -- Turn one scan into column tops and write them into the map
@@ -220,6 +225,7 @@ local function absorb(blocks, ox, oy, oz, R)
     end
   end
   local touched = {}
+  local seen = 0
   local function setCol(x, z, v, forceIt)
     local cx, cz, lx, lz = mc.locate(x, z)
     local key = mc.key(cx, cz)
@@ -258,6 +264,22 @@ local function absorb(blocks, ox, oy, oz, R)
         end
         -- The cube reaches R above us: a top at the very edge may continue higher
         setCol(x, z, mc.pack(oy + c.top, kind), c.top < R)
+      end
+    end
+  end
+  -- Some ground in the cube but not in these columns: they are a hole, not far-off ground. Mark them low (below the
+  -- cube) and remember the height he flew over them at, so a second scan never sends him down to look.
+  for _ in pairs(cols) do seen = seen + 1 end
+  lastSeen = seen
+  if seen > 0 and seen * 3 >= (2 * R + 1) ^ 2 then
+    for dx = -R, R do
+      for dz = -R, R do
+        if not cols[(dx + 32) * 64 + (dz + 32)] and topAt(ox + dx, oz + dz) == nil then
+          setCol(ox + dx, oz + dz, mc.pack(oy - R - 1, mc.LAND))
+          if pitCount > 4000 then pits, pitCount = {}, 0 end
+          pits[(ox + dx) .. "," .. (oz + dz)] = oy - 1 - E.CLEARANCE
+          pitCount = pitCount + 1
+        end
       end
     end
   end
@@ -349,6 +371,8 @@ local function groundNear(x, z, r)
   for dx = -r, r do
     for dz = -r, r do
       local t = topAt(x + dx, z + dz)
+      local pt = pits[(x + dx) .. "," .. (z + dz)]
+      if pt and (not t or pt > t) then t = pt end
       if t and (not best or t > best) then best = t end
     end
   end
@@ -536,10 +560,33 @@ scan = function()
   return false, "Scanner keeps failing"
 end
 
+-- Never under a roof. If a scan shows anything solid above him (a cave, an overhang), or he is far below the known
+-- top of his column, get out to open sky before doing anything else (seagull_nav's escape).
+local function openSky()
+  local t = topAt(pos.x, pos.z)
+  local roof = route.covered(pos.x, pos.y, pos.z)
+  if not roof and not (t and pos.y < t - E.RADIUS) then return true end
+  local st0, note0 = status, note
+  setStatus("error", ("Underground at %d %d %d, climbing out"):format(pos.x, pos.y, pos.z))
+  navIO.maxY, navIO.onStep = E.MAX_Y, nil
+  local ok, why = route.escape(navIO)
+  if ok and not roof and t then       -- no roof in the scans but far below the known ground: straight up
+    while pos.y < t + 1 + E.CLEARANCE and up() do end
+  end
+  if not ok then
+    setStatus("error", ("Underground at %d %d %d, no way out (%s)"):format(pos.x, pos.y, pos.z, tostring(why)))
+    return false, "Underground at " .. pos.x .. " " .. pos.y .. " " .. pos.z
+  end
+  setStatus(st0, note0)
+  return true
+end
+
 -- Scan, and if the ground under him is still out of sight (he climbed over a pylon, or he's never
 -- been here), sink until a scan can see it. Without this he'd stay up high over unknown ground.
 local function scanAndSettle()
   local ok, err = scan()
+  if not ok then return false, err end
+  ok, err = openSky()
   if not ok then return false, err end
   local guard = 0
   while topAt(pos.x, pos.z) == nil and guard < 60 do
@@ -1106,6 +1153,8 @@ local function boot()
     os.sleep(10)
   end
   log(("At %d %d %d facing %s"):format(pos.x, pos.y, pos.z, COMPASS[heading]))
+  -- Rebooted under a roof (a cave)? Out to open sky before anything else
+  if scanner and scan() then openSky() end
   if not S.home then
     local d = findDock()
     while d == nil do
