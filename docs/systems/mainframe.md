@@ -35,7 +35,7 @@ Storage broadcasts `{ type = "reactor_fuel", chests = { { name, label, units, ke
 
 ## Commands
 
-The wall has nothing to type into and the mainframe has no kit screen on its own terminal (that is the shell, where `reset` is typed), so there is no `/command` bar here. Chat (`$island ...`, `$dump`, `$pocket`, `$lock`) is how the mainframe is driven, and it is unchanged: `island status | scan | miner | storage | operator | alerts | test | help | remove_ring | monitors`.
+The wall has nothing to type into and the mainframe has no kit screen on its own terminal (that is the shell, where `reset` is typed), so there is no `/command` bar here. Chat (`$island ...`, `$dump`, `$pocket`, `$lock`) is how the mainframe is driven, and it is unchanged: `island status | scan | miner | storage | seagull | operator | alerts | test | help | remove_ring | monitors`. `island seagull` (also `carto`, `cartographer`) says where Seagull is from the Cartographer's heartbeat (`seagull.pos`, `seagull.at`): live (`Seagull-01 mapping at X Y Z (12 s ago), fuel 54,000. Region rx,rz, chunk 40/256.`), or after 30 s `last heard 14 min ago at X Y Z: <state> <msg>`; with no Cartographer heard in 30 s it says so.
 
 ## Tests
 

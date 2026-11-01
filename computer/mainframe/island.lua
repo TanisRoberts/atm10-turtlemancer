@@ -3,6 +3,7 @@
 --
 -- Chat commands (start with $ to keep them out of public chat, e.g. "$island miner"):
 --   island status | scan | miner (every Canary) | storage | operator [reactor] on|off|auto|status | alerts | test | help
+--   island seagull (carto)     where Seagull is, or was last heard (from the Cartographer's heartbeat)
 --   island monitors             forget the saved wall monitor and reboot, which asks again (shared/screens.lua)
 --   island remove_ring [name]   takes a cursed ring out of your Curios slots (ring.lua)
 -- ($dump and $pocket are the butler's: see butler.lua)
@@ -157,6 +158,33 @@ local function minerLine(e)
   return ("%s: %s%s. Y %s, layer %s/%s, ring %s/%s. Fuel %s, cargo %s/16.%s Seen %ds ago."):format(
     minerName(m), v(m.state):upper(), (m.msg and m.msg ~= "") and (" (" .. m.msg .. ")") or "",
     v(m.y), v(m.layer), v(m.layers), v(m.ring), v(m.maxRing), v(m.fuel), v(m.slots), at, ago)
+end
+
+-- Seagull's place, from the Cartographer's heartbeat (seagull.pos / seagull.at = epoch ms of that position)
+local function seagullLine()
+  local cg = _G.CARTOGRAPHER
+  if not cg or os.clock() - (_G.CARTOGRAPHER_SEEN or 0) > 30 then
+    return "No Cartographer on the air, so I can't say where Seagull is."
+  end
+  local sg = cg.seagull
+  if type(sg) ~= "table" then return "The Cartographer hasn't heard Seagull yet." end
+  local name = tostring(sg.label or "Seagull")
+  local p = sg.pos
+  if type(p) ~= "table" or not tonumber(p.x) then return name .. ": no position heard yet (" .. tostring(sg.state or "?") .. ")." end
+  local at = ("%d %d %d"):format(p.x, p.y or 0, p.z)
+  -- seconds since that position: the Cartographer's `heard` counted up to now by how long ago it sent it
+  local ago = math.max(0, math.floor((os.epoch("utc") - (tonumber(sg.at) or 0)) / 1000))
+  local function dur(s) return s < 60 and (s .. " s") or s < 3600 and (math.floor(s / 60) .. " min") or (math.floor(s / 3600) .. " h") end
+  if ago <= 30 then
+    local t = ("%s %s at %s (%s ago)"):format(name, sg.mapping and "mapping" or tostring(sg.state or "?"), at, dur(ago))
+    if sg.fuel then t = t .. ", fuel " .. tostring(sg.fuel):reverse():gsub("(%d%d%d)", "%1,"):reverse():gsub("^,", "") end
+    local rx, rz = math.floor(p.x / 256), math.floor(p.z / 256)
+    t = t .. (". Region %d,%d"):format(rx, rz)
+    if sg.mapping and tonumber(sg.wps) and sg.wps > 0 then t = t .. (", chunk %d/%d"):format(sg.wp or 1, sg.wps) end
+    return t .. "."
+  end
+  return ("%s last heard %s ago at %s: %s%s"):format(name, dur(ago), at, tostring(sg.state or "?"),
+    (sg.msg and sg.msg ~= "") and (" " .. tostring(sg.msg)) or "")
 end
 
 local function storageLine(s)
@@ -433,7 +461,7 @@ end
 ---------------------------------------------------------------------------
 -- Chat commands
 ---------------------------------------------------------------------------
-local HELP = "Commands: island status | scan | miner | storage | weaver | woodpecker | partridge | smelt | plastic | neural | operator | alerts | test | remove_ring | monitors."
+local HELP = "Commands: island status | scan | miner | storage | weaver | woodpecker | partridge | smelt | plastic | neural | seagull | operator | alerts | test | remove_ring | monitors."
   .. " Your inventory: $get [n] <item> | $dump | $pocket"
 
 local function chatLoop()
@@ -521,6 +549,8 @@ local function chatLoop()
           for i = 1, math.min(#lines, 6) do say(lines[i], user) end
           say("Orders: island plastic pause | go", user)
         end
+      elseif cmd == "seagull" or cmd == "carto" or cmd == "cartographer" then
+        say(seagullLine(), user)
       elseif cmd == "neural" or cmd == "lab" then
         local nl = _G.NEURAL
         local sub = tostring(msg):lower():match(cmd .. "%s+(%a+)")

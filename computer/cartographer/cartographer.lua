@@ -537,11 +537,19 @@ local function netLoop()
     end
     if os.clock() - lastBase >= 5 then
       lastBase = os.clock()
-      local sg = st.seagull
+      -- Seagull's entry: the live status, or (after a reboot, none heard yet) the last-heard record. Either way it
+      -- carries his last-heard position `pos` and the epoch ms `at` of it, so the mainframe can say where he is.
+      local sg, l = st.seagull, st.seagullLast
+      local entry
+      if sg then
+        entry = { label = sg.label, state = sg.state, msg = sg.msg, fuel = sg.fuel, wp = sg.wp, wps = sg.wps,
+                  mapping = sg.mapping, heard = math.floor(os.clock() - (st.seagullSeen or 0)) }
+      elseif l then
+        entry = { label = l.label, state = l.state, msg = l.msg, fuel = l.fuel, heard = seagullQuiet() }
+      end
+      if entry and l then entry.pos, entry.at = { x = l.pos.x, y = l.pos.y, z = l.pos.z }, l.at end
       rednet.broadcast({ type = "cartographer", id = os.getComputerID(), label = os.getComputerLabel() or "Cartographer",
-        regions = store:regionCount(), chunks = store:count(),
-        seagull = sg and { label = sg.label, state = sg.state, msg = sg.msg, fuel = sg.fuel, wp = sg.wp, wps = sg.wps,
-                           mapping = sg.mapping, heard = math.floor(os.clock() - (st.seagullSeen or 0)) } or nil,
+        regions = store:regionCount(), chunks = store:count(), seagull = entry,
         scan = st.scan and st.scan.pct }, BASE)
     end
   end
