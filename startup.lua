@@ -183,6 +183,15 @@ local function ownerCheck()
   return false
 end
 
+-- CraftOS shows its message of the day before this file runs: turn it off for every later boot (saved in
+-- .settings, which reset.lua's wipe takes too, so the next boot turns it off again) and clear it off the screen now.
+if settings.get("motd.enable") ~= false then
+  settings.set("motd.enable", false)
+  pcall(settings.save)
+end
+term.setBackgroundColour(colours.black); term.setTextColour(colours.white)
+term.clear(); term.setCursorPos(1, 1)
+
 if not ownerCheck() then return end
 
 -- Keep owner.cfg in step with label changes made on this machine (setup, `label set`, Canaries naming themselves)
