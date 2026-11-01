@@ -355,12 +355,14 @@ local function groundNear(x, z, r)
   return best
 end
 
--- Cruising: outside the region he is mapping (on the way to it or home) he flies at CRUISE_Y or higher.
--- Inside it, CLEARANCE over the ground as usual. Defined further down (needs the region plan).
-local inWorkRegion
+-- He is either scanning (low, CLEARANCE over the ground: the hop to the next chunk, a second scan in a chunk)
+-- or cruising (CRUISE_Y or higher: home, out to a region, back to his chunk after refuelling, a retried chunk).
+-- flyTo sets `cruising` for each flight; once there he drops straight down to the ground to scan.
+local cruising = false
+local SCAN_HOP = 24          -- a flight this long or shorter between scans is part of scanning
 local function floorAt(x, z)
   local c = tonumber(E.CRUISE_Y) or 0
-  if c <= 0 or (inWorkRegion and inWorkRegion(x, z)) then return -math.huge end
+  if c <= 0 or not cruising then return -math.huge end
   return math.min(c, E.MAX_Y)
 end
 
@@ -392,10 +394,21 @@ local function hop(h)
   return false, "stuck"
 end
 
--- Leaving the dock: straight up until he is CLEARANCE above everything round him (a launch tube's walls) and at
--- CRUISE_Y, before any sideways move. Scans again on the way up, as walls can reach past one scan.
+-- Leaving the dock: straight up before any sideways move: to CRUISE_Y, or with no cruising height until he is
+-- CLEARANCE above everything round him (a launch tube's walls; scanned on the way up, walls can reach past a scan).
 local scan   -- defined with the scanning below
 local function launch()
+  -- With a cruising height: straight up to it, no scanning (the sky over the dock is always open)
+  local cruise = tonumber(E.CRUISE_Y) or 0
+  if cruise > 0 then
+    local top = math.min(cruise, E.MAX_Y)
+    while pos.y < top do
+      if turtle.getFuelLevel() == 0 then return false, "fuel" end
+      if not up() then return false, "stuck" end
+    end
+    return true
+  end
+  -- Without one: up until he is CLEARANCE above the tube's walls (scanned on the way up)
   local scannedAt = nil
   for _ = 1, 400 do
     if scanner and (not scannedAt or pos.y - scannedAt >= math.floor(E.RADIUS / 2)) then
@@ -450,8 +463,16 @@ local function detour(tx, tz, onHop)
   return false, "stuck"
 end
 
--- Fly to column (tx, tz), long axis first. onHop is called after every block.
-local function flyTo(tx, tz, onHop)
+-- Fly to column (tx, tz), long axis first. onHop is called after every block. home = true: going home, always
+-- cruising; otherwise cruising unless it is a short hop between scans (SCAN_HOP).
+local flyTo1
+local function flyTo(tx, tz, onHop, home)
+  cruising = home or math.abs(tx - pos.x) + math.abs(tz - pos.z) > SCAN_HOP
+  local ok, why = flyTo1(tx, tz, onHop)
+  cruising = false
+  return ok, why
+end
+flyTo1 = function(tx, tz, onHop)
   if S.home and pos.x == S.home.x and pos.z == S.home.z and (pos.x ~= tx or pos.z ~= tz) then
     local ok, why = launch()
     if not ok then return false, why == "fuel" and "fuel" or "launch" end
@@ -570,13 +591,6 @@ local function regionChunks()
     chunkList, chunkListFor = plan.chunks(S.region[1], S.region[2], E.REGION_CHUNKS, cn[1], cn[2]), k
   end
   return chunkList
-end
-
-inWorkRegion = function(x, z)
-  local r = S.region
-  if not r then return false end
-  local rx, rz = plan.regionOf(math.floor(x / 16), math.floor(z / 16), E.REGION_CHUNKS)
-  return rx == r[1] and rz == r[2]
 end
 
 inRegion = function(key, r)
@@ -790,7 +804,7 @@ end
 
 local function goHome()
   setStatus("returning", "Flying home")
-  local ok, why = flyTo(S.home.x, S.home.z, scanIfUnknown)
+  local ok, why = flyTo(S.home.x, S.home.z, scanIfUnknown, true)
   if not ok then return false, why end
   -- Straight down onto the dock spot (open sky above it, see the top of this file)
   while pos.y > S.home.y do
@@ -807,7 +821,11 @@ local function enoughFuelFor(tx, tz)
   local there = math.abs(tx - pos.x) + math.abs(tz - pos.z) + 2 * E.CLEARANCE + 20
   local back = math.abs(tx - S.home.x) + math.abs(tz - S.home.z) + math.abs(pos.y - S.home.y) + 40
   local cruise = tonumber(E.CRUISE_Y) or 0
-  if cruise > 0 then back = back + 2 * math.max(0, math.min(cruise, E.MAX_Y) - math.min(pos.y, S.home.y)) end
+  if cruise > 0 then         -- up to cruising height and back down, both ways
+    local c = math.min(cruise, E.MAX_Y)
+    back = back + 2 * math.max(0, c - math.min(pos.y, S.home.y))
+    if math.abs(tx - pos.x) + math.abs(tz - pos.z) > SCAN_HOP then there = there + 2 * math.max(0, c - pos.y) end
+  end
   return turtle.getFuelLevel() >= there + back + E.FUEL_RESERVE
 end
 

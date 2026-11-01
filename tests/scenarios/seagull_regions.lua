@@ -156,26 +156,33 @@ end)
 T.test("seagull: CRUISE_Y: between his dock and the region he flies at that height or higher, inside it low", function()
   local w, t, carto = setup("CRUISE_Y=80\n")
   w:run(30)
+  G(carto).hold = true             -- no region_ok yet: he flies home still holding the region, as in game
   order(carto, { type = "cmd", to = 7, want = "map", seq = 1, next = { 1, 0 } })   -- region 1,0: x 32 .. 63
-  local outside, inside = math.huge, math.huge
+  local outside, inside, leftAt = math.huge, math.huge, nil
   T.waitFor(w, function()
     local b = t.body
+    if not leftAt and (b.x ~= 0 or b.z ~= 0) then leftAt = b.y end
     if b.x >= 3 and b.x <= 28 then outside = math.min(outside, b.y) end
     if b.x >= 36 and b.x <= 60 then inside = math.min(inside, b.y) end
-    return #G(carto).oks >= 1
+    return G(carto).doneSeen["1,0"]
   end, 2500, "region 1,0 was never finished")
-  T.eq(G(carto).oks[1], "1,0")
+  T.eq(leftAt, 80, "straight up from the dock to CRUISE_Y before any sideways move")
   T.eq(outside >= 80, true, "on the way he never went below CRUISE_Y (lowest " .. tostring(outside) .. ")")
   T.eq(inside < 80, true, "over the region he flies low to scan (lowest " .. tostring(inside) .. ")")
-  -- home at cruising height, no dipping to look for ground the scanner can't reach
-  local dips = 0
-  for _ = 1, 60 do
+  -- home at cruising height the whole way, over the region he finished too, and no dipping to look for ground
+  local dips, climbedAt = 0, nil
+  for _ = 1, 120 do
     w:run(1)
     local b = t.body
-    if b.x >= 3 and b.x <= 28 and b.y < 80 then dips = dips + 1 end
+    if not climbedAt and b.y >= 80 then climbedAt = b.x end
+    if climbedAt and b.x >= 1 and b.x < climbedAt and b.y < 80 then dips = dips + 1 end
   end
+  T.eq(climbedAt ~= nil and climbedAt >= 36, true, "he climbed to CRUISE_Y over the region, not only after leaving it (at x " .. tostring(climbedAt) .. ")")
   T.eq(dips, 0, "on the way home he stayed at CRUISE_Y")
   T.eq(t.body.x .. "," .. t.body.y .. "," .. t.body.z, "0,64,0", "home on his dock")
+  G(carto).hold = false
+  T.waitFor(w, function() return #G(carto).oks >= 1 end, 300, "region_ok never came")
+  T.eq(G(carto).oks[1], "1,0")
 end)
 
 T.test("seagull: a region on his done list is mapped again when the Cartographer names it (re-survey)", function()
