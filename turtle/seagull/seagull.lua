@@ -457,9 +457,11 @@ end
 -- Fly to column (tx, tz), long axis first. onHop is called after every block. home = true: going home, always
 -- cruising; otherwise cruising unless it is a short hop between scans (SCAN_HOP).
 local flyTo1
+local loadHere        -- defined below; every flight keeps his chunk loaded through it
 local scanAndSettle   -- defined with the scanning below
 local function flyTo(tx, tz, onHop, home)
   cruising = home or math.abs(tx - pos.x) + math.abs(tz - pos.z) > SCAN_HOP
+  loadHere(true)
   local ok, why = flyTo1(tx, tz, onHop)
   cruising = false
   return ok, why
@@ -483,6 +485,7 @@ flyTo1 = function(tx, tz, onHop)
     else h = tz > pos.z and 2 or 0 end
     local ok, why = fly.hop(h)       -- over what is ahead, never round or under it
     if not ok then return false, why end
+    loadHere()
     if onHop then onHop() end
     if scanning and (not lastScanAt or math.abs(pos.x - lastScanAt.x) + math.abs(pos.z - lastScanAt.z) >= E.RADIUS - 1) then
       local sok, serr = scanAndSettle(false)
@@ -774,6 +777,13 @@ end
 local function goHome()
   setStatus("returning", "Flying home")
   local ok, why = flyTo(S.home.x, S.home.z, scanIfUnknown, true)
+  local tries = 0
+  while not ok and why == "unloaded" and tries < 3 do   -- a chunk on the way is not loaded yet: load mine, wait, go on
+    tries = tries + 1
+    loadHere(true)
+    os.sleep(1)
+    ok, why = flyTo(S.home.x, S.home.z, scanIfUnknown, true)
+  end
   if not ok then return false, why end
   -- Straight down onto the dock spot (open sky above it, see the top of this file)
   while pos.y > S.home.y do
@@ -845,7 +855,7 @@ local function dockAndRefuel(why, wait)
 end
 
 -- Keep the chunk he is in loaded (chunk controller swap, only in a new chunk or every 45 s)
-local function loadHere(force)
+loadHere = function(force)
   if not S.chunky or not pos then return end
   core.chunk.ensure(math.floor(pos.x / 16) .. "," .. math.floor(pos.z / 16), force)
 end
@@ -913,7 +923,7 @@ local function scanChunk(cx, cz)
   local c = chunks[mc.key(cx, cz)]
   local extras = plan.extras(cx, cz, mc.toArray(c and c.data))
   for _, p in ipairs(extras) do
-    if flyTo(p.x, p.z, loadHere) then
+    if flyTo(p.x, p.z) then
       local sok, serr = scanAndSettle()
       if not sok then return false, serr end
     end
@@ -961,7 +971,7 @@ local function mapOneChunk()
     or ("Region %s, chunk %d/%d"):format(regionKey(S.region), S.ci, #list))
   loadHere(true)
   local x0, y0, z0 = pos.x, pos.y, pos.z
-  local ok, why = flyTo(tx, tz, loadHere)
+  local ok, why = flyTo(tx, tz)
   if ok then
     loadHere(true)
     if not S.rstart then S.rstart = now() end

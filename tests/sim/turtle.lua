@@ -57,6 +57,7 @@ function Turtle.attach(world, c, opts)
   b.slots = b.inv.slots
   function b:equip(side, name)
     self.up[side] = name
+    if name and name:find("chunk_controller") and self.onChunkLoad then self.onChunkLoad(self.x, self.z) end
     local dev = name and upgradeDevice(name)
     -- like CC: the computer's view of a side lags the swap by a game tick. Until then rednet.isOpen still finds
     -- a "modem" there by its type, while the methods are already the new upgrade's: "No such method isOpen".
@@ -111,6 +112,8 @@ function Turtle.api(world, c)
       if b.fuel ~= "unlimited" and b.fuel <= 0 then return false, "Out of fuel" end
       local x, y, z = ahead(dir)
       if blockAt(dir) then return false, "Movement obstructed" end
+      -- a scenario can refuse a move into a chunk that is not loaded (b.chunkGate(x, z) false)
+      if b.chunkGate and not b.chunkGate(x, z) then return false, "Cannot enter an unloaded chunk" end
       b.x, b.y, b.z = x, y, z
       if b.fuel ~= "unlimited" then b.fuel = b.fuel - 1 end
       if b.onMove then b.onMove(dir) end      -- a scenario can watch every move (tests/sim/flycheck.lua)

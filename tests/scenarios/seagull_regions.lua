@@ -588,3 +588,49 @@ T.test("seagull: the fly check itself: a hover too low over a known top is caugh
   T.eq(ok, false, "a move at y 64 over a top at 63 is a violation")
   T.contains(err, "flycheck")
 end)
+
+-- #115: every flight keeps his chunk loaded. The sim refuses a move into a chunk more than one chunk from the last
+-- one a controller swap loaded (the home chunks start loaded, as if a player stood there).
+local function chunkWorld(w, t)
+  local swaps, last = 0, { 0, 0 }
+  t.body.onChunkLoad = function(x, z) swaps = swaps + 1; last = { math.floor(x / 16), math.floor(z / 16) } end
+  t.body.chunkGate = function(x, z)
+    local cx, cz = math.floor(x / 16), math.floor(z / 16)
+    if t.body.failOnce and x >= 8 and x <= 28 then t.body.failOnce = nil; return false end
+    if math.abs(cx) <= 1 and math.abs(cz) <= 1 and not t.body.homeOff then return true end
+    return math.abs(cx - last[1]) <= 1 and math.abs(cz - last[2]) <= 1
+  end
+  return function() return swaps end
+end
+
+T.test("seagull: far region: chunks between are unloaded unless his controller loaded them; he maps, flies home, docks", function()
+  local w, t, carto = setup("CRUISE_Y=80\n")
+  w:run(30)
+  local swaps = chunkWorld(w, t)
+  t.body.homeOff = true
+  G(carto).hold = true
+  order(carto, { type = "cmd", to = 7, want = "map", seq = 1, next = { 2, 0 } })   -- region 2,0: x 64 .. 95
+  T.waitFor(w, function() return G(carto).doneSeen["2,0"] end, 3000, "region 2,0 was never finished")
+  local before = swaps()
+  T.truthy(before >= 4, "swaps while flying out and mapping")
+  T.waitFor(w, function() local b = t.body; return b.x == 0 and b.z == 0 and b.y == 64 end, 600, "never got home")
+  T.truthy(swaps() > before + 3, "controller swaps on the way home (" .. before .. " -> " .. swaps() .. ")")
+  T.absent(t.screen:text(), "unloaded", "no unloaded stop")
+  G(carto).hold = false
+  T.waitFor(w, function() return #G(carto).oks >= 1 end, 300, "region_ok never came")
+  T.eq(t:readTable("seagull.state").skipped or 0, 0, "no chunk skipped")
+end)
+
+T.test("seagull: one forced 'unloaded' on the way home: he retries and gets home", function()
+  local w, t, carto = setup("CRUISE_Y=80\n")
+  w:run(30)
+  chunkWorld(w, t)
+  t.body.homeOff = true
+  G(carto).hold = true
+  order(carto, { type = "cmd", to = 7, want = "map", seq = 1, next = { 2, 0 } })
+  T.waitFor(w, function() return G(carto).doneSeen["2,0"] end, 3000, "region 2,0 was never finished")
+  t.body.failOnce = true
+  T.waitFor(w, function() return t.body.x == 0 and t.body.z == 0 and t.body.y == 64 end, 600, "never got home")
+  T.eq(t.body.failOnce, nil, "the forced failure happened")
+  T.absent(t.screen:text(), "Can't get home", "no stop")
+end)
