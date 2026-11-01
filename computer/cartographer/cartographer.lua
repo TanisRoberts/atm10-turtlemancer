@@ -47,6 +47,37 @@ local st = {
   changed = {}, mapRev = 0,
 }
 local turtleInfo = {}       -- [id] = { label, role, pos, seen }
+
+-- Where Seagull was last heard (seagull_last.cfg, kept across reboots): a Seagull that goes quiet out in the world
+-- can be found there. { id, label, pos = {x, y, z}, state, msg, fuel, at = os.epoch("utc") }
+local LAST_FILE = "seagull_last.cfg"
+do
+  local f = fs.open(LAST_FILE, "r")
+  if f then
+    local t = textutils.unserialize(f.readAll()); f.close()
+    if type(t) == "table" and type(t.pos) == "table" then st.seagullLast = t end
+  end
+end
+local lastSavedAt = -100
+local function noteSeagull(id, msg)
+  if type(msg.pos) ~= "table" or not tonumber(msg.pos.x) then return end
+  local old = st.seagullLast
+  local p = { x = math.floor(msg.pos.x), y = math.floor(tonumber(msg.pos.y) or 0), z = math.floor(msg.pos.z) }
+  st.seagullLast = { id = id, label = msg.label, pos = p, state = msg.state, msg = msg.msg, fuel = msg.fuel,
+                     at = os.epoch("utc") }
+  local moved = not old or old.pos.x ~= p.x or old.pos.y ~= p.y or old.pos.z ~= p.z or old.state ~= msg.state
+  if moved and os.clock() - lastSavedAt >= 10 or os.clock() - lastSavedAt >= 120 then
+    lastSavedAt = os.clock()
+    local f = fs.open(LAST_FILE, "w")
+    if f then f.write(textutils.serialize(st.seagullLast)); f.close() end
+  end
+end
+-- Seconds since Seagull was last heard (nil if never), from the saved time so it survives a reboot
+local function seagullQuiet()
+  local l = st.seagullLast
+  return l and math.max(0, math.floor((os.epoch("utc") - (tonumber(l.at) or 0)) / 1000)) or nil
+end
+st.seagullQuiet = seagullQuiet
 local ord = nil             -- the order waiting for Seagull to confirm { want, next, seq, untilT, sentAt }
 local seq = math.floor(os.epoch("utc") / 1000) % 100000
 local floor = nil
@@ -320,6 +351,17 @@ cmds:add({ name = "storage", help = "where the map lives and what is left", max 
     end
     return true, table.concat(parts, ", ") .. (", room for ~%d regions"):format(room)
   end })
+cmds:add({ name = "where", help = "where Seagull is, or was last heard", max = 0,
+  run = function()
+    local l, quiet = st.seagullLast, seagullQuiet()
+    if not l then return true, "Seagull has never been heard.", "warn" end
+    local at = ("%d %d %d"):format(l.pos.x, l.pos.y, l.pos.z)
+    if quiet <= 30 then return true, ("%s is at %s (%s)"):format(tostring(l.label or "Seagull"), at, tostring(l.state or "?")) end
+    local t = quiet < 60 and (quiet .. "s") or quiet < 3600 and (math.floor(quiet / 60) .. " min")
+      or (math.floor(quiet / 3600) .. " h")
+    return true, ("%s last heard %s ago at %s (%s%s)"):format(tostring(l.label or "Seagull"), t, at,
+      tostring(l.state or "?"), l.msg and (": " .. tostring(l.msg)) or ""), "warn"
+  end })
 cmds:add({ name = "status", help = "regions, Seagull, what is next", max = 0,
   run = function()
     local sg = st.seagull
@@ -391,8 +433,15 @@ end
 
 local function liveTurtles()
   local out = {}
+  local l, quiet = st.seagullLast, seagullQuiet()
+  local lost = l and quiet and quiet > 30
   for id, t in pairs(turtleInfo) do
-    if os.clock() - t.seen > env.v.HIDE_AFTER then turtleInfo[id] = nil else out[#out + 1] = t end
+    if os.clock() - t.seen > env.v.HIDE_AFTER or (lost and id == l.id) then turtleInfo[id] = nil else out[#out + 1] = t end
+  end
+  -- Seagull gone quiet: a red marker where he was last heard, until he is back
+  if lost then
+    out[#out + 1] = { label = l.label, pos = l.pos, short = short(l.label, l.id) .. "?",
+                      lost = true }
   end
   table.sort(out, function(a, b) return (a.label or "") < (b.label or "") end)
   return out
@@ -457,6 +506,7 @@ local function netLoop()
           local first = st.seagullId == nil
           st.seagull, st.seagullId, st.seagullSeen = msg, from, os.clock()
           noteTurtle(from, msg)
+          noteSeagull(from, msg)
           if first then lastSync = -1000 end
           if ord and msg.seq == ord.seq then ord = nil end
           updateScan()

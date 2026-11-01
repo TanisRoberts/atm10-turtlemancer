@@ -88,7 +88,12 @@ function S.new(sh)
       y = y + 1
     end
     section("Seagull")
-    if not sg then
+    local last = st.seagullLast
+    if not sg and last then           -- not heard since this computer started: where he was last heard
+      local q = st.seagullQuiet and st.seagullQuiet() or 0
+      kv(fit(tostring(last.label or "Seagull"), w - 12), "off radio", "warn")
+      kv("last heard " .. ago(q), ("%d %d %d"):format(last.pos.x, last.pos.y, last.pos.z), "warn")
+    elseif not sg then
       kv("", "not heard yet", "dim")
     else
       local off = now - (st.seagullSeen or 0)
@@ -102,7 +107,7 @@ function S.new(sh)
         local pct = fl and fl > 0 and math.floor(f / fl * 100) or nil
         kv("Fuel", pct and (pct .. "%") or tostring(f), pct and pct < 20 and "warn" or "fg")
       end
-      local where = type(sg.pos) == "table" and ("%d,%d"):format(sg.pos.x or 0, sg.pos.z or 0) or ""
+      local where = type(sg.pos) == "table" and ("%d %d %d"):format(sg.pos.x or 0, sg.pos.y or 0, sg.pos.z or 0) or ""
       kv(quiet and ("off radio " .. ago(off)) or "on the radio", where, quiet and "warn" or "dim")
     end
     y = y + 1

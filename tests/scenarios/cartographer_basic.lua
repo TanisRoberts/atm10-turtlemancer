@@ -179,6 +179,30 @@ T.test("cartographer: /resurvey queues a mapped region again; region_ok waits fo
   T.running(c)
 end)
 
+T.test("cartographer: remembers where Seagull was last heard, across its own reboot, and shows it when he goes quiet", function()
+  local w, c, floor = room()
+  c:run("cartographer")
+  local s = seagull(w, { { 0, 0, "island" } }, { state = "mapping" })
+  T.waitFor(w, function() return dbg(c) and dbg(c).store:count() == 256 end, 120)
+  w:run(15)
+  T.contains(c.screen:text(), "120 90 130", "his position, with Y")
+  local saved = c:readTable("seagull_last.cfg")
+  T.eq(saved and saved.pos.x .. "," .. saved.pos.y .. "," .. saved.pos.z, "120,90,130")
+  -- he goes quiet (out of range, unloaded, out of fuel), then the Cartographer itself reboots
+  s:_stop()
+  w:run(60)
+  T.contains(c.screen:text(), "off radio")
+  c:type("/where"); c:key(257); w:run(1)
+  T.contains(c.screen:text(), "last heard")
+  c:reboot(); w:run(20)
+  T.contains(c.screen:text(), "off radio")
+  T.contains(c.screen:text(), "120 90 130", "the last position survives the reboot")
+  local lost
+  for _, t in ipairs(dbg(c).st.turtles or {}) do if t.lost then lost = t end end
+  T.truthy(lost, "a lost-Seagull marker for the floor")
+  T.eq(lost and lost.pos.x, 120)
+end)
+
 T.test("cartographer: scanning region shows ~% (or just 'scanning' when Seagull sends no times)", function()
   local w, c, floor = room()
   c:run("cartographer")

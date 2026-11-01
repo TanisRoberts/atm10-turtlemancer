@@ -43,6 +43,8 @@ Kept from the old art-controller protocol, plus what Seagull's region work (#68)
 - **Cruising height.** `CRUISE_Y` in `seagull.env` (0 = off): outside the region he is mapping (to it, home, or with no region) he flies at that Y or higher; inside it `CLEARANCE` over the ground. At cruising height he doesn't sink to find ground the scanner can't reach, and scans every `RADIUS` blocks. The fuel check counts the climb.
 - He stays on the radio while scanning (the modem is off for 0.15 s per swap), so DOCK and tap orders arrive mid-region.
 
+- **Last heard.** Every status with a position is kept in `seagull_last.cfg` (position with Y, state, message, time; written on a move or state change at most every 10 s, else every 2 min), so it survives the Cartographer's reboots. Quiet for over 30 s: the Seagull panel says `off radio` with the time and X Y Z, `/where` says it in full, and the floor shows a red `Seagull?` marker there until he is heard again.
+
 ## Floor
 
 - Left: the map. Right 8 columns: `+`, a track with a tick per zoom level (1, 2, 4, 8, 16 blocks per pixel; tap a tick), `-`, `FILL`. A tap on the map centres the view (on the computer too). It never sends Seagull anywhere.
@@ -58,7 +60,7 @@ Keys (command bar empty): arrows pan, `-` / `+` zoom, `f` fits.
 
 ### Commands (shared slash module, with or without the `/`)
 
-`/map`, `/dock`, `/next X,Z` (region numbers), `/next clear`, `/resurvey X,Z` (map a mapped region again, next), `/goto x z` (blocks), `/fit`, `/fill on|off`, `/storage`, `/status`, `/help`.
+`/where` (where Seagull is, or was last heard), `/map`, `/dock`, `/next X,Z` (region numbers), `/next clear`, `/resurvey X,Z` (map a mapped region again, next), `/goto x z` (blocks), `/fit`, `/fill on|off`, `/storage`, `/status`, `/help`.
 
 ## Settings (`cartographer.env`)
 

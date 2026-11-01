@@ -154,8 +154,9 @@ function F.overlay(pane, gfx, st, labels, view)
   end
   for _, t in ipairs(st.turtles or {}) do
     local x, y = pane:w2p(t.pos.x, t.pos.z, view)
-    pane:blob(px, x, y, K.white)
-    if labels and pane:inside(x, y) then placeLabel(gfx, cells, used, x, y, t.short or t.label or "?", K.white) end
+    local col = t.lost and K.red or K.white      -- red: Seagull's last known spot (he has gone quiet)
+    pane:blob(px, x, y, col)
+    if labels and pane:inside(x, y) then placeLabel(gfx, cells, used, x, y, t.short or t.label or "?", col) end
   end
   return px, cells
 end
