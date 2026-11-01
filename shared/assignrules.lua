@@ -80,6 +80,7 @@ return function(X)
       v:buttons(13, y, { { label = txt .. (" "):rep(bw - 2 - #txt), id = "rf-" .. f[1], fn = function()
         st.rfield = f[1]
         go("rpick")
+        st.pickTicked = { list = { table.unpack(r[f[1]] or {}) } }   -- what was ticked on the way in stays on top
       end } })
       y = y + 1
     end
@@ -110,21 +111,36 @@ return function(X)
     local picked = e.rule[f] or {}
     v:header("DEPOT " .. title, { state = #picked > 0 and ("%d ticked"):format(#picked) or "tap to tick", color = "dim" })
     local q = st.f.text:lower()
-    local rows = {}
-    local function add(label, right, value)
-      if q == "" or label:lower():find(q, 1, true) then
+    local rows, seen = {}, {}
+    local function add(label, right, value, also)
+      seen[value] = true
+      if q == "" or label:lower():find(q, 1, true) or (also and also:lower():find(q, 1, true)) then
         local on = ticked(e.rule[f], value)
         rows[#rows + 1] = { name = (on and "[x] " or "[ ] ") .. label, value = right, state = on and "info" or nil, id = value,
           tone = on and "info" or "dim" }
       end
     end
+    -- Ticked values first, so they stay findable (and untickable) when storage has none left
+    local missing = {}
+    st.pickTicked = st.pickTicked or { list = picked }
+    for _, val in ipairs(st.pickTicked.list) do missing[#missing + 1] = val end
+    local all = {}
     if f == "item" then
-      for _, it in ipairs(dp.items(e.name)) do add(it.label or X.prettyName(it.name), fmt(it.count or 0), it.name) end
+      for _, it in ipairs(X.depotItems(dp, e.name)) do
+        all[#all + 1] = { it.label or X.prettyName(it.name), fmt(it.count or 0), it.name, it.name }
+      end
     elseif f == "tag" then
-      for _, t in ipairs(R.tags()) do add(t.tag, ("%d kinds  %s"):format(t.kinds, fmt(t.items)), t.tag) end
+      for _, t in ipairs(R.tags()) do all[#all + 1] = { t.tag, ("%d kinds  %s"):format(t.kinds, fmt(t.items)), t.tag } end
     else
-      for _, m in ipairs(R.mods()) do add(m.mod, ("%d kinds  %s"):format(m.kinds, fmt(m.items)), m.mod) end
+      for _, m in ipairs(R.mods()) do all[#all + 1] = { m.mod, ("%d kinds  %s"):format(m.kinds, fmt(m.items)), m.mod } end
     end
+    local byVal = {}
+    for _, a in ipairs(all) do byVal[a[3]] = a end
+    for _, val in ipairs(missing) do
+      local a = byVal[val] or { f == "item" and X.prettyName(val) or val, f == "item" and "0" or "none", val, val }
+      add(a[1], a[2], a[3], a[4])
+    end
+    for _, a in ipairs(all) do if not seen[a[3]] then add(a[1], a[2], a[3], a[4]) end end
     local what = f == "item" and "Items in storage, variants merged." or (title:sub(1, 1) .. title:sub(2):lower() .. "s on items in storage.")
     v:put(2, 3, fit(what .. " Type to narrow it down.", v.W - 2), "dim", "bg")
     local pl = plan(v, {

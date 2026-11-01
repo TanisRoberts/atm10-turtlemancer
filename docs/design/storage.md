@@ -370,7 +370,7 @@ Example: `library_books` (Item enchanted book) and `disenchant` (Tag c:enchantab
 ░Search:░c:_░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 
 ```
 
-- Multi-select: search at the bottom, pager, tap a row to tick or untick it (ticked rows are cyan and stay ticked across pages and searches). The header counts the ticked rows. **Done** goes back to the form; **Any** clears the row. Item lists item ids (variants merged), Tag lists every tag on items in storage with kinds and items, Mod lists namespaces.
+- Multi-select: search at the bottom, pager, tap a row to tick or untick it (ticked rows are cyan and stay ticked across pages and searches). The header counts the ticked rows. **Done** goes back to the form; **Any** clears the row. Item lists item ids (variants merged), Tag lists every tag on items in storage with kinds and items, Mod lists namespaces. What was ticked when the list opened comes first, even when storage has none left (count 0), so it can always be found and unticked. Item search matches the name or the id.
 
 ### Something like this
 

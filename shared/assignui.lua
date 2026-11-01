@@ -157,6 +157,7 @@ function A.run(o)
   local function go(page)
     st.page = page
     st.f.text = ""
+    st.itemsOf = nil
     v.page, v.sel, v.focus, v.armed = 1, nil, nil, nil
   end
 
@@ -322,10 +323,18 @@ function A.run(o)
     end
   end
 
+  -- What a depot could hold, read once per page visit: dp.items asks the cable (each call waits a game tick, and
+  -- keys typed meanwhile are lost), so a page that redraws on every key must not call it each time.
+  local function depotItems(dp, n)
+    local k = dp.key .. "|" .. tostring(n)
+    if not (st.itemsOf and st.itemsOf.k == k) then st.itemsOf = { k = k, list = dp.items(n) } end
+    return st.itemsOf.list
+  end
+
   RU = o.rules and dofile("assignrules.lua")({
     o = o, st = st, ui = ui, v = v, names = names, call = call, go = go, plan = plan, wrapText = wrapText,
     say = say, fmt = fmt, prettyName = prettyName, shortName = shortName,
-    startWatch = startWatch, depotOf = function(key) return DEPOT_BY[key] end,
+    startWatch = startWatch, depotOf = function(key) return DEPOT_BY[key] end, depotItems = depotItems,
   })
 
   local function backToList(msg, tone)
@@ -509,7 +518,7 @@ function A.run(o)
     local dp = curDepot()
     local q = st.f.text:lower()
     local shown = {}
-    for _, it in ipairs(dp.items(st.depotName)) do
+    for _, it in ipairs(depotItems(dp, st.depotName)) do
       if q == "" or it.name:lower():find(q, 1, true) or (it.label or ""):lower():find(q, 1, true) then
         shown[#shown + 1] = it
       end
