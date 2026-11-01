@@ -35,6 +35,29 @@ T.test("turtle core: drinks a lava bucket from the dock and puts the empty bucke
   T.eq(slotsOf(t, "minecraft:bucket"), 0, "no bucket left in the turtle")
 end)
 
+T.test("turtle core: a dock Storage refills as fast as he drains it: empties stack in one slot, go back when there's room", function()
+  local w, t, dock = setup({ fuel = 0, body = 'core.fuel.refuelFromDock("front", 15000)' })
+  for i = 1, 27 do dock:give("minecraft:lava_bucket", 1) end
+  local refills, extract = 0, dock.extract
+  dock.extract = function(self, slot, count)       -- Storage tops the freed slot back up with lava
+    local r = extract(self, slot, count)
+    if refills < 40 then refills = refills + 1; self:give("minecraft:lava_bucket", 1, slot) end
+    return r
+  end
+  t:run("probe"); w:run(5)
+  T.eq(t.body.fuel >= 15000, true, "fuel reaches the target")
+  local n = 0
+  for _, s in pairs(t.body.slots) do if s.name == "minecraft:bucket" then n = n + 1 end end
+  T.eq(n <= 1, true, "at most one slot of empty buckets")
+  -- next visit, with room in the dock: they go back
+  dock.extract = extract
+  for sl = 1, 27 do dock.slots[sl] = nil end
+  t:writeFile("probe2.lua", 'local core = dofile("turtlecore.lua")\ncore.fuel.refuelFromDock("front", 0)')
+  t:run("probe2"); w:run(5)
+  T.eq(slotsOf(t, "minecraft:bucket"), 0, "empties went back once the dock had room")
+  T.eq(dock:count("minecraft:bucket") > 0, true)
+end)
+
 T.test("turtle core: no lava, so coal from the dock (and only up to the target)", function()
   local w, t, dock = setup({ body = 'core.fuel.refuelFromDock("front", 300)' })
   dock:give("minecraft:coal", 64)

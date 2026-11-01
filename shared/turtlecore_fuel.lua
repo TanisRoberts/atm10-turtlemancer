@@ -49,12 +49,28 @@ function F.refuelFromInventory(target)
   return before == math.huge and 0 or F.level() - before
 end
 
--- Put every empty bucket he carries into the dock (drop = the drop function for that side).
+-- Stack every empty bucket he carries into the first slot that holds some, so empties take one slot (16 a stack).
+function F.stackEmpties()
+  local first
+  for s = 1, 16 do
+    local d = turtle.getItemDetail(s)
+    if d and d.name == BUCKET then
+      if not first then first = s
+      else turtle.select(s); turtle.transferTo(first) end
+    end
+  end
+  turtle.select(1)
+end
+
+-- Put every empty bucket he carries into the dock (drop = the drop function for that side). A full dock
+-- is no error: the buckets stay stacked and go back on the next visit.
 function F.returnEmpties(drop)
+  F.stackEmpties()
   for s = 1, 16 do
     local d = turtle.getItemDetail(s)
     if d and d.name == BUCKET then turtle.select(s); drop(d.count) end
   end
+  F.stackEmpties()
   turtle.select(1)
 end
 
@@ -81,16 +97,20 @@ function F.refuelFromDock(dir, target, want)
     return false
   end
   local held = {}
+  F.returnEmpties(drop)   -- empties from an earlier visit go back first, while the dock may have room
   for _ = 1, 27 do
     local needFuel = fuelNeeded() and fuelInDock()
     if not needFuel and not wantsFromDock() then break end
     local free
-    for s = 16, 1, -1 do if turtle.getItemCount(s) == 0 then free = s; break end end
+    local function findFree() for s = 16, 1, -1 do if turtle.getItemCount(s) == 0 then return s end end end
+    F.stackEmpties()
+    free = findFree()
+    if not free then F.returnEmpties(drop); free = findFree() end   -- no free slot: hand the empties back first
     if not free then break end
     turtle.select(free)
     if not suck() then break end
     local d = turtle.getItemDetail(free)
-    if d and F.value[d.name] and fuelNeeded() then F.burnSlot(free, target) end
+    if d and F.value[d.name] and fuelNeeded() then F.burnSlot(free, target); F.stackEmpties() end
     local count = turtle.getItemCount(free)
     if d and count > 0 then
       local keep = want and math.max(0, math.min(count, want(d.name, core.dock.holding(d.name, free)))) or 0

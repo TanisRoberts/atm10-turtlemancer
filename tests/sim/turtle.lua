@@ -200,7 +200,10 @@ function Turtle.api(world, c)
     s.count = s.count - used
     local name = s.name
     if s.count <= 0 then b.slots[b.sel] = nil end
-    if name == "minecraft:lava_bucket" and used > 0 then give("minecraft:bucket", used) end
+    if name == "minecraft:lava_bucket" and used > 0 then
+      -- like the game: the empty bucket stays in the slot that was burned (it only stacks when you move it)
+      if not b.slots[b.sel] then b.slots[b.sel] = { name = "minecraft:bucket", count = used } else give("minecraft:bucket", used) end
+    end
     return true
   end
 

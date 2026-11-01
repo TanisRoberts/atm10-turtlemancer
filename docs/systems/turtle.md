@@ -30,8 +30,8 @@ One table, best first. Only these are ever burned: never logs, planks or sapling
 - `fuel.needFuel(low)`: true when the level is under `low`.
 - `fuel.burnSlot(slot, target)`: burns just enough of that slot to reach `target`. Returns items burned.
 - `fuel.refuelFromInventory(target)`: burns what he carries, best fuel first. Returns fuel gained. An empty bucket stays in his slots until the next dock visit.
-- `fuel.refuelFromDock(dir, target, want)`: takes fuel from the dock up to `target`, plus `want(name, have)` more of anything he restocks from it (saplings). Puts empty buckets back. Returns `{ [name] = taken }`.
-- `fuel.returnEmpties(drop)`: every `minecraft:bucket` he carries goes into the dock.
+- `fuel.refuelFromDock(dir, target, want)`: takes fuel from the dock up to `target`, plus `want(name, have)` more of anything he restocks from it (saplings). Empty buckets are stacked into one slot (`fuel.stackEmpties`) and handed back before the first suck and at the end; with no free slot it returns them first. A full dock is no error: they stay stacked for the next visit. Returns `{ [name] = taken }`.
+- `fuel.returnEmpties(drop)`: every `minecraft:bucket` he carries is stacked, then goes into the dock (whatever the dock can't take stays stacked).
 
 `suck()` always hands over the barrel's first stack, so the order of the dock's slots decides which fuel he takes first. Priority applies fully to what he carries. Storage keeps the best fuel in the dock's first slot (see Storage's side).
 
