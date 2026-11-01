@@ -219,7 +219,7 @@ local M = {
                    details = "Maps the world one region (16 x 16 chunks) at a time, chunk by chunk, keeping each chunk loaded with a chunk controller, and hands each finished region to "
                      .. "the Cartographer computer. Geo Scanner + ender modem + chunk controller in his bag, no pickaxe. Needs GPS and a fuel dock "
                      .. "with open sky above it.",
-                   files = { "turtle/seagull/seagull.lua", "shared/mapchunk.lua", "shared/regionplan.lua" } },
+                   files = { "turtle/seagull/seagull.lua", "turtle/seagull/seagull_nav.lua", "shared/mapchunk.lua", "shared/regionplan.lua" } },
         bowerbird = { name = "Bowerbird", about = "Crafts matrices for the neural lab", run = "crafter",
                    details = "Keeps storage stocked with prediction matrices (iron, gold, glass panes, "
                      .. "clay). Crafty turtle + wireless or ender modem, parked at a dock barrel that "

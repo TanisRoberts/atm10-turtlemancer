@@ -252,6 +252,20 @@ T.test("seagull: chunks with no map after the first pass get one more try before
   T.eq(n, 4, "all four chunks arrived, the two missing ones from the second try")
 end)
 
+T.test("seagull: a cliff taller than a scan with a ledge sticking out: he backs out from under it and goes over", function()
+  local w, t, carto = setup(nil, function(w)
+    w:fill(10, 64, -20, 12, 95, 40, "minecraft:stone")      -- a cliff across his way east, up to y 95
+    w:fill(9, 72, -20, 9, 72, 40, "minecraft:stone")        -- a one-block ledge sticking out of it at y 72
+  end)
+  w:run(30)
+  order(carto, { type = "cmd", to = 7, want = "map", seq = 1, next = { 1, 0 } })   -- region 1,0: over the cliff
+  T.waitFor(w, function() return #G(carto).oks >= 1 end, 4000, "region 1,0 was never finished")
+  local st = t:readTable("seagull.state")
+  T.eq(st.skipped or 0, 0, "no chunk skipped")
+  w:run(200)
+  T.eq(t.body.x .. "," .. t.body.y .. "," .. t.body.z, "0,64,0", "and home again, back over the cliff")
+end)
+
 T.test("seagull: a reboot mid-region carries on with the same region; nothing is skipped", function()
   local w, t, carto = setup()
   w:run(30)

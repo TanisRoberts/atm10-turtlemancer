@@ -27,6 +27,7 @@
 
 local mc = dofile("mapchunk.lua")
 local plan = dofile("regionplan.lua")
+local route = dofile("seagull_nav.lua")()  -- the way round cliffs, ledges and caves (A* through his scans)
 local core = dofile("turtlecore.lua")   -- fuel, dock and GPS shared by every turtle (docs/systems/turtle.md)
 
 local PROTO      = "tanis-carto"
@@ -410,13 +411,52 @@ local function launch()
   return false, "stuck"
 end
 
+-- Blocked (a cliff, a ledge over him, a cave roof): find a way with seagull_nav to a spot up to RADIUS blocks on
+-- towards (tx, tz), at his flying height there (higher if that is taken), and walk it.
+local navIO = {
+  pos = function() return pos end,
+  move = function(dir)
+    local ok, why
+    if dir == "up" then ok, why = turtle.up(); if ok then pos.y = pos.y + 1 end
+    elseif dir == "down" then ok, why = turtle.down(); if ok then pos.y = pos.y - 1 end
+    else
+      turnTo(dir)
+      ok, why = turtle.forward()
+      if ok then pos.x, pos.z = pos.x + DX[dir], pos.z + DZ[dir] end
+    end
+    return ok, why
+  end,
+  scan = function() return scan() end,
+}
+local function detour(tx, tz, onHop)
+  navIO.maxY, navIO.onStep = E.MAX_Y, onHop
+  local dist = math.abs(tx - pos.x) + math.abs(tz - pos.z)
+  for _, reach in ipairs({ E.RADIUS, 4, 1 }) do
+    local gx, gz = tx, tz
+    if dist > reach then
+      gx = pos.x + math.floor((tx - pos.x) * reach / dist + 0.5)
+      gz = pos.z + math.floor((tz - pos.z) * reach / dist + 0.5)
+    end
+    local g = groundNear(gx, gz, 0)
+    local base = math.max(g and (g + 1 + E.CLEARANCE) or pos.y, floorAt(gx, gz))
+    for _, extra in ipairs({ 0, 4, 10 }) do
+      local gy = math.min(base + extra, E.MAX_Y)
+      while gy < E.MAX_Y and route.isSolid(gx, gy, gz) do gy = gy + 1 end
+      local ok, why = route.go({ x = gx, y = gy, z = gz }, navIO)
+      if ok then return true end
+      if why == "unloaded" or why == "fuel" then return false, why end
+    end
+  end
+  return false, "stuck"
+end
+
 -- Fly to column (tx, tz), long axis first. onHop is called after every block.
 local function flyTo(tx, tz, onHop)
   if S.home and pos.x == S.home.x and pos.z == S.home.z and (pos.x ~= tx or pos.z ~= tz) then
     local ok, why = launch()
     if not ok then return false, why == "fuel" and "fuel" or "launch" end
   end
-  local guard = 0
+  local guard, detours = 0, 0
   while pos.x ~= tx or pos.z ~= tz do
     guard = guard + 1
     if guard > 4000 then return false, "stuck" end
@@ -434,6 +474,11 @@ local function flyTo(tx, tz, onHop)
       if h == 1 or h == 3 then h2 = (tz ~= pos.z) and (tz > pos.z and 2 or 0) or nil
       else h2 = (tx ~= pos.x) and (tx > pos.x and 1 or 3) or nil end
       if why == "stuck" and h2 then ok, why = hop(h2) end
+      if not ok and (why == "stuck" or why == "high") then
+        detours = detours + 1
+        if detours > 40 then return false, "stuck" end
+        ok, why = detour(tx, tz, onHop)
+      end
       if not ok then return false, why end
     end
     if onHop then onHop() end
@@ -455,6 +500,7 @@ scan = function()
     local ok, res, err = pcall(scanner.scanBlocks, E.RADIUS)
     if ok and type(res) == "table" then
       absorb(res, pos.x, pos.y, pos.z, E.RADIUS)
+      route.observe(res, pos.x, pos.y, pos.z, E.RADIUS)
       lastScanAt = { x = pos.x, y = pos.y, z = pos.z, r = E.RADIUS, t = now() }
       return true
     end
