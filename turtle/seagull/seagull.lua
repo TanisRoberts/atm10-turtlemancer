@@ -45,6 +45,7 @@ local DEFAULTS = {
   { "RADIUS", 8, "Scan radius. 8 is free and covers a whole chunk from its middle; up to 16 costs fuel per scan." },
   { "SHALLOW", 4, "Water this deep or less counts as shallow (lighter blue)." },
   { "FUEL_PCT", 90, "Fuel he tops up to at the dock, as % of his fuel limit (an advanced turtle holds 100,000)." },
+  { "HANDOVER_WAIT", 120, "Seconds he hovers where he finished a region, waiting for the Cartographer to take it, before he goes home to wait." },
   { "DOCK_WAIT", 30, "Seconds he waits at the dock for Storage to bring more fuel before he goes with what he has." },
   { "FUEL_RESERVE", 200, "Spare fuel kept on top of the trip home." },
   { "MAX_Y", 300, "He never flies higher than this; places that would need it are skipped." },
@@ -882,6 +883,9 @@ local function startRegion()
   save()
 end
 
+-- Set while he hovers where he finished a region, waiting for region_ok (os.clock when he began); nil otherwise
+local handoverSince = nil
+
 -- The region is whole: name it to the Cartographer and wait for region_ok, then forget it
 local function finishRegion()
   local r = S.region
@@ -892,7 +896,8 @@ local function finishRegion()
   for k in pairs(chunks) do
     if inRegion(k, r) then dirtyKeys[k] = true end
   end
-  if not atHome() then dockAndRefuel("Region done") end
+  -- He waits right here (radio works anywhere); mapLoop sends him home only if region_ok is slow
+  handoverSince = (not atHome() and (tonumber(E.HANDOVER_WAIT) or 120) > 0) and os.clock() or nil   -- 0 = go home first
 end
 
 local function forgetRegion()
@@ -1017,6 +1022,7 @@ local function mapLoop()
     local order = takeOrder()
     if order == "dock" then
       S.mapping = false; save()
+      handoverSince = nil
       if not atHome() then dockAndRefuel("Docked (told to)") end
     elseif order == "map" then
       if S.doneRegion then
@@ -1027,8 +1033,24 @@ local function mapLoop()
 
     if S.doneRegion then
       -- Handed over, or about to be: wait for region_ok (and say it again now and then)
-      if okRegion == regionKey(S.doneRegion) then forgetRegion()
+      if okRegion == regionKey(S.doneRegion) then
+        local inPlace = handoverSince ~= nil
+        handoverSince = nil
+        forgetRegion()
+        -- Handed over where he hovers: straight on to the next region (mapOneChunk goes home first if the fuel
+        -- won't cover the trip out and back)
+        if inPlace then startRegion() end
+      elseif handoverSince and os.clock() - handoverSince <= (tonumber(E.HANDOVER_WAIT) or 120) then
+        local msg = "Handing over " .. regionKey(S.doneRegion) .. " here"
+        if status ~= "waiting" or note ~= msg then setStatus("waiting", msg) end
+        loadHere()
+        if os.clock() - pushedAt > 60 then
+          pushedAt = os.clock()
+          for k in pairs(chunks) do if inRegion(k, S.doneRegion) then dirtyKeys[k] = true end end
+        end
+        waitOrder(2)
       else
+        handoverSince = nil
         if not atHome() then dockAndRefuel("Region done") end
         if status ~= "waiting" then setStatus("waiting", "Waiting for the Cartographer to take " .. regionKey(S.doneRegion)) end
         if os.clock() - pushedAt > 60 then

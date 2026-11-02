@@ -75,7 +75,7 @@ local STUB = [==[
   end
 ]==]
 
-local function setup(envExtra, build)
+local function setup(envExtra, build, handover)
   local w = cc.world()
   w.gpsOn = true
   w:fill(-20, 60, -40, 70, 63, 70, "minecraft:stone")
@@ -93,7 +93,7 @@ local function setup(envExtra, build)
   -- every scenario runs with the fly check (tests/sim/flycheck.lua); the launch tube is his dock's own wall
   t.scanner = scanner
   scanner.check = flycheck.watch(t, { exempt = function(x, z) return math.abs(x) <= 1 and math.abs(z) <= 1 end })
-  t:writeFile("seagull.env", "REGION_CHUNKS=2\n" .. (envExtra or ""))
+  t:writeFile("seagull.env", "REGION_CHUNKS=2\nHANDOVER_WAIT=" .. (handover or 0) .. "\n" .. (envExtra or ""))
   local carto = w:computer{ id = 3, label = "Cartographer" }
   carto:attach("top", cc.wireless{ ender = true })
   carto:writeFile("stub.lua", STUB)
@@ -104,6 +104,11 @@ local function setup(envExtra, build)
 end
 
 local function G(c) return c.G end
+-- He has taken region_ok and forgotten the region (the stub says it as soon as the hand-over is announced, which
+-- is while he is still flying home)
+local function settled(w, t)
+  T.waitFor(w, function() local st = t:readTable("seagull.state"); return st and st.doneRegion == nil end, 600, "he never forgot the region")
+end
 local function order(c, o) G(c).order = o end
 
 T.test("seagull: MAP maps the home region chunk by chunk, hands it over whole, forgets it", function()
@@ -112,7 +117,7 @@ T.test("seagull: MAP maps the home region chunk by chunk, hands it over whole, f
   T.contains(t.screen:text(), "Ready")
   order(carto, { type = "cmd", to = 7, want = "map", seq = 1 })
   T.waitFor(w, function() return #G(carto).oks >= 1 end, 1500)
-  w:run(20)
+  settled(w, t)
   local g = G(carto)
   T.truthy(g.scanRegions["0,0"], "the status named scan_region 0,0 while he scanned")
   T.truthy(g.doneSeen["0,0"], "the status named done_region 0,0")
@@ -142,14 +147,14 @@ T.test("seagull: MAP again goes to the next region in the spiral; a tapped regio
   w:run(30)
   order(carto, { type = "cmd", to = 7, want = "map", seq = 1 })
   T.waitFor(w, function() return #G(carto).oks >= 1 end, 1500)
-  w:run(20)
+  settled(w, t)
   -- tap region 0,-1 (north of home), then MAP: he goes there, not to the spiral's first pick
   w:run(1)
   order(carto, { type = "cmd", to = 7, want = "map", seq = 2, next = { 0, -1 } })
   T.waitFor(w, function() return #G(carto).oks >= 2 end, 2500)
   T.eq(G(carto).oks[2], "0,-1")
   T.truthy(G(carto).scanRegions["0,-1"])
-  w:run(20)
+  settled(w, t)
   local st = t:readTable("seagull.state")
   T.eq(st.nextReg, nil, "the tap is used up")
   -- MAP once more: the spiral's next unmapped region round home (0,0 and 0,-1 are done): ring 1, top edge, (1,-1)
@@ -195,7 +200,7 @@ T.test("seagull: a region on his done list is mapped again when the Cartographer
   w:run(30)
   order(carto, { type = "cmd", to = 7, want = "map", seq = 1 })
   T.waitFor(w, function() return #G(carto).oks >= 1 end, 1500)
-  w:run(20)
+  settled(w, t)
   T.truthy(t:readTable("seagull.state").done["0,0"])
   G(carto).scanRegions = {}
   order(carto, { type = "cmd", to = 7, want = "map", seq = 2, next = { 0, 0 } })
@@ -633,4 +638,100 @@ T.test("seagull: one forced 'unloaded' on the way home: he retries and gets home
   T.waitFor(w, function() return t.body.x == 0 and t.body.z == 0 and t.body.y == 64 end, 600, "never got home")
   T.eq(t.body.failOnce, nil, "the forced failure happened")
   T.absent(t.screen:text(), "Can't get home", "no stop")
+end)
+
+-- Hand-over where he is (#116): the Cartographer is told by radio, so he waits right over his last chunk for
+-- region_ok (HANDOVER_WAIT) and, with fuel for it, carries straight on to the next region.
+local function isHome(t) return t.body.x == 0 and t.body.y == 64 and t.body.z == 0 end
+-- Run until the first hand-over is announced and he is still out over the region
+local function hoverOver(w, t, carto)
+  T.waitFor(w, function()
+    local st = t:readTable("seagull.state")
+    return st and st.doneRegion and not isHome(t)
+  end, 2500, "region never finished")
+end
+
+T.test("seagull: hand-over in place: the next region follows with no dock visit between", function()
+  local w, t, carto = setup(nil, nil, 120)
+  w:run(30)
+  order(carto, { type = "cmd", to = 7, want = "map", seq = 1 })
+  local first, home, forgotten, second = nil, false, nil, nil
+  T.waitFor(w, function()
+    local st = t:readTable("seagull.state")
+    if not st then return false end
+    first = first or (st.region and st.region[1] .. "," .. st.region[2])
+    if G(carto).oks[1] and isHome(t) then home = true end
+    if st.doneRegion then T.contains(t.screen:text(), "Handing over") end
+    if first and st.region and (st.region[1] .. "," .. st.region[2]) ~= first then
+      second = st.region[1] .. "," .. st.region[2]
+      forgotten = st.done and st.done[first]
+      return true
+    end
+  end, 3000, "he never started a second region")
+  T.eq(forgotten, true, "region 1 was handed over and forgotten before region 2 began")
+  T.eq(home, false, "no dock visit between the regions")
+  T.eq(G(carto).oks[1], first)
+  T.waitFor(w, function() return #G(carto).oks >= 2 end, 3000, "the second region was never handed over")
+  T.eq(G(carto).oks[2], second)
+end)
+
+T.test("seagull: hand-over in place, low fuel: home to refuel first, then out to the next region", function()
+  local w, t, carto, dock = setup(nil, nil, 120)
+  w:run(30)
+  G(carto).hold = true                    -- no region_ok yet: he hovers over his last chunk
+  order(carto, { type = "cmd", to = 7, want = "map", seq = 1 })
+  hoverOver(w, t, carto)
+  w:run(5)
+  T.truthy(not isHome(t), "he waits where he is")
+  dock:give("minecraft:lava_bucket", 10)   -- Storage brought fuel
+  t.body.fuel = 150                       -- not enough for the next region and back
+  G(carto).hold = false
+  local visited, second = false, nil
+  T.waitFor(w, function()
+    local st = t:readTable("seagull.state")
+    if isHome(t) and G(carto).oks[1] then visited = true end
+    if st and st.region and st.done and st.done["0,0"] then second = true; return visited end
+  end, 3000, "he never reached the second region")
+  T.truthy(visited, "he went home to refuel before region 2")
+  T.waitFor(w, function() return not isHome(t) and t.body.fuel > 1000 end, 600, "he never set out again with fuel")
+  T.eq(t:readTable("seagull.state").mapping, true, "out to region 2")
+end)
+
+T.test("seagull: hand-over in place with no Cartographer: he waits HANDOVER_WAIT, then goes home and waits there", function()
+  local w, t, carto = setup(nil, nil, 40)
+  w:run(30)
+  G(carto).hold = true
+  order(carto, { type = "cmd", to = 7, want = "map", seq = 1 })
+  hoverOver(w, t, carto)
+  local x, y, z = t.body.x, t.body.y, t.body.z
+  w:run(30)
+  T.eq(t.body.x .. "," .. t.body.y .. "," .. t.body.z, x .. "," .. y .. "," .. z, "still hovering inside HANDOVER_WAIT")
+  T.waitFor(w, function() return isHome(t) end, 600, "he never went home")
+  w:run(30)
+  local st = t:readTable("seagull.state")
+  T.truthy(st.doneRegion, "he still holds the region: never two unconfirmed")
+  T.contains(t.screen:text(), "Waiting for the")
+  G(carto).hold = false
+  settled(w, t)
+  st = t:readTable("seagull.state")
+  T.eq(st.region, nil)
+  T.eq(st.mapping, false, "handed over at home: he idles, no next region")
+  T.truthy(isHome(t))
+end)
+
+T.test("seagull: DOCK while he hovers for the hand-over: home, hands over there, no next region", function()
+  local w, t, carto = setup(nil, nil, 120)
+  w:run(30)
+  G(carto).hold = true
+  order(carto, { type = "cmd", to = 7, want = "map", seq = 1 })
+  hoverOver(w, t, carto)
+  order(carto, { type = "cmd", to = 7, want = "dock", seq = 2 })
+  T.waitFor(w, function() return isHome(t) end, 600, "he never went home")
+  G(carto).hold = false
+  settled(w, t)
+  w:run(60)
+  local st = t:readTable("seagull.state")
+  T.eq(st.region, nil)
+  T.eq(st.mapping, false)
+  T.truthy(isHome(t))
 end)
