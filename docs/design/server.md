@@ -27,9 +27,8 @@ Mockup legend (kit notation): `▒` a coloured cell, `░` an empty cell slot (g
 ```text w=79
 ▓SERVER▓ROOM▓                                        30 drives · 281 cells  ok 
 ───────────────────────────────────────────────────────────────────────────────
-                                                                               
- Bytes  ▒░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░   3% 199.5M of 6G         
- Slots  ▒▒▒▒▒▒▒▒▒▒░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░  23% 281 of 1200 cells    
+ Fill ▒ <70%  ▒ 70-90%  ▒ >90%  ▒ no size (infinity, bulk) ░ empty  · no drive 
+───────────────────────────────────────────────────────────────────────────────
                                                                                
  BANK 1 · West      BANK 1 · East        BANK 2 · West      BANK 2 · East      
  R1 0  R2 0  R3 5   R4 10 R5    R6       R7    R8    R9     R10   R11   R12    
@@ -64,18 +63,6 @@ Mockup legend (kit notation): `▒` a coloured cell, `░` an empty cell slot (g
  ▒▒ ▒▒ ▒▒ ▒▒ ▒▒ ▒▒  ░░ ░░ ·· ·· ·· ··    ·· ·· ·· ·· ·· ··  ·· ·· ·· ·· ·· ··  
  1k    4k    64k    256M                                                       
                                                                                
- TIERS  items fill the top tier first ──────────────────────────────────────── 
- p10  R4      256M    ▒░░░░░░░░░░░░░░░░░░░░░░░░░░░░░   3% 5.8G free     0 full 
- p5   R3      64k     ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒░░░░░░░░░░░░░░  52% 1.7M free     0 full 
- p0   R1+R2   1k/4k   ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒░░░░  86% 69.6k free  111 full 
- ▒ 3 cells with no size: 2 Infinity, 1 MEGA Bulk. Not in the byte totals.      
-                                                                               
- DEFRAG ────────────────────────────────────────────────────────────────────── 
- running  Cobbled Deepslate -> p10 / void drawer              item 14 of 41    
- ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░  p0 freed 41k bytes
-                                                                               
- Energy ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒░░░░ 82%  1,240 AE/t      2,735 kinds  41.2M items     
-                                                                               
  BIGGEST PILES  defrag moves these first ───────────────────────────────────── 
  Cobbled Deepslate              1.84M    Granite                         288k  
  Cobblestone                     912k    Tuff                            190k  
@@ -86,33 +73,49 @@ Mockup legend (kit notation): `▒` a coloured cell, `░` an empty cell slot (g
                                                                                
                                                                                
                                                                                
+ Energy ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒░░░░ 82%  1,240 AE/t      2,735 kinds  41.2M items     
+                                                                               
+ DEFRAG ────────────────────────────────────────────────────────────────────── 
+ running  Cobbled Deepslate -> p10 / void drawer              item 14 of 41    
+ ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░  p0 freed 41k bytes
+                                                                               
+ TIERS  items fill the top tier first ──────────────────────────────────────── 
+ p10  R4      256M    ▒░░░░░░░░░░░░░░░░░░░░░░░░░░░░░   3% 5.8G free     0 full 
+ p5   R3      64k     ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒░░░░░░░░░░░░░░  52% 1.7M free     0 full 
+ p0   R1+R2   1k/4k   ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒░░░░  86% 69.6k free  111 full 
                                                                                
                                                                                
                                                                                
                                                                                
+ ▒ 3 cells with no size: 2 Infinity, 1 MEGA Bulk. Not in the byte totals.      
                                                                                
- Fill ▒ <70%  ▒ 70-90%  ▒ >90%  ▒ no size (infinity, bulk) ░ empty  · no drive 
+ CAPACITY ──────────────────────────────────────────────────────────────────── 
+ Bytes  ▒░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░   3% 199.5M of 6G         
+ Slots  ▒▒▒▒▒▒▒▒▒▒░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░  23% 281 of 1200 cells    
 ```
 
 ### Rows
+
+Big screens are read from the floor (UI kit 10.11): the numbers that matter most sit at the **bottom**, in fixed rows counted up from the bottom edge, so nothing moves when the room grows.
+
 - **1–2 header:** gold chip `SERVER ROOM`, dim `N drives · N cells`, state word: `ok` lime, `ME offline` red (bridge not connected/online; the last data stays on screen, dimmed), `?` dim before the first read.
-- **4 Bytes:** bar over all sized cells, `NN%`, `used of total` (k/M/G). Colour: lime under 70%, orange 70–90%, red over 90%.
-- **5 Slots:** cells fitted out of the room's total (cyan bar).
-- **7–39 the room:** four walls side by side (x = 1, 22, 42, 63; 3 racks 6 apart). Row 1 the wall name, row 2 the rack name and priority (`R1 0`), then 5 drive rows of 5 cell rows with a blank row between, then the rack's cell size(s) in dim (`1k`, `1k/4k` when mixed). Drive = 2 cells, a space, the next drive.
-  - Cell colour = its `usedBytes / maxBytes` (lime, orange, red as above).
+- **3 legend**, rule on 4: fill swatches, light blue `no size`, empty slot, no drive.
+- **6–37 the room:** four walls side by side (x = 1, 22, 42, 63; 3 racks 6 apart). Row 1 the wall name, row 2 the rack name and priority (`R1 0`), then 5 drive rows of 5 cell rows with a blank row between, then the rack's cell size(s) in dim (`1k`, `1k/4k` when mixed). Drive = 2 cells, a space, the next drive.
+  - Cell colour = its `usedBytes / maxBytes`: lime under 70%, orange 70–90%, red over 90%.
   - **No size** (ExtendedAE Infinity, MEGA Bulk: the bridge gives no `maxBytes`): light blue (`idle`), no glyph. Left out of every byte total and tier bar.
   - Empty slot in a drive: `·` dim on grey. No drive: `·` grey on black.
-- **Tiers** (`TIERS  items fill the top tier first`): one row per priority, highest first: `p10`, racks, sizes, fill bar, `NN%`, `X free`, `N full` (red when over 0; full = over 90%). Under it, only when there are any: light-blue swatch + `N cells with no size: N Infinity, N MEGA Bulk. Not in the byte totals.` and `N drives outside the room`.
-- **Defrag:** from storage's `{ type = "defrag", running, item, done, left, freedBytes }` on `tanis-base`. Running: `running` cyan, item name, `item N of M`, cyan progress bar, `p0 freed X bytes`. Not running: `idle` light blue + the last run's result, or `never run` dim. No news for 30 s: `storage not heard` orange.
-- **Energy:** `getStoredEnergy / getEnergyCapacity` bar, `NN%`, `getEnergyUsage` AE/t; dim `N kinds  N items` (from `getItems`).
-- **Biggest piles** (`BIGGEST PILES  defrag moves these first`): top 8 items by count from `getItems`, two columns, count in cyan.
-- **67 legend:** fill swatches, light blue `no size`, empty slot, no drive.
+- **39–43 biggest piles** (`BIGGEST PILES  defrag moves these first`): top 8 items by count from `getItems`, two columns, count in cyan.
+- **49 energy:** `getStoredEnergy / getEnergyCapacity` bar, `NN%`, `getEnergyUsage` AE/t; dim `N kinds  N items` (from `getItems`).
+- **51–53 defrag:** from storage's `{ type = "defrag", running, item, done, left, freedBytes }` on `tanis-base`. Running: `running` cyan, item name, `item N of M`, cyan progress bar, `p0 freed X bytes`. Not running: `idle` light blue + the last run's result, or `never run` dim. No news for 30 s: `storage not heard` orange.
+- **55–62 tiers** (`TIERS  items fill the top tier first`): 7 fixed slots, one per priority, highest first: `p10`, racks, sizes, fill bar, `NN%`, `X free`, `N full` (red when over 0; full = over 90%). Unused slots stay blank; more than 7 priorities: the 7th slot says `+N more tiers` dim.
+- **63** (only when there are any): light-blue swatch + `N cells with no size: N Infinity, N MEGA Bulk. Not in the byte totals.`; `, N drives outside the room` is added to it in orange.
+- **65–67 capacity** (rule `CAPACITY`): **Bytes** bar over all sized cells, `NN%`, `used of total` (k/M/G), coloured as cells. **Slots**: cells fitted out of the room's total (cyan bar). Always the last two rows.
 
 ### Refresh
 Read `getDrives` and the totals every 5 s, `getItems` every 30 s (2,700+ kinds), off the draw path; redraw only what changed. A slow read never freezes the screen.
 
 ### Smaller monitors
-Under 79 wide: the banks stack (Bank 1's two walls, then Bank 2's). Under 50 rows tall: the piles go, then energy. Under 39 wide: the room becomes one row of rack tiles (fill bar per rack).
+Under 79 wide: the banks stack (Bank 1's two walls, then Bank 2's). Under 50 rows tall: the piles go first, then energy; the bottom block (defrag, tiers, capacity) always stays anchored to the bottom edge. Under 39 wide: the room becomes one row of rack tiles (fill bar per rack).
 
 ### Taps and keys
 None (display only). The computer's own screen shows the same board scaled down plus `/monitors` (re-pick) and `/help`.

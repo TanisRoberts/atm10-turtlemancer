@@ -704,6 +704,7 @@ The storage lock screen: a 13x11 line-art padlock in gold, centred, with `LOCKED
 - A page's actions are buttons in the content or the footer; the footer's left is always Back (when there is a parent), then tabs, then the pager at the right.
 - Text the user types lives in a text field or in the input row; a monitor shows it but cannot type, and says `type on the computer`.
 - The header chip carries the page title; the state word at the right is the only state in the header.
+- **Big screens are read from the floor** (walls and boards taller than about 40 rows, #117): the header stays on row 1, but the most important lines (totals, alerts, the one number the screen is read for) sit at the **bottom**, in fixed rows counted up from the bottom edge. Reference and rarely read things (legends, long lists) go at the top. Every block keeps a fixed slot: a list that can grow gets a fixed number of rows (blank when unused, `+N more` in the last), so nothing below or above it moves.
 
 ### 10.12 Two-row board entry and departures paging
 
