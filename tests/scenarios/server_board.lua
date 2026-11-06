@@ -81,9 +81,9 @@ T.test("server: a partly built room at 79x67", function()
   local x3 = mon:find("R3 5")
   local x4 = mon:find("R4 10")
   T.truthy(x1 and x2 and x3 and x4, "rack names with priorities")
-  T.eq(y1, 8, "rack row"); T.eq(x1, 1); T.eq(x2, 7); T.eq(x3, 13); T.eq(x4, 22)
+  T.eq(y1, 7, "rack row"); T.eq(x1, 1); T.eq(x2, 7); T.eq(x3, 13); T.eq(x4, 22)
   T.contains(mon, "R12", "unbuilt racks are named too")
-  T.falsy(mon:line(8):find("R5 %d"), "an unbuilt rack has no priority")
+  T.falsy(mon:line(7):find("R5 %d"), "an unbuilt rack has no priority")
   T.eq(mon.h, 67)
   for y = 1, 67 do T.truthy(#mon:line(y) <= 79, "row " .. y .. " wider than the screen") end
   T.absent(mon, "Screen error")
@@ -94,7 +94,7 @@ T.test("server: cells are coloured by fill, empty slots and missing drives are d
   local P = function(name) return COLOURS[name] end
   -- R1 is the top-left rack. Its first drive in board order is the top row of the grid; the bottom row (y0) is built first.
   -- The mock fills drives bottom row first, so R1's first drive sits in the rack's bottom-left: drive row 5, col 1.
-  local x0, y0 = 4, 9 + 4 * 6       -- (R1's first drive is the right-hand one: the west wall reads from high z to low z)
+  local x0, y0 = 4, 8 + 4 * 6       -- (R1's first drive is the right-hand one: the west wall reads from high z to low z)
   local _, bg1 = mon:colourAt(x0, y0)             -- slot 1: 7800 items in a 1k cell = about 96%
   local _, bg2 = mon:colourAt(x0 + 1, y0)         -- slot 2: 6200 items = about 76%
   local _, bg3 = mon:colourAt(x0, y0 + 1)         -- slot 3: 500 items = small
@@ -103,9 +103,9 @@ T.test("server: cells are coloured by fill, empty slots and missing drives are d
   T.eq(bg3, 2 ^ 5, "under 70% is lime")
   -- R3 is built to 6 drives: the top of its grid is empty (a dot on black); R4 has 3 drives
   local _, y_ = mon:find("R3 5")
-  local top = mon:line(9):sub(13, 17)
+  local top = mon:line(8):sub(13, 17)
   T.eq(top, DOT .. DOT .. " " .. DOT .. DOT, "R3's top drive row is not built")
-  local fgc, bgc = mon:colourAt(13, 9)
+  local fgc, bgc = mon:colourAt(13, 8)
   T.eq(bgc, 2 ^ 15, "no drive is on black")
 end)
 
@@ -113,7 +113,7 @@ T.test("server: the tiers, byte totals and the biggest piles", function()
   local w, srv, mon = boot()
   T.contains(mon, "TIERS  items fill the top tier first")
   local _, ty = mon:find("TIERS")
-  T.eq(ty, 40, "tiers start under the room")
+  T.eq(ty, 55, "tiers sit in fixed rows above the capacity block")
   local row10, row5, row0 = mon:find("p10"), mon:find("p5 "), mon:find("p0 ")
   local _, y10 = mon:find("p10"); local _, y5 = mon:find("p5 "); local _, y0 = mon:find("p0 ")
   T.truthy(y10 < y5 and y5 < y0, "highest priority first")
@@ -124,7 +124,41 @@ T.test("server: the tiers, byte totals and the biggest piles", function()
   T.contains(mon, "Energy"); T.contains(mon, "AE/t"); T.contains(mon, "kinds")
   T.contains(mon, "no drive"); T.contains(mon, "no size")      -- the legend
   local cy = select(2, mon:find("Fill "))
-  T.eq(cy, 67, "legend on the last row")
+  T.eq(cy, 3, "legend on row 3, under the header")
+end)
+
+-- #132: big screens are read from the floor: the bottom block sits in fixed rows counted up from the last row.
+local function rowOf(mon, text) local _, y = mon:find(text); return y end
+
+T.test("server: the rows of the 79x67 board (#132)", function()
+  local w, srv, mon, me, st = boot()
+  say(st, { type = "defrag", running = false, done = 0, left = 0, freedBytes = 0 })
+  w:run(6)
+  T.eq(rowOf(mon, "Fill "), 3, "legend"); T.eq(rowOf(mon, "BANK 1 " .. DOT .. " West"), 6, "wall names")
+  T.eq(rowOf(mon, "R1 0"), 7, "rack names")
+  T.eq(rowOf(mon, "BIGGEST PILES"), 39, "piles right under the room")
+  T.eq(rowOf(mon, "Energy"), 49); T.eq(rowOf(mon, "DEFRAG"), 51)
+  T.eq(rowOf(mon, "TIERS"), 55); T.eq(rowOf(mon, "p10 "), 56); T.eq(rowOf(mon, "p0 "), 58)
+  T.eq(rowOf(mon, "cells with no size"), 63)
+  T.eq(rowOf(mon, "CAPACITY"), 65); T.eq(rowOf(mon, "Bytes"), 66); T.eq(rowOf(mon, "Slots"), 67)
+end)
+
+T.test("server: another priority tier moves nothing else (#132)", function()
+  local w, srv, mon, me = boot()
+  local before = {}
+  for _, k in ipairs({ "Energy", "DEFRAG", "TIERS", "cells with no size", "CAPACITY", "Bytes", "Slots", "BIGGEST PILES" }) do before[k] = rowOf(mon, k) end
+  me:addRackAt{ axis = "x", at = 8, col0 = 0, priority = 3, cell = "16k" }
+  w:run(7)
+  T.contains(mon, "p3 ")
+  for k, y in pairs(before) do T.eq(rowOf(mon, k), y, k .. " stayed put") end
+end)
+
+T.test("server: more than 7 tiers: the 7th slot says how many more (#132)", function()
+  local w, srv, mon, me = boot()
+  for i = 1, 6 do me:addRackAt{ axis = "x", at = i <= 3 and 8 or 12, col0 = ((i - 1) % 3) * 2, priority = 20 + i, cell = "1k" } end
+  w:run(7)
+  T.contains(mon, "+3 more tiers")
+  T.eq(rowOf(mon, "+3 more tiers"), 62); T.eq(rowOf(mon, "Slots"), 67)
 end)
 
 T.test("server: storage's defrag news: running, idle, never run, not heard", function()
@@ -149,18 +183,18 @@ end)
 T.test("server: the bridge going offline keeps the last data, dimmed, and comes back", function()
   local w, srv, mon, me = boot()
   T.contains(mon, "R3 5"); T.contains(mon, " ok")
-  local _, bg = mon:colourAt(4, 33)
+  local _, bg = mon:colourAt(4, 32)
   T.eq(bg, 2 ^ 14, "red cell while online")
   me:setOnline(false)
   w:run(12)
   T.contains(mon, "ME offline"); T.contains(mon, "R3 5"); T.contains(mon, "283 cells")
-  _, bg = mon:colourAt(4, 33)
+  _, bg = mon:colourAt(4, 32)
   T.eq(bg, 2 ^ 8, "dimmed (light grey) while offline")
   T.running(srv)
   me:setOnline(true)
   w:run(12)
   T.contains(mon, " ok"); T.absent(mon, "ME offline")
-  _, bg = mon:colourAt(4, 33)
+  _, bg = mon:colourAt(4, 32)
   T.eq(bg, 2 ^ 14)
 end)
 
@@ -216,7 +250,7 @@ T.test("server: racks one block apart: all 120 drives land in their racks, none 
   -- the west walls read high to low z (3 2 1), the east walls low to high (1 2 3); FLIP_2 turns wall 2 round
   for _, n in ipairs({ "R1 3", "R2 2", "R3 1", "R4 3", "R5 2", "R6 1", "R7 3", "R10 1", "R12 3" }) do T.contains(mon, n) end
   for _, n in ipairs({ "R1 1", "R4 1" }) do T.absent(mon, n) end
-  T.falsy(mon:line(9):find(DOT .. DOT .. " " .. DOT .. DOT), "every rack is fully built")
+  T.falsy(mon:line(8):find(DOT .. DOT .. " " .. DOT .. DOT), "every rack is fully built")
 end)
 
 T.test("server: racks with no gap and with a 2-block gap still fit", function()
@@ -232,7 +266,7 @@ T.test("server: an unbuilt rack between built ones keeps the others in place (#1
   local w, srv, mon = gapRoom(1, { wall = 0, rack = 1 })
   T.contains(mon, "110 drives"); T.absent(mon, "outside the room")
   T.contains(mon, "R1 3"); T.contains(mon, "R3 1")
-  T.falsy(mon:line(8):find("R2 %d"), "the middle rack is not built")
+  T.falsy(mon:line(7):find("R2 %d"), "the middle rack is not built")
 end)
 
 T.test("server: RACK_GAP overrides, for a wall with one built rack", function()
@@ -276,11 +310,11 @@ T.test("server: the room size comes from server.env", function()
 end)
 
 T.test("server: smaller monitors stack the banks, then fall back to rack lines", function()
-  local w, srv, mon = boot({ mw = 60, mh = 80 })
+  local w, srv, mon = boot({ mw = 60, mh = 100 })
   T.contains(mon, "BANK 2 " .. DOT .. " West")
   local _, y1 = mon:find("BANK 1"); local _, y2 = mon:find("BANK 2")
   T.truthy(y2 > y1 + 30, "bank 2 sits under bank 1")
-  for y = 1, 80 do T.truthy(#mon:line(y) <= 60, "row " .. y .. " wider than the screen") end
+  for y = 1, 100 do T.truthy(#mon:line(y) <= 60, "row " .. y .. " wider than the screen") end
   local w2, srv2, mon2 = boot({ mw = 30, mh = 30 })
   T.contains(mon2, "R1 "); T.contains(mon2, "R4 "); T.contains(mon2, "racks not built yet")
   for y = 1, 30 do T.truthy(#mon2:line(y) <= 30, "row " .. y .. " wider than the screen") end

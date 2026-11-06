@@ -152,45 +152,57 @@ local function drawTiles(v, room, y, last, stale)
 end
 
 ---------------------------------------------------------------------------
--- The rest of the board
+-- The rest of the board. The bottom block sits in fixed rows counted up from the last row (docs/design/server.md,
+-- UI kit 10.11): nothing in it moves when a tier is added.
 ---------------------------------------------------------------------------
-local function tiers(v, M, y, last)
+local TIER_SLOTS = 7
+
+-- `slots` fixed rows from y: one per priority, highest first, blank when unused; too many: the last says `+N more tiers`
+local function tiers(v, M, y, slots)
   local room, W = M.room, v.W
-  y = section(v, y, "TIERS", "items fill the top tier first")
   local bw = math.max(4, W - 24 - 33)
-  for _, t in ipairs(room.tiers) do
-    if y > last then return y end
+  local list = room.tiers
+  local shown = #list > slots and slots - 1 or #list
+  for i = 1, shown do
+    local t = list[i]
     local f = t.total > 0 and t.used / t.total or 0
-    v:put(2, y, fit("p" .. tostring(t.prio), 4), "fg", "bg")
-    v:put(7, y, fit(table.concat(t.racks, "+"), 7), "fg", "bg")
-    v:put(15, y, fit(sizes(t.sizes), 8), "dim", "bg")
-    bar(v, 24, y, bw, f, M.online and fillRole(f) or "dim")
+    local row = y + i - 1
+    v:put(2, row, fit("p" .. tostring(t.prio), 4), "fg", "bg")
+    v:put(7, row, fit(table.concat(t.racks, "+"), 7), "fg", "bg")
+    v:put(15, row, fit(sizes(t.sizes), 8), "dim", "bg")
+    bar(v, 24, row, bw, f, M.online and fillRole(f) or "dim")
     local x = 24 + bw + 1
-    v:put(x, y, ("%3d%% %s free"):format(pct(t.used, t.total), B.bytes(math.max(0, t.total - t.used))), "fg", "bg")
+    v:put(x, row, ("%3d%% %s free"):format(pct(t.used, t.total), B.bytes(math.max(0, t.total - t.used))), "fg", "bg")
     local full = ("%d full"):format(t.full)
-    v:put(W - #full, y, full, t.full > 0 and "bad" or "dim", "bg")
-    y = y + 1
+    v:put(W - #full, row, full, t.full > 0 and "bad" or "dim", "bg")
   end
+  if #list > slots then v:put(2, y + slots - 1, ("+%d more tiers"):format(#list - shown), "dim", "bg") end
+end
+
+-- the no-size / outside line
+local function noSize(v, M, y)
+  local room, W = M.room, v.W
   local n, parts = 0, {}
   for _, kind in ipairs({ "Infinity", "MEGA Bulk", "other" }) do
     local c = room.noSize[kind]
     if c then n = n + c; parts[#parts + 1] = c .. " " .. kind end
   end
-  if n > 0 and y <= last then
+  local x = 4
+  if n > 0 then
+    local full = ("%d cell%s with no size: %s. Not in the byte totals."):format(n, n == 1 and "" or "s", table.concat(parts, ", "))
+    local outside = room.outside > 0 and (", %d drive%s outside the room"):format(room.outside, room.outside == 1 and "" or "s") or ""
+    -- the outside count shares the line: shorten the no-size text when both do not fit
+    if 3 + #full + #outside > W then full = full:gsub("%. Not in the byte totals%.$", "") end
     v:put(2, y, " ", "fg", "idle")
-    v:put(4, y, fit(("%d cell%s with no size: %s. Not in the byte totals."):format(n, n == 1 and "" or "s", table.concat(parts, ", ")), W - 4), "fg", "bg")
-    y = y + 1
+    x = v:put(4, y, fit(full, W - 4), "fg", "bg")
+    if #outside > 0 then v:put(x, y, fit(outside, W - x), "warn", "bg") end
+  elseif room.outside > 0 then
+    v:put(x, y, fit(("%d drive%s outside the room"):format(room.outside, room.outside == 1 and "" or "s"), W - x), "warn", "bg")
   end
-  if room.outside > 0 and y <= last then
-    v:put(4, y, fit(("%d drive%s outside the room"):format(room.outside, room.outside == 1 and "" or "s"), W - 4), "warn", "bg")
-    y = y + 1
-  end
-  return y
 end
 
-local function defrag(v, M, y, last)
+local function defrag(v, M, y)
   local W = v.W
-  if y + 2 > last then return y end
   y = section(v, y, "DEFRAG")
   local d = M.defrag
   local msg = d and d.msg
@@ -234,9 +246,9 @@ local function energy(v, M, y)
   return y + 1
 end
 
-local function piles(v, M, y, last)
+local function piles(v, M, y)
   local W = v.W
-  if not M.piles or #M.piles == 0 or y + 5 > last then return y end
+  if not M.piles or #M.piles == 0 then return y end
   y = section(v, y, "BIGGEST PILES", "defrag moves these first")
   local colW = math.floor((W - 3) / 2)
   for i = 1, 4 do
@@ -255,6 +267,7 @@ local function piles(v, M, y, last)
 end
 
 local function legend(v, y)
+  v:fill(1, y, v.W, "bg")
   local x = v:put(2, y, "Fill ", "dim", "bg")
   local function sw(role, text, fg, bg, ch)
     v:put(x, y, ch or " ", fg or "fg", bg or role); x = v:put(x + 2, y, text .. "  ", "dim", "bg")
@@ -276,16 +289,10 @@ function B.header(v, M)
   return v:header("Server room", { state = state, color = color, right = right })
 end
 
-function B.draw(v, M, o)
-  o = o or {}
-  local W, H = v.W, v.H
-  local last = H - (o.reserve or 0)
-  local y = B.header(v, M)
-  local room = M.room
-  if not room then return end
-  local stale = M.seen and not M.online
-  y = y + 1                                                    -- blank row under the header
-  -- Bytes and Slots
+-- Bytes and Slots: the last two rows, under a CAPACITY rule at y
+local function capacity(v, M, y, stale)
+  local room, W = M.room, v.W
+  y = section(v, y, "CAPACITY")
   local bw = math.max(4, W - 9 - 27)
   local f = room.total > 0 and room.used / room.total or 0
   v:put(2, y, "Bytes", "dim", "bg")
@@ -295,19 +302,64 @@ function B.draw(v, M, o)
   v:put(2, y + 1, "Slots", "dim", "bg")
   bar(v, 9, y + 1, bw, room.cells / math.max(slotsTotal, 1), stale and "dim" or "info")
   v:put(9 + bw + 1, y + 1, fit(("%3d%% %d of %d cells"):format(pct(room.cells, slotsTotal), room.cells, slotsTotal), W - bw - 10), "fg", "bg")
-  y = y + 3
+end
+
+-- Rows, counted up from `last` (the board's last row). With S tier slots:
+--   last Slots, last-1 Bytes, last-2 CAPACITY, last-4 no size / outside, last-4-S .. last-5 tier slots,
+--   last-5-S TIERS, last-9-S .. last-7-S DEFRAG, last-11-S energy.
+local function blockRows(last, S)
+  return { cap = last - 2, nosize = last - 4, tiers = last - 4 - S, tiersHead = last - 5 - S,
+           defrag = last - 9 - S, energy = last - 11 - S }
+end
+
+function B.draw(v, M, o)
+  o = o or {}
+  local W, H = v.W, v.H
+  local last = H - (o.reserve or 0)
+  local y = B.header(v, M)
+  local room = M.room
+  if not room then return end
+  local stale = M.seen and not M.online
+  local big = H >= 50
+  -- legend on row 3 under the header, its rule on 4: reference text lives at the top
+  if big then
+    legend(v, 3)
+    v:put(1, 4, ("\140"):rep(W), "bar", "bg")
+    y = 6
+  else
+    y = y + 1
+  end
+
+  -- The bottom block. A tall board keeps 7 tier slots whatever the tiers are; a short one only as many as it has.
+  local S = big and TIER_SLOTS or math.max(1, math.min(TIER_SLOTS, #room.tiers))
+  local R = blockRows(last, S)
+  local top = y + 4                                    -- the room (or rack lines) keeps at least a few rows
+  -- short boards drop what does not fit: energy first, then defrag, then the tier list
+  local showEnergy, showDefrag, showTiers = R.energy - 2 >= top, R.defrag - 2 >= top, R.tiersHead - 2 >= top
+  if not showDefrag then showEnergy = false end
+  if not showTiers then showDefrag, showEnergy = false, false end
+  local roomLast = (showEnergy and R.energy or showDefrag and R.defrag or showTiers and R.tiersHead or R.cap) - 2
+  roomLast = math.max(roomLast, y)
+
+  capacity(v, M, R.cap, stale)
+  noSize(v, M, R.nosize)
+  if showTiers then
+    section(v, R.tiersHead, "TIERS", "items fill the top tier first")
+    tiers(v, M, R.tiers, S)
+  end
+  if showDefrag then defrag(v, M, R.defrag) end
+  if showEnergy then energy(v, M, R.energy) end
 
   -- the room: walls side by side, banks stacked, or one line per rack
   local after
-  if W >= #room.walls * wallWidth(room) + (#room.walls - 1) * 3 + 1 then after = drawRoom(v, room, y, last - 1, stale, "row")
-  elseif W >= 39 then after = drawRoom(v, room, y, last - 1, stale, "stack") end
-  if after then y = after + 1 else y = drawTiles(v, room, y, last - 2, stale) + 1 end
-
-  y = tiers(v, M, y, last - 1) + 1
-  y = defrag(v, M, y, last - 1) + 1
-  if y <= last - 1 then y = energy(v, M, y) + 1 end
-  if H >= 50 then piles(v, M, y, last - 1) end
-  if H >= 50 and (o.reserve or 0) == 0 then legend(v, H) end
+  if W >= #room.walls * wallWidth(room) + (#room.walls - 1) * 3 + 1 then after = drawRoom(v, room, y, roomLast, stale, "row")
+  elseif W >= 39 then after = drawRoom(v, room, y, roomLast, stale, "stack") end
+  if after then
+    -- the biggest piles go right under the room while there is space above the energy line
+    if big and showEnergy and after + 1 + 5 <= R.energy - 1 then piles(v, M, after + 1, R.energy - 1) end
+  else
+    drawTiles(v, room, y, roomLast, stale)
+  end
 end
 
 return B

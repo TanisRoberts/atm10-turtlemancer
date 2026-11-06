@@ -30,15 +30,17 @@ Because the first drive column / lowest row of a built wall sets the origin, a w
 
 ## Cells
 
-A cell is coloured by `usedBytes / maxBytes` (lime under 70%, orange to 90%, red over). AP gives a drive's own bytes as 0, so the cells are summed. Cells with no `maxBytes` (ExtendedAE Infinity, MEGA Bulk) are light blue, listed under the tiers by kind, and left out of every byte total. Infinity / Bulk are matched on `"infinity"` / `"bulk"` in the cell item's name: **not checked against the real item ids**; any other sizeless cell is counted as "other".
+A cell is coloured by `usedBytes / maxBytes` (lime under 70%, orange to 90%, red over). AP gives a drive's own bytes as 0, so the cells are summed. Cells with no `maxBytes` (ExtendedAE Infinity, MEGA Bulk) are light blue, listed on the no-size line by kind, and left out of every byte total. Infinity / Bulk are matched on `"infinity"` / `"bulk"` in the cell item's name: **not checked against the real item ids**; any other sizeless cell is counted as "other".
 
 ## Defrag
 
 Storage broadcasts `{ type = "defrag", running, item, done, left, freedBytes }` on `tanis-base` (`storage_defrag.lua`). Running shows the item, `item done+1 of done+left`, a progress bar and `freed`. Not running: `last run: N items, freed X bytes`, or `never run` when both are 0. No message for 30 s (or ever): `storage not heard`.
 
-## Sizes
+## Sizes and rows
 
-79 wide: four walls in a row. Narrower (39+) and tall enough: banks stacked. Otherwise one line per built rack. Under 50 rows tall the piles and legend go. The computer's own screen draws the same board (rack lines on a 51x19) with the search bar at the bottom.
+Big screens are read from the floor (UI kit 10.11), so the bottom block sits in fixed rows counted up from the last row. At 79x67: header 1-2, legend 3 (rule 4), the room from row 6 (wall names 6, rack names 7, sizes 37), biggest piles 39-43 right under it, energy 49, defrag 51-53, tiers 55 (`TIERS`) with 7 fixed slots on 56-62 (blank when unused, `+N more tiers` in the 7th), the no-size / outside line 63, `CAPACITY` 65, Bytes 66, Slots 67. A new tier fills a blank slot and moves nothing.
+
+Shorter than 79x67: the piles go first, then energy, then defrag; the bottom block stays anchored to the bottom. Under 50 rows there is no legend, and only as many tier slots as there are tiers. 79 wide: four walls in a row. Narrower (39+) and tall enough for two banks plus the block: banks stacked. Otherwise one line per built rack. The computer's own screen draws the same board (rack lines on a 51x19) with the search bar at the bottom.
 
 ## Tests
 
