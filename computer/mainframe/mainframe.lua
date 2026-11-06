@@ -17,15 +17,13 @@
 -- Find the wall, the one place that looks (shared/screens.lua, docs/systems/screens.md): the biggest monitor
 -- touching the computer, else the one picked from the monitors on the cable (saved in monitors.cfg).
 -- More slots (the light strips) go in this list later.
--- wall.env: SCALE (text size) and VIEW (where the strip goes); edit, then reboot. ANIM is added by wall.lua.
+-- wall.env: SCALE (text size); edit, then reboot. ANIM is added by wall.lua.
 local wallEnv = require("envfile").new("wall.env", "Mainframe wall settings (reboot after an edit).", {
   { "SCALE", 1, "Text size on the wall: 0.5 (smallest, most rows) up to 5, in steps of 0.5. 1 suits an 8x6 wall." },
-  { "VIEW", "bottom", "bottom: island strip on the bottom rows, the board just above it (easy to read from the floor). top: strip at the top." },
 })
 wallEnv.load()
 local SCALE = tonumber(wallEnv.v.SCALE) or 1
 if SCALE < 0.5 or SCALE > 5 or (SCALE * 2) % 1 ~= 0 then SCALE = 1 end
-local VIEW = wallEnv.v.VIEW == "top" and "top" or "bottom"
 local screens = require("screens").new({ slots = { { id = "wall", label = "the main wall", required = false, scale = SCALE } } })
 screens:open()
 local wall, wallName = screens:get("wall")
@@ -60,7 +58,7 @@ end
 -- The wall: wall.lua draws on the monitor, given its peripheral name so taps find it.
 local function runWall()
   if not wallName then return os.pullEvent("never") end
-  local ok, err = pcall(function() require("wall").run(wall, wallName, { scale = SCALE, view = VIEW }) end)
+  local ok, err = pcall(function() require("wall").run(wall, wallName, { scale = SCALE }) end)
   printError("Wall stopped: " .. tostring(err))
   return os.pullEvent("never")
 end

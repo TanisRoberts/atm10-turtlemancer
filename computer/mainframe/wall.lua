@@ -5,8 +5,6 @@
 --   _G.WALL_VISITORS  butler: who is around, and the "are you home" line
 -- wall.run(mon, name) draws all three on one monitor; `name` is its peripheral name (monitor_touch needs it).
 -- The wall is read-only: nothing to tap.
--- VIEW=bottom (wall.env, the default) puts the strip on the bottom rows and sits the board right above it, so the
--- lines that matter are at eye level for someone standing at the foot of a tall wall. VIEW=top is the old layout.
 local ui = require("ui")
 
 local wall = {}
@@ -24,10 +22,8 @@ local TONE = { running = "good", paused = "warn", setup = "info" }
 local function fit(s, n) return ui.text.fit(tostring(s), n) end
 
 -- Where everything goes for a W x H wall. Pure, so a test can read it.
--- L.top..L.bot are the rows the board (header included) and the visitors may use; L.sy is the strip's first row and
--- L.ry the rule's row (normal wall only). view = "bottom" (default) or "top".
-function wall.layout(W, H, view)
-  local L = { W = W, H = H, bot = H }
+function wall.layout(W, H)
+  local L = { W = W, H = H }
   if W >= BIG_W and H >= BIG_H then
     L.big = true
     L.sw = 44                                  -- station column
@@ -36,12 +32,7 @@ function wall.layout(W, H, view)
     L.vx = W - L.vw + 1
     L.top = 1
   else
-    if view == "top" then
-      L.sy, L.ry, L.top = 1, STRIP_ROWS + 1, STRIP_ROWS + 2      -- strip, rule, then the board header
-    else
-      L.bottom = true
-      L.sy, L.ry, L.top, L.bot = H - STRIP_ROWS + 1, H - STRIP_ROWS, 1, H - STRIP_ROWS - 1
-    end
+    L.top = STRIP_ROWS + 2                     -- strip, rule, then the board header
     L.bx, L.bw = 1, W
     if W >= VISITOR_MIN then
       L.vw = VISITOR_W
@@ -81,21 +72,21 @@ local function chip(v, x, y, text)
 end
 
 local function strip(v, L, st)
-  local W, y = L.W, L.sy
+  local W = L.W
   if not st then
-    v:put(2, y, fit("Island station not running", W - 2), "dim", "bg")
+    v:put(2, 1, fit("Island station not running", W - 2), "dim", "bg")
     return
   end
-  local x = chip(v, 1, y, "ISLAND")
-  x = v:put(x + 1, y, st.time .. "  ", "fg", "bg")
-  x = v:put(x, y, st.phase, phaseTone(st.phase), "bg")
-  x = v:put(x, y, "  day " .. st.day .. "  ", "dim", "bg")
-  v:put(x, y, st.weather, weatherTone(st.weather), "bg")
-  v:put(1, y + 1, fit((" Moon %s  Biome %s  Light %s/%s"):format(st.moon, st.biome, tostring(st.sky), tostring(st.block)), W),
+  local x = chip(v, 1, 1, "ISLAND")
+  x = v:put(x + 1, 1, st.time .. "  ", "fg", "bg")
+  x = v:put(x, 1, st.phase, phaseTone(st.phase), "bg")
+  x = v:put(x, 1, "  day " .. st.day .. "  ", "dim", "bg")
+  v:put(x, 1, st.weather, weatherTone(st.weather), "bg")
+  v:put(1, 2, fit((" Moon %s  Biome %s  Light %s/%s"):format(st.moon, st.biome, tostring(st.sky), tostring(st.block)), W),
     "dim", "bg")
   st.W = W
   local text, tone = dangerLine(st)
-  v:put(1, y + 2, fit(text, W), tone, "bg")
+  v:put(1, 3, fit(text, W), tone, "bg")
 end
 
 local function rule(v, y, W)
@@ -169,32 +160,22 @@ local function paginate(items, cap)
   return pages
 end
 
--- The page of board rows to show now: rows, and the paging dots (nil when everything fits). Grouped under section
--- labels on the big wall, and on a normal wall when the groups fit without paging.
-local function boardPage(L, list)
-  local cap = L.bot - L.top                     -- rows below the header
+local function board(v, L, list)
   local items = boardItems(list or {}, L.big)
-  if not L.big then
-    local grouped = boardItems(list or {}, true)
-    if #grouped <= cap and #grouped > #items + 1 then items = grouped end
-  end
+  local cap = L.H - L.top                       -- rows below the header
   local pages = paginate(items, cap)
   if #pages > 1 then pages = paginate(items, cap - 1) end   -- the last row shows where we are
   local page = #pages > 1 and (math.floor(os.clock() / PAGE_S) % #pages + 1) or 1
-  local dots
-  if #pages > 1 then
-    local d = {}
-    for i = 1, #pages do d[i] = i == page and "o" or "." end
-    dots = table.concat(d, " ")
-  end
-  return pages[page], dots
-end
-
-local function board(v, L, rows, dots, list)
+  local rows = pages[page]
   rows.title = "Machines"
-  v:board(L.bx, L.hy, L.bw, rows)
-  if not list then v:put(L.bx + 1, L.hy + 1, "no data yet", "dim", "bg") end
-  if dots then v:put(L.bx + math.floor((L.bw - #dots) / 2), L.bot, dots, "dim", "bg") end
+  v:board(L.bx, L.top, L.bw, rows)
+  if not list then v:put(L.bx + 1, L.top + 1, "no data yet", "dim", "bg") end
+  if #pages > 1 then
+    local dots = {}
+    for i = 1, #pages do dots[i] = i == page and "o" or "." end
+    local s = table.concat(dots, " ")
+    v:put(L.bx + math.floor((L.bw - #s) / 2), L.H, s, "dim", "bg")
+  end
 end
 
 ---------------------------------------------------------------------------------------------------------
@@ -202,46 +183,37 @@ end
 ---------------------------------------------------------------------------------------------------------
 local function visitors(v, L, vis)
   local x, w = L.vx, L.vw
-  v:boardHeader(x, L.hy, w, "Visitors")
+  v:boardHeader(x, L.top, w, "Visitors")
   if not vis then return end
-  local y = L.hy + 1
+  local y = L.top + 1
   if not vis.detector then
     v:put(x + 1, y, fit("No player detector", w - 1), "bad", "bg")
   elseif #vis.rows == 0 then
     v:put(x + 1, y, fit("Nobody yet", w - 1), "dim", "bg")
   end
   for _, e in ipairs(vis.rows) do
-    if y > L.bot - 2 then break end
+    if y > L.H - 2 then break end
     local nameW = math.max(1, w - #e.when - 3)
     v:put(x + 1, y, fit(e.name, nameW), e.here and "good" or "fg", "bg")
     v:put(x + w - #e.when, y, e.when, e.tone, "bg")
     y = y + 1
   end
-  if vis.foot then v:put(x + 1, L.bot, fit(vis.foot.text, w - 1), vis.foot.tone, "bg") end
+  if vis.foot then v:put(x + 1, L.H, fit(vis.foot.text, w - 1), vis.foot.tone, "bg") end
 end
 
 ---------------------------------------------------------------------------------------------------------
 -- The wall
 ---------------------------------------------------------------------------------------------------------
 function wall.draw(v)
-  local L = wall.layout(v.W, v.H, wall.view)
+  local L = wall.layout(v.W, v.H)
   local st, list, vis = _G.WALL_STRIP, _G.WALL_BOARD, _G.WALL_VISITORS
   if st then st = setmetatable({ W = L.W }, { __index = st }) end
-  if L.big then station(v, L, st) else strip(v, L, st); rule(v, L.ry, L.W) end
-  local rows, dots = boardPage(L, list)
-  -- The header row. Anchored to the bottom, the board and visitors end on the row above the rule (blank rows go to
-  -- the top of the wall, out of the way); otherwise the header is on the first free row.
-  L.hy = L.top
-  if L.bottom then
-    local need = math.max(#rows + (dots and 1 or 0) + (list and 0 or 1),
-      (L.vx and vis) and (#(vis.rows or {}) + (vis.foot and 2 or 0)) or 1)
-    L.hy = math.max(L.top, L.bot - need)
-  end
-  board(v, L, rows, dots, list)
+  if L.big then station(v, L, st) else strip(v, L, st); rule(v, STRIP_ROWS + 1, L.W) end
+  board(v, L, list)
   if L.vx then
     visitors(v, L, vis)
     -- the divider(s) between columns
-    for y = L.big and 1 or L.hy, L.bot do
+    for y = L.big and 1 or L.top, L.H do
       if L.big then v:put(L.bx - 1, y, " ", "fg", "bar") end
       v:put(L.vx - 1, y, " ", "fg", "bar")
     end
@@ -249,12 +221,10 @@ function wall.draw(v)
 end
 
 -- Draw the wall on `mon` (a monitor, peripheral name `name`) until the program ends.
--- opts.scale: the monitor's text scale (mainframe.lua reads SCALE from wall.env), opts.view: "bottom" or "top".
+-- opts.scale: the monitor's text scale (mainframe.lua reads SCALE from wall.env).
 function wall.run(mon, name, opts)
-  opts = opts or {}
-  wall.view = opts.view
   ui.loadAnim("wall.env")
-  local v = ui.view(mon, { side = name, scale = opts.scale })
+  local v = ui.view(mon, { side = name, scale = (opts or {}).scale })
   ui.run(v, function(view)
     local ok, err = pcall(wall.draw, view)
     if not ok then view:put(1, view.H, fit("wall: " .. tostring(err), view.W), "bad", "bg") end
