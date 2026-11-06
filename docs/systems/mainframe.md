@@ -16,7 +16,8 @@ The programs that used to draw now hand data over in globals, and `wall.lua` red
 
 `wall.layout(W, H)` says where things go.
 
-- **Normal wall** (57x24, 57x38, 36x24): strip on rows 1-3 (island chip, time, phase with Night red, day, weather; moon, biome, light; danger red, alert orange, or "All clear" lime), a rule, then the `MACHINES` board. At 50 wide and up, the `VISITORS` column sits at the right (20 wide) with "You're home" (lime) or "Away 12m, locked" (orange) on its last row.
+- **Text size and view** (`wall.env`, read by `mainframe.lua` at boot; reboot after an edit): `SCALE=1` (0.5 to 5 in steps of 0.5; an 8x6 wall is 164x81 at 0.5 and 82x40 at 1) and `VIEW=bottom` (default) or `top`. With `bottom` the strip is on the last three rows with the rule above it, and the board and visitors end on the row above the rule; the spare rows are left blank at the top, so what matters is at eye level from the floor. `top` is the old layout. On a normal wall the board shows the group labels when they fit without paging.
+- **Normal wall** (82x40, 57x24, 57x38, 36x24): strip on three rows (bottom with `VIEW=bottom`, rows 1-3 with `top`) (island chip, time, phase with Night red, day, weather; moon, biome, light; danger red, alert orange, or "All clear" lime), a rule, then the `MACHINES` board. At 50 wide and up, the `VISITORS` column sits at the right (20 wide) with "You're home" (lime) or "Away 12m, locked" (orange) on its last row.
 - **Big wall** (120 wide and 60 high or more, e.g. 164x81): three columns: the Island Station (key/value rows, danger line, the nearby list), the board with machines grouped under Storage, Mining, Farming, Building and Labs, and visitors.
 - **Board rows** are the kit's `v:board`: stripe, glyph, state word, detail, last heard. A row not heard from for 30 s goes grey with a still `?`; a machine never heard from says `never`. `returning` is cyan. When rows do not fit, the board pages every 8 s and the last row shows `o . .` dots.
 - Motion follows `ANIM=` in `wall.env` (full, calm or off; made on first run).
@@ -39,7 +40,7 @@ The wall has nothing to type into and the mainframe has no kit screen on its own
 
 ## Tests
 
-`tests/scenarios/mainframe_wall.lua` runs the real `mainframe.lua` with stand-in machines at 57x24, 57x38, 36x24 and 164x81: rows, colours, the visitor column, grey rows after 30 s, paging. `operator_mainframe.lua` checks the Operator rows on the wall, the fuel chest text (report, stale, none) and both fuel alerts.
+`tests/scenarios/mainframe_wall.lua` runs the real `mainframe.lua` with stand-in machines at 82x40, 57x24, 57x38, 36x24 and 164x81, plus `VIEW=top`: rows, colours, the visitor column, grey rows after 30 s, paging. `operator_mainframe.lua` checks the Operator rows on the wall, the fuel chest text (report, stale, none) and both fuel alerts.
 
 ## Which monitor is the wall
 

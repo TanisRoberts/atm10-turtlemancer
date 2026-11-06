@@ -169,7 +169,9 @@ function S:handle(ev, a, b, c, d)
     if slot then
       local old = self.size[slot]
       local new = self:measure(slot)
-      if not (old and new and old.scale ~= new.scale) then os.queueEvent("screens_changed", slot) end
+      -- The scale set at boot (adopt) fires one too, after it was measured: same size, nothing changed.
+      local same = old and new and old.w == new.w and old.h == new.h
+      if not (old and new and old.scale ~= new.scale) and not same then os.queueEvent("screens_changed", slot) end
     end
   elseif ev == "peripheral_detach" then
     local slot = self:slotOf(a)

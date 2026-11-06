@@ -82,8 +82,47 @@ T.test("mainframe wall 57x24: strip, board rows and the visitor column", functio
   T.truthy(x and x > 35, mon:text())
   T.truthy(mon:line(y):find("here", 1, true), mon:line(y))
   T.truthy(mon:find("You're home"), mon:text())
-  -- the board sits under the strip: the header is on row 5
-  T.truthy(mon:line(5):find("MACHINES", 1, true), mon:line(5))
+  -- VIEW=bottom (the default): the strip is on the bottom three rows, the board ends on the row above the rule
+  T.truthy(mon:line(22):find("ISLAND", 1, true), mon:line(22))
+  T.truthy(mon:line(24):find("All clear", 1, true), mon:line(24))
+  local _, yh = mon:find("MACHINES")
+  T.truthy(yh > 5, "board pushed down to the strip:\n" .. mon:text())
+  T.truthy(mon:line(20):find("You're home", 1, true), mon:line(20))
+end)
+
+T.test("mainframe wall 82x40 (an 8x6 wall at scale 1): wall.env made, groups shown, everything at the bottom", function()
+  local world, mf, mon = build{ w = 82, h = 40 }
+  world:run(20)
+  T.eq(mf.error, nil)
+  local env = mf:readFile("wall.env")
+  T.truthy(env and env:find("SCALE=1", 1, true) and env:find("VIEW=bottom", 1, true) and env:find("ANIM=", 1, true), env)
+  T.eq(mon:getTextScale(), 1)
+  T.eq(mf.bootAt, 0)                           -- the scale change at boot does not reboot it
+  T.truthy(mon:line(38):find("ISLAND", 1, true), mon:text())
+  for _, g in ipairs({ "STORAGE", "MINING" }) do T.truthy(mon:find(g), g .. "\n" .. mon:text()) end
+  local _, ym = mon:find("MINING")
+  local _, yc = mon:find("Canary-07")
+  T.truthy(yc > ym, "Canary under MINING")
+  local _, yh = mon:find("MACHINES")
+  T.truthy(yh > 20, "board near the bottom:\n" .. mon:text())
+  for y = 1, yh - 1 do T.eq(mon:line(y):match("^%s*$") ~= nil, true) end
+end)
+
+T.test("mainframe wall VIEW=top: the old layout, strip on top and the header on row 5", function()
+  local world = cc.world()
+  local mf = world:computer{ id = 1, label = "Mainframe" }
+  mf:attach("top", cc.wireless{ ender = true })
+  mf:attach("right", envDetector())
+  local mon = mf:monitor("bottom", 57, 24)
+  mf:installRole("mainframe")
+  mf.files["butler.lua"] = nil
+  mf:writeFile("wall.env", "SCALE=0.5\nVIEW=top\n")
+  mf:run("mainframe")
+  world:run(10)
+  T.eq(mf.error, nil)
+  T.eq(mon:getTextScale(), 0.5)
+  T.truthy(mon:line(1):find("ISLAND", 1, true), mon:text())
+  T.truthy(mon:line(5):find("MACHINES", 1, true), mon:text())
 end)
 
 T.test("mainframe wall: a row not heard from for 30 s goes grey with a still ?", function()
@@ -124,7 +163,7 @@ T.test("mainframe wall: rows that do not fit page every 8 s", function()
   world:run(20)
   T.eq(mf.error, nil)
   local first = mon:text()
-  T.truthy(mon:line(24):find("[o%.] [o%.]"), mon:line(24))
+  T.truthy(mon:line(20):find("[o%.] [o%.]"), mon:text())
   T.truthy(mon:find("Canary-04"), first)
   world:run(8)
   T.truthy(mon:find("Canary-29") or mon:find("Canary-27"), mon:text())
