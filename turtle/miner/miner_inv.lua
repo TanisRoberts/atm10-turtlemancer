@@ -41,12 +41,12 @@ VALUE_TAGS = { "c:ores", "c:raw_materials", "c:gems", "c:dusts", "c:nuggets", "c
 -- "computercraft:" = a turtle/computer picked up by an older Canary: always brought home, never dumped
 VALUE_NAMES = { "computercraft:", "cable", "raw_", "_ore", "diamond", "emerald", "lapis", "redstone", "coal", "quartz",
   "amethyst_shard", "ancient_debris", "netherite", "nugget", "ingot", "gem", "crystal", "dust", "gilded",
-  "glowstone", "shroomlight" }
+  "glowstone", "shroomlight", "essence", "prosperity" }
 valuableCache = {}
 function isValuable(slot)
   local d = turtle.getItemDetail(slot)
   if not d then return false end
-  if S.loot and S.loot[d.name] then return true end -- out of a chest: always comes home
+  if S.loot and S.loot[d.name] then return true end -- out of a chest or an ore: always comes home
   if isGear(d.name) then return true end
   local v = valuableCache[d.name]
   if v ~= nil then return v end
@@ -125,6 +125,28 @@ function countsBySlot()
   return c
 end
 
+-- Whatever came into my slots since `before` (countsBySlot) is loot: it always comes home, never thrown away.
+-- (junk is still junk: netherrack in a fortress chest gets no free ride home)
+function markLoot(before)
+  S.loot = S.loot or {}
+  for s = 1, 16 do
+    local d = turtle.getItemDetail(s)
+    if d and not JUNK[d.name] and (not before[s] or before[s][1] ~= d.name or before[s][2] < d.count) then
+      S.loot[d.name] = true
+    end
+  end
+end
+
+-- Dig an ore with `dig` (turtle.dig/digUp/digDown). What it drops is marked as loot, so an ore whose drop
+-- isn't tagged or named like an ore product (Mystical Agriculture's inferium essence, prosperity shards)
+-- still comes home instead of being thrown out when the bag fills.
+function digOre(dig)
+  local before = countsBySlot()
+  local ok, why = dig()
+  if ok then markLoot(before) end
+  return ok, why
+end
+
 -- Take everything out of the container on that side. Everything taken that isn't on my junk list
 -- is marked as loot (always comes home, never thrown away). True when it's empty; false if I filled up first (after making
 -- room by throwing junk away).
@@ -135,14 +157,7 @@ lootAt = function(kind)
     local before = countsBySlot()
     if SUCK[kind]() then
       took = took + 1
-      S.loot = S.loot or {}
-      for s = 1, 16 do
-        local d = turtle.getItemDetail(s)
-        -- (junk out of a chest is still junk: netherrack in a fortress chest gets no free ride home)
-        if d and not JUNK[d.name] and (not before[s] or before[s][1] ~= d.name or before[s][2] < d.count) then
-          S.loot[d.name] = true
-        end
-      end
+      markLoot(before)
       S.lootItems = (S.lootItems or 0) + 1
       save()
     elseif emptySlots() > 0 then
@@ -173,8 +188,8 @@ function lootUpDown()
 end
 
 function checkUpDown()
-  if isOre(turtle.inspectUp()) then turtle.digUp(); S.ores = (S.ores or 0) + 1 end
-  if isOre(turtle.inspectDown()) then turtle.digDown(); S.ores = (S.ores or 0) + 1 end
+  if isOre(turtle.inspectUp()) then digOre(turtle.digUp); S.ores = (S.ores or 0) + 1 end
+  if isOre(turtle.inspectDown()) then digOre(turtle.digDown); S.ores = (S.ores or 0) + 1 end
   lootUpDown()
   lookForLava()
 end

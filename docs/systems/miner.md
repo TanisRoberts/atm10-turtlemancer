@@ -32,7 +32,7 @@ Miners are one program (`turtle/miner/`) named by the dimension they are set up 
 
 ## Junk
 
-A Canary's junk list is `junk.txt` on the turtle (Firecrest's comes from the Nether Foreman). A plain line is junk: thrown away underground, but up to 4 slots still come home while storage is under its cap. A `keep` line is never thrown away. A `dump` line is junk that never comes home (netherrack and end stone, which the Mining Dimension is full of); it's also dropped down the shaft before he unloads. Lines added to the default list later are appended once to an older `junk.txt` (deleting them afterwards sticks).
+A Canary's junk list is `junk.txt` on the turtle (Firecrest's comes from the Nether Foreman). A plain line is junk: thrown away underground, but up to 4 slots still come home while storage is under its cap. A `keep` line is never thrown away. A `dump` line is junk that never comes home (netherrack and end stone, which the Mining Dimension is full of); it's also dropped down the shaft before he unloads. Lines added to the default list later are appended once to an older `junk.txt` (deleting them afterwards sticks). Whatever an ore block drops is loot for the trip (like a chest's contents): it always comes home and is never thrown out to make room, even when the item isn't tagged or named like an ore product (Mystical Agriculture's inferium essence and prosperity shards).
 
 ## A moved miner
 

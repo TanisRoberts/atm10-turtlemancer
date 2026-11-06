@@ -248,3 +248,25 @@ T.test("miner: a chunk swap landing while the radio loop waits in receive never 
   end
   cost.equipLeft, cost.equipRight = old[1], old[2]
 end)
+
+T.test("miner: what an ore drops comes home even when its name isn't an ore product (inferium essence, prosperity shards)", function()
+  local w = cc.world()
+  w.gpsOn = true
+  -- 20 kinds of rock that are neither junk nor valuable: his bag fills, and he throws out what isn't valuable
+  for x = -20, 20 do w:fill(x, 40, -20, x, 63, 20, "minecraft:rock_" .. (x % 20)) end
+  w:setBlock(2, 62, 1, { name = "mysticalagriculture:inferium_ore", drop = "mysticalagriculture:inferium_essence" })
+  w:setBlock(4, 61, 2, { name = "mysticalagriculture:prosperity_ore", drop = "mysticalagriculture:prosperity_shard" })
+  w:setBlock(6, 62, 3, { name = "somemod:glimmer_ore", drop = "somemod:glimmer" })   -- a drop no list knows
+  local dock = MS.barrel()
+  dock:give("minecraft:coal", 64)
+  w:setBlock(1, 64, 0, "minecraft:barrel", dock)
+  local t = MS.turtle(w)
+  local f = MS.foreman(w)
+  MS.setup(w, t)
+  w:run(10)
+  MS.order(f)
+  T.waitFor(w, MS.finished(f), 2500, "never finished the range")
+  T.eq(dock:count("mysticalagriculture:inferium_essence"), 1, "inferium essence came home")
+  T.eq(dock:count("mysticalagriculture:prosperity_shard"), 1, "prosperity shard came home")
+  T.eq(dock:count("somemod:glimmer"), 1, "an unknown ore's drop came home")
+end)

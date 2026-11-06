@@ -63,7 +63,8 @@ function move(kind)
     elseif op.detect() then
       -- A chest: take everything out first (a dug chest spills its loot on the floor)
       if isLootable(kind, okI, info) and not lootAt(kind) then unwait(); save(); return false, CHEST_FULL end
-      local ok, why = op.dig()
+      local ok, why
+      if isOre(okI, info) then ok, why = digOre(op.dig) else ok, why = op.dig() end
       if not ok then
         why = tostring(why)
         if why:find("nbreakable") or why:find("ermission") or why:find("rotect") then unwait(); save(); return false, why end
