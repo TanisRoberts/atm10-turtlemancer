@@ -49,6 +49,7 @@ local function build(opts)
     net:add("BigReactors-Reactor_1", rb); net:add("in_1", i2); net:add("out_1", o2)
     units["BigReactors-Reactor_1"] = { kind = "reactor", num = 2, label = "Reactor-2", mode = "auto", enabled = true, input = "in_1", output = "out_1" }
   end
+  local det = opts.detector and net:add("energy_detector_0", world:detector{ rate = opts.detector, limit = 4000 })
   if opts.fullOutlet then outP:give("bigreactors:cyanite_ingot", 64 * 9) end
   for _, u in pairs(units) do            -- the reactor room's two ender chests; a full outlet means the waste chest is full too
     u.fuelChest, u.wasteChest = "enderstorage:ender_chest_" .. (2 * u.num - 2), "enderstorage:ender_chest_" .. (2 * u.num - 1)
@@ -80,7 +81,7 @@ local function build(opts)
   mf:installRole("mainframe")
   mf:writeFile("launch.lua", LAUNCH)
   mf:run("launch")
-  return world, mf, opc, chat, mon, ra, rb
+  return world, mf, opc, chat, mon, ra, rb, det
 end
 
 local UUID = "00000000-0000-0000-0000-000000000001"
@@ -246,4 +247,65 @@ T.test("operator mainframe: island operator status mentions the fuel chest", fun
   world:run(20)
   say(world, mf, "$island operator")
   T.truthy(heard(chat, "Fuel chest 48/64, store 412"), dump(chat))
+end)
+
+-- Reactor 1 makes 3000 FE/t at full power (prod 3000, rods at level 60 report 1800). Draw 1700 = 57% of 3000.
+local function count(chat, pat) local n = 0; for _, m in ipairs(chat.sent) do if m.msg:find(pat) then n = n + 1 end end; return n end
+
+T.test("operator mainframe: the board row and island operator show power use", function()
+  local world, mf, opc, chat, mon = build{ supply = 100, wide = 130, detector = 1700 }
+  world:run(25)
+  local _, y = mon:find("Operator")
+  local row = mon:line(y)
+  T.truthy(row:find("use 5%d%% %(1,700 / 3,000 FE/t%)"), row)
+  say(world, mf, "$island operator")
+  T.truthy(heard(chat, "Power use 5%d%% %(1,700 / 3,000 FE/t%)"), dump(chat))
+  T.falsy(heard(chat, "Power deficit"), dump(chat))
+end)
+
+T.test("operator mainframe: no detector leaves the use text out", function()
+  local world, mf, opc, chat, mon = build{ supply = 100, wide = 130 }
+  world:run(25)
+  local _, y = mon:find("Operator")
+  T.falsy(mon:line(y):find("use ", 1, true), mon:line(y))
+end)
+
+T.test("operator mainframe: Power deficit fires after the delay, once, and clears when draw drops", function()
+  local world, mf, opc, chat, mon, ra, rb, det = build{ supply = 100, wide = 130, detector = 3600 }
+  say(world, mf, "$island alerts")
+  world:run(15)
+  T.eq(count(chat, "Power deficit"), 0, "fired before the 30 s delay\n" .. dump(chat))
+  world:run(40)
+  T.truthy(heard(chat, "Power deficit: the grid draws 3,600 FE/t but the reactors can only make 3,000", "Tanis"), dump(chat))
+  world:run(30)
+  T.eq(count(chat, "Power deficit"), 1, "should alert once")
+  det.rate = 1000
+  world:run(25)
+  det.rate = 3600
+  world:run(15)
+  world:run(40)
+  T.eq(count(chat, "Power deficit"), 2, "should alert again after it cleared\n" .. dump(chat))
+end)
+
+T.test("operator mainframe: a surge shorter than the delay raises nothing", function()
+  local world, mf, opc, chat, mon, ra, rb, det = build{ supply = 100, detector = 1000 }
+  say(world, mf, "$island alerts")
+  world:run(15)
+  det.rate = 4000
+  world:run(12)
+  det.rate = 1000
+  world:run(60)
+  T.eq(count(chat, "Power deficit"), 0, dump(chat))
+end)
+
+T.test("operator mainframe: a stale power report raises no deficit and the use text goes", function()
+  local world, mf, opc, chat, mon, ra, rb, det = build{ supply = 100, wide = 130, detector = 3600 }
+  mf:writeFile("island.env", "DEFICIT_AFTER=60\n")   -- longer than the 30 s it takes the report to go stale
+  say(world, mf, "$island alerts")
+  world:run(5)
+  det.rate = function() return nil end   -- the detector stops answering; the last reading stays in the record
+  world:run(100)
+  T.eq(count(chat, "Power deficit"), 0, dump(chat))
+  local _, y = mon:find("Operator")
+  T.falsy(mon:line(y):find("use ", 1, true), mon:line(y))
 end)

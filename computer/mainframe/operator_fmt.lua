@@ -53,6 +53,31 @@ function F.fuelText(rf, age)
   return out
 end
 
+-- The Operator's power record (draw, potential, pct, seen) is stale when its detector has not answered for this long
+F.POWER_STALE = 30
+
+-- The record when it is fresh enough to use, else nil (no detector on the cable, or not heard from lately).
+function F.power(op)
+  local pw = op and (op.power or (op.plant or {}).power)
+  if not pw or not pw.draw or not pw.pct then return nil end
+  if (pw.seen or 0) > F.POWER_STALE then return nil end
+  return pw
+end
+
+-- "use 64% (1,920 / 3,000 FE/t)"; nil with no fresh reading.
+function F.powerText(op)
+  local pw = F.power(op)
+  if not pw then return nil end
+  return ("use %d%% (%s / %s FE/t)"):format(math.floor(pw.pct + 0.5), num(pw.draw), num(pw.potential))
+end
+
+-- true when the grid draws more than the reactors can make; false when not; nil when it can't be told (stale).
+function F.deficit(op)
+  local pw = F.power(op)
+  if not pw then return nil end
+  return pw.draw > pw.potential
+end
+
 -- Rows for the status board: { name, state, detail, seen }. One row with the plant totals; with more than one
 -- reactor, a row for each reactor under it. `rf`/`rfAge`: Storage's reactor_fuel report and its age in seconds.
 function F.boardRows(op, seen, rf, rfAge)
@@ -70,7 +95,9 @@ function F.boardRows(op, seen, rf, rfAge)
   local lead = #R > 1 and ("%d of %d on, "):format(running, #R) or ((running > 0 and "ON, " or "OFF, "))
   if #R == 0 then lead = "no reactor found, " end
   if setup > 0 then lead = ("%d awaiting setup, "):format(setup) .. lead end
-  local rows = { { op.label or "Operator", worst, ("%s%s FE/t, buffer %s, %s"):format(lead, num(p.fe or 0), pct(p.buf), F.fuelText(rf, rfAge) or uranium(op)), seen } }
+  local use = F.powerText(op)
+  local rows = { { op.label or "Operator", worst, ("%s%s FE/t, buffer %s, %s%s"):format(lead, num(p.fe or 0), pct(p.buf),
+    use and (use .. ", ") or "", F.fuelText(rf, rfAge) or uranium(op)), seen } }
   if #R > 1 then
     for _, u in ipairs(R) do
       rows[#rows + 1] = { "  " .. u.label, F.state(u), ("%s %s FE/t, buffer %s%s"):format(u.active and "ON" or "OFF",
@@ -103,7 +130,10 @@ function F.plantLine(op, rf, rfAge)
   local R = F.reactors(op)
   local p = op.plant or {}
   if #R == 0 then return "Operator: no reactor on its cable." end
-  if #R == 1 then return F.unitLine(R[1]) .. " " .. ura() .. "." end
+  local use = F.powerText(op)
+  local tail = use and (" Power " .. use .. ".") or ""
+  if F.deficit(op) then tail = tail .. " Power deficit: draw is above what the reactors can make." end
+  if #R == 1 then return F.unitLine(R[1]) .. " " .. ura() .. "." .. tail end
   local running = 0
   for _, u in ipairs(R) do if u.active then running = running + 1 end end
   local line = ("Operator: %d reactors, %d on, %s FE/t, buffer %s. %s."):format(#R, running, num(p.fe or 0), pct(p.buf), ura())
@@ -113,7 +143,7 @@ function F.plantLine(op, rf, rfAge)
     if s == "waiting" or s == "offline" then bad[#bad + 1] = u.label end
   end
   if #bad > 0 then line = line .. " Needs a look: " .. table.concat(bad, ", ") .. "." end
-  return line
+  return line .. tail
 end
 
 -- Problems for alerts: { [key] = text }.
@@ -126,6 +156,13 @@ function F.problems(op)
     elseif u.wasteStuck then out["waste:" .. u.label] = u.label .. ": waste not clearing. The outlet port isn't emptying; is Storage running?" end
   end
   return out
+end
+
+-- The text of the Power deficit alert (island.lua raises it after a delay; see F.deficit).
+function F.deficitText(op)
+  local pw = F.power(op)
+  if not pw then return "Power deficit." end
+  return ("Power deficit: the grid draws %s FE/t but the reactors can only make %s."):format(num(pw.draw), num(pw.potential))
 end
 
 -- Fuel problems from Storage's report (kept apart from the Operator's, so they hold while it is quiet).

@@ -64,3 +64,26 @@ T.test("operator power: no detector means no power record", function()
   T.truthy(mf.G.last, "no status")
   T.eq(mf.G.last.power, nil)
 end)
+
+T.test("operator power: an idle reactor keeps its full-power figure; forced off or disabled counts for nothing", function()
+  local w = cc.world(); local net = w:net()
+  local inP, outP = port(), port()
+  inP:give("mekanism:ingot_uranium", 10)
+  local r = w:reactor{ stored = 200000, active = true, prod = 2000, rodScale = true, rodLevel = 50, rods = 4, inPort = inP, outPort = outP }
+  net:add("BigReactors-Reactor_0", r); net:add("port_in", inP); net:add("port_out", outP)
+  net:add("energy_detector_0", w:detector{ rate = 500 })
+  local mf = listener(w)
+  local c = plant(w, net); c:run("operator")
+  w:run(15)
+  T.truthy(mf.G.last.power.potential > 1900, "potential " .. tostring(mf.G.last.power.potential))
+  -- Auto idles it (switched off on a full buffer): still counts at its last full-power figure
+  r:setActive(false)
+  w:run(10)
+  T.truthy(mf.G.last.power.potential > 1900, "idle reactor dropped to " .. tostring(mf.G.last.power.potential))
+  -- forced off by hand: counts for nothing
+  local cfg = c:readTable("operator.cfg")
+  cfg.units["BigReactors-Reactor_0"].mode = "off"
+  c:writeTable("operator.cfg", cfg)
+  w:run(15)
+  T.eq(mf.G.last.power.potential, 0)
+end)

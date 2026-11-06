@@ -2,7 +2,8 @@
 --   Energy detectors (AP 0.8 type `energy_detector`) sit on the reactor-room cable. Draw = their summed
 --   getTransferRate() (FE/t), averaged over WINDOW seconds. Potential = what the running reactors would make at
 --   full power: each one's FE/t scaled up from its current rod level (fe * 100 / level). A reactor with no reading
---   yet (just switched on) uses the figure remembered from its last run. pct = draw / potential.
+--   yet (just switched on) or idling (Auto, full buffer) uses the figure remembered from its last run; disabled or
+--   manual-off reactors count for nothing. pct = draw / potential.
 -- Detectors are labelled like units (Detector-1, ...): numbers handed out once, kept in operator.cfg, never reused.
 local M = {}
 local WINDOW = 5
@@ -72,6 +73,13 @@ function M.unitPotential(u)
   return u.potential
 end
 
+-- Disabled or manually forced off: such a reactor makes nothing, so it adds nothing to the potential.
+-- (One that Auto merely idles on a full buffer still counts at its last full-power figure.)
+function M.switchedOff(u)
+  local cfg = u.cfg or {}
+  return cfg.enabled == false or (u.hold and u.hold.mode or cfg.mode) == "off"
+end
+
 -- The `power` record for the status: { draw, potential, pct, limit, seen }, or nil with no detector on the cable.
 function M.record(self, units, now)
   if #self.found == 0 then return nil end
@@ -83,7 +91,7 @@ function M.record(self, units, now)
   end
   local pot = 0
   for _, u in ipairs(units) do
-    if u.kind == "reactor" and u.present and u.status and u.status.active then pot = pot + (M.unitPotential(u) or 0) end
+    if u.kind == "reactor" and u.present and u.status and u.status.answers and not M.switchedOff(u) then pot = pot + (M.unitPotential(u) or 0) end
   end
   local pct = draw and pot > 0 and (draw / pot * 100) or nil
   return { draw = draw, potential = pot, pct = pct, limit = self.limit, seen = self.seenAt and (now - self.seenAt) or nil,

@@ -21,6 +21,7 @@ local opfmt = require("operator_fmt")
 local ring = require("ring")
 local tune = require("envfile").new("island.env", "Mainframe alert settings.", {
   { "OPERATOR_SILENT_AFTER", 60, "Seconds without the Operator's heartbeat before a 'reactor silent' alert." },
+  { "DEFICIT_AFTER", 30, "Seconds the grid must draw more than the reactors can make before a 'power deficit' alert." },
 })
 tune.load()
 local HOSTILES = {
@@ -226,6 +227,7 @@ local function farmLine(st)
 end
 
 local operatorKeys = {} -- reactor problems we've raised
+local deficitSince = nil -- os.clock() when draw first went above potential (nil = not in deficit)
 local fuelKeys = {}     -- reactor fuel chest problems we've raised
 local lastHaul = {}   -- per Canary
 local factoryKeys = {} -- plastic factory problems we've raised
@@ -286,6 +288,19 @@ local function watch()
       if not probs[k] then condition("operator:" .. k, false); operatorKeys[k] = nil end
     end
     for k, text in pairs(probs) do operatorKeys[k] = true; condition("operator:" .. k, true, text) end
+    -- Power deficit: draw above potential for DEFICIT_AFTER seconds. A stale report (or a silent Operator)
+    -- raises nothing and leaves an alert already up as it is; it clears once draw is back at or below potential.
+    local d = nil
+    if not silent and _G.OPERATOR then d = opfmt.deficit(_G.OPERATOR) end
+    if d == true then
+      deficitSince = deficitSince or os.clock()
+      if os.clock() - deficitSince >= tune.v.DEFICIT_AFTER then condition("powerDeficit", true, opfmt.deficitText(_G.OPERATOR)) end
+    elseif d == false then
+      deficitSince = nil
+      condition("powerDeficit", false)
+    else
+      deficitSince = nil
+    end
   end
   -- Storage's reactor fuel report (its own radio message, so these hold while the Operator is quiet)
   do
