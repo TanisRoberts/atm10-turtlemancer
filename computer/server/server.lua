@@ -22,6 +22,7 @@ local env = require("envfile").new("server.env", "Server room board settings.", 
   { "RACKS_PER_WALL", 3, "Racks along a wall." },
   { "RACK_COLS", 2, "Drive columns in a rack." },
   { "RACK_ROWS", 5, "Drive rows in a rack." },
+  { "RACK_GAP", "", "Blocks between racks on a wall. Blank = worked out from the drives; a number overrides (for a room with one built rack)." },
   { "FLIP_1", 0, "1 = draw wall 1 (board order) the other way round. Same for FLIP_2 to FLIP_4." },
   { "FLIP_2", 0, "" }, { "FLIP_3", 0, "" }, { "FLIP_4", 0, "" },
 })
@@ -33,7 +34,7 @@ local function config()
   local flip = {}
   for n = 1, 4 do if v["FLIP_" .. n] == 1 then flip[n] = true end end
   return { banks = v.BANKS, wallsPerBank = v.WALLS_PER_BANK, racksPerWall = v.RACKS_PER_WALL,
-           rackCols = v.RACK_COLS, rackRows = v.RACK_ROWS, flip = flip }
+           rackCols = v.RACK_COLS, rackRows = v.RACK_ROWS, rackGap = tonumber(v.RACK_GAP), flip = flip }
 end
 
 ---------------------------------------------------------------------------

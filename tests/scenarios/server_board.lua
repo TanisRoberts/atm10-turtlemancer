@@ -184,6 +184,76 @@ T.test("server: FLIP_1=1 mirrors the first wall", function()
   T.absent(mon, "R1 0")
 end)
 
+-- Tanis's real room (#131): 4 walls (x = 0, 4, 8, 12) x 3 racks of 2x5 drives; racks stand `gap` blocks apart. Each rack
+-- on a wall gets a priority of its place along the coordinate (offset 0 = 1, next = 2, ...) so the board shows where it landed.
+local function gapRoom(gap, skipRack, extraEnv)
+  local w = cc.world()
+  local net = w:net()
+  local me = net:add("me_bridge_0", w:meBridge{})
+  for wall = 0, 3 do
+    for rk = 0, 2 do
+      if not (skipRack and wall == skipRack.wall and rk == skipRack.rack) then
+        me:addRackAt{ axis = "x", at = wall * 4, col0 = rk * (2 + gap), priority = rk + 1, cell = "1k" }
+      end
+    end
+  end
+  local srv = w:computer{ id = 2, label = "Server" }
+  srv:attach("back", cc.wired(net))
+  srv:attach("top", cc.wireless{ ender = true })
+  local mon = srv:monitor("right", 79, 67)
+  srv:installRole("server")
+  if extraEnv then srv:writeFile("server.env", extraEnv) end
+  srv:run("server")
+  w:run(8)
+  return w, srv, mon
+end
+
+T.test("server: racks one block apart: all 120 drives land in their racks, none outside (#131)", function()
+  local w, srv, mon = gapRoom(1, nil, "FLIP_2=1\n")
+  T.running(srv)
+  T.contains(mon, "120 drives"); T.contains(mon, "1200 cells")
+  T.absent(mon, "outside the room")
+  -- the west walls read high to low z (3 2 1), the east walls low to high (1 2 3); FLIP_2 turns wall 2 round
+  for _, n in ipairs({ "R1 3", "R2 2", "R3 1", "R4 3", "R5 2", "R6 1", "R7 3", "R10 1", "R12 3" }) do T.contains(mon, n) end
+  for _, n in ipairs({ "R1 1", "R4 1" }) do T.absent(mon, n) end
+  T.falsy(mon:line(9):find(DOT .. DOT .. " " .. DOT .. DOT), "every rack is fully built")
+end)
+
+T.test("server: racks with no gap and with a 2-block gap still fit", function()
+  local w, srv, mon = gapRoom(0)
+  T.contains(mon, "120 drives"); T.absent(mon, "outside the room")
+  T.contains(mon, "R1 3"); T.contains(mon, "R3 1")
+  local w2, srv2, mon2 = gapRoom(2)
+  T.contains(mon2, "120 drives"); T.absent(mon2, "outside the room")
+  T.contains(mon2, "R1 3"); T.contains(mon2, "R3 1")
+end)
+
+T.test("server: an unbuilt rack between built ones keeps the others in place (#131)", function()
+  local w, srv, mon = gapRoom(1, { wall = 0, rack = 1 })
+  T.contains(mon, "110 drives"); T.absent(mon, "outside the room")
+  T.contains(mon, "R1 3"); T.contains(mon, "R3 1")
+  T.falsy(mon:line(8):find("R2 %d"), "the middle rack is not built")
+end)
+
+T.test("server: RACK_GAP overrides, for a wall with one built rack", function()
+  -- only the far rack of a wall exists: no gap can be seen, so the offset says it is rack 1 unless RACK_GAP is set
+  local function one(env)
+    local w = cc.world()
+    local net = w:net()
+    local me = net:add("me_bridge_0", w:meBridge{})
+    me:addRackAt{ axis = "x", at = 0, col0 = 0, priority = 7, cell = "1k" }
+    local srv = w:computer{ id = 2, label = "Server" }
+    srv:attach("back", cc.wired(net))
+    local mon = srv:monitor("right", 79, 67)
+    srv:installRole("server")
+    if env then srv:writeFile("server.env", env) end
+    srv:run("server"); w:run(8)
+    return mon
+  end
+  local m = one("RACK_GAP=1\n")
+  T.contains(m, "10 drives"); T.absent(m, "outside the room"); T.contains(m, "R1 7")
+end)
+
 T.test("server: an empty room draws every rack as no drive", function()
   local w = cc.world()
   local net = w:net()

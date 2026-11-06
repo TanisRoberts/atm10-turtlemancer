@@ -7,7 +7,7 @@
 --   rack = { name, wall, idx, grid = { [row 1..rows, top first] = { [col 1..cols] = drive } }, built, prio, mixed,
 --            used, total, full, sizes = { bytes... } }
 --   cell = a getDrives cell: maxBytes/usedBytes, or no maxBytes for an Infinity / Bulk cell (no size)
--- cfg: banks wallsPerBank racksPerWall rackCols rackRows, flip = { [wallNumber] = true }.
+-- cfg: banks wallsPerBank racksPerWall rackCols rackRows, rackGap (blocks between racks; nil = worked out), flip = { [wallNumber] = true }.
 local L = {}
 
 L.FULL = 0.9           -- over this a cell is "full"
@@ -102,6 +102,30 @@ function L.build(drives, cfg)
     room.walls[n] = wall
   end
 
+  -- the gap between racks: racks may stand a block or more apart. Per wall, the distinct drive columns form runs of
+  -- consecutive coordinates; the space between two runs is a gap (or several racks). The room is built the same all
+  -- round, so take the smallest gap seen on any wall (0 when every wall is one run). cfg.rackGap overrides.
+  local gap = tonumber(cfg.rackGap)
+  if not gap or gap < 0 then
+    gap = math.huge
+    for _, g in ipairs(kept) do
+      local seen, cs = {}, {}
+      for _, d in ipairs(g.drives) do
+        local c = d.position[colKey]
+        if not seen[c] then seen[c] = true; cs[#cs + 1] = c end
+      end
+      table.sort(cs)
+      for i = 2, #cs do
+        local sp = cs[i] - cs[i - 1] - 1
+        if sp > 0 and sp < gap then gap = sp end
+      end
+    end
+    if gap == math.huge then gap = 0 end
+  end
+  gap = math.floor(gap)
+  local pitch = rcols + gap
+  room.rackGap = gap
+
   -- 4. columns and rows inside each built wall
   for n, g in ipairs(kept) do
     local wall = room.walls[n]
@@ -116,12 +140,13 @@ function L.build(drives, cfg)
       local c = d.position[colKey]
       local col = wall.reversed and (cmax - c) or (c - cmin)
       local row = d.position.y - ymin                    -- 0 = bottom
-      local ri = math.floor(col / rcols) + 1
-      if col < 0 or row < 0 or row >= rrows or ri > rpw or math.floor(col) ~= col or math.floor(row) ~= row then
+      local ri = math.floor(col / pitch) + 1
+      local rcol = col % pitch                           -- 0-based column in the rack; past rcols = in a gap
+      if col < 0 or row < 0 or row >= rrows or ri > rpw or rcol >= rcols or math.floor(col) ~= col or math.floor(row) ~= row then
         outside = outside + 1
       else
         local rack = wall.racks[ri]
-        local rr, rc = rrows - row, col % rcols + 1
+        local rr, rc = rrows - row, rcol + 1
         if rack.grid[rr][rc] then outside = outside + 1 else
           rack.grid[rr][rc] = d
           rack.built = rack.built + 1

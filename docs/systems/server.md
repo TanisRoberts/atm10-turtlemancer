@@ -20,11 +20,13 @@ Manifest role `server` (computers list, last). Needs the bridge on the cable, an
 
 Walls = drives sharing a plane (same x, or same z; whichever axis gives fewer groups). Banks = the walls in coordinate order, `WALLS_PER_BANK` at a time; first wall of a bank is West/North, second East/South. Columns run as seen from the aisle (West wall: high z to low z, East: low to high; North: low x to high x, South: high to low), rows by y from the wall's lowest drive. A rack is `RACK_COLS` x `RACK_ROWS` drives. Racks `R1`.. in board order; racks with no drive are drawn as "no drive". A wall comes out backwards: `FLIP_<n>=1` in `server.env`.
 
+Racks may stand apart (Tanis's room has a one-block gap). On each wall the distinct drive columns form runs of consecutive coordinates; the space between two runs is a gap. The board takes the smallest gap seen on any wall (0 if none), so the rack pitch is `RACK_COLS + gap`: rack = `offset / pitch`, column = `offset % pitch`, and a column past `RACK_COLS` (a drive in the gap) counts as outside. An unbuilt rack between built ones keeps the others in place as long as some wall shows the gap. `RACK_GAP=` in `server.env` (blank = work it out) overrides it, needed when no wall shows a gap, e.g. one built rack at the far end.
+
 Not drawn but counted as `N drives outside the room`: drives more than 64 blocks from the middle of the room, extra planes beyond `BANKS * WALLS_PER_BANK`, and drives off the wall's grid. ME chests (`type` without "drive") are ignored.
 
 Because the first drive column / lowest row of a built wall sets the origin, a wall whose first rack or bottom row is not built yet can come out shifted: build from the start of the wall and bottom row up, or use `FLIP_n`.
 
-`server.env`: `BANKS=2 WALLS_PER_BANK=2 RACKS_PER_WALL=3 RACK_COLS=2 RACK_ROWS=5 FLIP_1..4=0` (edits are picked up within 5 s).
+`server.env`: `BANKS=2 WALLS_PER_BANK=2 RACKS_PER_WALL=3 RACK_COLS=2 RACK_ROWS=5 RACK_GAP= FLIP_1..4=0` (edits are picked up within 5 s).
 
 ## Cells
 
