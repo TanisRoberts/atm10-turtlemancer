@@ -8,7 +8,25 @@ Every controller draws its screens with `shared/ui.lua`, which implements this d
 
 ## 1. Screens and size classes
 
-Monitors run at text scale 0.5, CC's smallest. Characters: `round((64n-20)/3)` wide by `round((64n-20)/4.5)` tall for n blocks.
+Small monitors run at text scale 0.5, CC's smallest; big walls (6 blocks or more on a side) run at text scale 1 (section 1.1). Characters for n blocks: `round((64n-20)/(6s))` wide by `round((64n-20)/(9s))` tall at scale s, so `round((64n-20)/3)` by `round((64n-20)/4.5)` at 0.5. A character cell is 6x9 pixels at every scale (2:3), so a mockup drawn in a monospace font must use that cell or it comes out the wrong shape.
+
+### 1.1 Visual direction: big walls
+
+Decided with Tanis on #117. Most of Tanis's monitors are now big: 8x6, 7x4 and 4x5.
+
+| Monitor | Scale 0.5 | Scale 1 |
+|---|---|---|
+| 8x6 | 164x81 | 82x40 |
+| 7x4 | 143x52 | 71x26 |
+| 4x5 | 79x67 | 39x33 |
+
+- **Design for the big monitor first.** A wall is read from a few blocks back and from below, not flat on.
+- **The top of a big monitor is the hardest part to read** (far away and at a steep angle), and the taller the monitor the worse it gets. Put what is read at a glance (alerts, power, the one number that matters) in fixed slots in the lower half, and reference lists you step back to read at the top. A monitor at ground height tilts less, so a large chart can go at the top.
+- **Text scale 1 on walls 6 blocks or more on a side**, and pick the scale with Tanis for others. Bigger text beats more detail on a wall; the detail stays one tap away on the computer.
+- **Big text only where it matters:** block digits (10.13) for at most two numbers per wall.
+- **Nothing moves.** Every part has fixed rows. Empty slots stay blank, nothing slides up to fill the space, and lists that do not fit turn pages in place (10.12) instead of scrolling or shifting.
+- **Computer screens stay as they are:** 51x19 and 39x13 are read flat on and are already cramped. Keep them dense and easy to read; don't spend their rows on big text.
+
 
 | Screen | Blocks | Characters | Class |
 |---|---|---|---|
@@ -686,3 +704,25 @@ The storage lock screen: a 13x11 line-art padlock in gold, centred, with `LOCKED
 - A page's actions are buttons in the content or the footer; the footer's left is always Back (when there is a parent), then tabs, then the pager at the right.
 - Text the user types lives in a text field or in the input row; a monitor shows it but cannot type, and says `type on the computer`.
 - The header chip carries the page title; the state word at the right is the only state in the header.
+
+### 10.12 Two-row board entry and departures paging
+
+For big walls (#117). A board row (10.5) split over two rows: row 1 is the stripe, name (14 wide), glyph and state word in the state colour, and last heard right-aligned; row 2 is the detail, indented 4, dim, cut with `..`. The stripe runs down both rows. Not heard for 30 s: the whole entry grey, last heard orange.
+
+```text w=61
+▒ Firecrest-02   \ working                                 3s
+▒   Y 31, 4 chunks left, fuel 2,100                          
+▒ Canary-12      ! lost                                    3m
+▒   not heard since 05:58, last at Y -51                     
+```
+
+**Departures paging:** entries keep a fixed order and slot. When they don't fit, the whole list turns to the next page every `PAGE_S` seconds (3 on the mainframe wall), and a dot row under the list shows the page (`o . .`). A short last page leaves its slots blank. One page: no dots. `v:board(x, y, w, rows, { tworow = true })`.
+
+### 10.13 Block number
+
+Big digits for the one or two numbers a wall is read for (power use, the time). 3x5 font, from `shared/screens.lua` moved into the kit, plus `%`, `:` and `-`. Each font pixel is `px` cells wide and `py` rows tall (2x1 at text scale 1, about square; 4x2 for a bigger one); one pixel gap between glyphs. Drawn as background colour in the tone, so `113%` at 2x1 is 30 wide by 5 tall. `v:bigNumber(x, y, "113%", "warn", { px = 2, py = 1 })` returns the end column.
+
+### 10.14 Needs you slots
+
+A fixed list of alert lines (10.3) under a gold `NEEDS YOU` section label, `n` slots tall (4 on the mainframe wall). Worst first: red, then orange, each saying what is wrong. More than `n`: the last slot says `+3 more: Smelter, Seagull, ...` in orange. Empty: slot 1 `Nothing needs you.` lime, slot 2 a dim one-line summary, the rest blank. The list never grows or shrinks, so nothing below it moves. Unlike 10.3, a wall's slots may hold more than two alerts.
+
