@@ -235,7 +235,7 @@ T.test("operator screen: one reactor on a narrow screen opens straight on its Po
 end)
 
 T.test("operator screen: the wall shows the chart on top, panels in the middle, the glance band below", function()
-  local world, c, m, ra = build(51, 19, { 164, 81 }, { run = 400, detector = { rate = 5000, limit = 2147483647 } })
+  local world, c, m, ra = build(51, 19, { 164, 81 }, { run = 400, detector = { rate = 4000, limit = 2147483647 } })
   T.eq(c.error, nil)
   for _, t in ipairs({ "PLANT BUFFER, LAST 30 MINUTES", "now ", "-30 min", "-15 min", "100%", "POWER GRID", "REACTORS", "Reactors on",
     "Supply (Storage)", "Reactor-1", "Reactor-2", "POWER LEVEL", "Output", "Waste outlet", "POWER USE", "NEEDS YOU", "RECENT",
@@ -276,10 +276,11 @@ T.test("operator screen: the wall shows the chart on top, panels in the middle, 
 end)
 
 T.test("operator screen: the wall's power use slot, throttled and without a detector", function()
-  local world, c, m = build(51, 19, { 164, 81 }, { run = 60, detector = { rate = 5000, limit = 2000 } })
+  local world, c, m = build(51, 19, { 164, 81 }, { run = 60, detector = { rate = 5000 } })   -- 166%: the breaker trips after 10 s
   T.eq(c.error, nil)
   T.truthy(m:find("THROTTLED"), "throttle tag\n" .. m:text())
-  T.truthy(m:find("Throttled at 2,000 FE/t"), "capped figure")
+  T.truthy(m:find("Throttled at"), "capped figure\n" .. m:text())
+  T.truthy(m:find("Reset breaker") or m:find("Reset"), "reset button")
   T.truthy(m:find("Power throttled"), "needs you line")
   local red = 0
   for yy = 61, 70 do for xx = 3, 70 do local _, b = m:colourAt(xx, yy); if b == COL.red then red = red + 1 end end end

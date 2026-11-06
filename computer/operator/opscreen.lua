@@ -95,6 +95,17 @@ end
 
 local function tell(msg) if msg then ui.say(msg, "warn") end end
 
+-- The power breaker (oppower.lua) is tripped: the status carries a power.limit.
+local function tripped(pw) return pw and pw.limit ~= nil end
+-- "Reset breaker" (tap twice). The only way to lift the cap; the Operator never does it by itself.
+local function resetButton(v, ctx, x, y)
+  v:buttons(x, y, { { label = "Reset breaker", short = "Reset", style = "danger", confirm = true, id = "breaker",
+    fn = function()
+      if ctx.ctl.resetBreaker() then ui.say("Breaker reset: the detector is no longer capped", "good") end
+    end } })
+end
+S.tripped, S.resetButton = tripped, resetButton
+
 -- A tile: `rows` = 5 (stripe, name and state, what it waits for, buffer, power, fuel) or 2 (name and state, buffer).
 function S.tile(v, x, y, w, r, o)
   o = o or {}
@@ -176,7 +187,7 @@ local function netText(t)
 end
 
 -- The Power Grid column: x, y0 (header row), w, last row it may use.
-function S.grid(v, x, y0, w, last, rec, t)
+function S.grid(v, x, y0, w, last, rec, t, ctx)
   v:boardHeader(x, y0, w, "POWER GRID")
   local y = y0 + 1
   v:put(x + 1, y, "Output", "dim", "bg")
@@ -202,7 +213,10 @@ function S.grid(v, x, y0, w, last, rec, t)
     if i == 1 then y = y end
   end
   local foot = last
-  if t.problems > 0 then
+  if tripped(t.power) and ctx and last - 1 > y then
+    v:put(x + 1, foot, "THROTTLED", "bad", "bg")
+    resetButton(v, ctx, x + 1, foot - 1)
+  elseif t.problems > 0 then
     v:put(x + 1, foot, D.fit(t.problems .. " needs fixing", w - 2), "warn", "bg")
   else
     v:put(x + 1, foot, "All good", "good", "bg")
@@ -250,7 +264,7 @@ local function overview(v, ctx, R, t)
   local open = function(r) if r.awaiting then S.wizard.open(v, r) else openReactor(v, r, "power") end end
   if W >= 50 then
     local gw = 17
-    S.grid(v, 1, 3, gw, H - 2, rec, t)
+    S.grid(v, 1, 3, gw, H - 2, rec, t, ctx)
     for y = 3, H - 1 do v:put(gw + 1, y, " ", "fg", "bar") end
     v:boardHeader(gw + 2, 3, W - gw - 1, "REACTORS")
     local tx = gw + 3
@@ -355,7 +369,8 @@ local function powerTab(v, ctx, r)
   end
   D.section(v, 2, 3, W - 2, "POWER LEVEL")
   if W >= 50 and H >= 17 then
-    local rh = min(max(H - 12, 3), 14)
+    local trip = tripped(ctx.rec and ctx.rec.power)
+    local rh = min(max(H - 12 - (trip and 1 or 0), 3), 14)
     local rw = 3
     local width, caption = D.rods(v, 3, 4, rods, rw, rh, running)
     local sx = 3 + width + 5
@@ -370,6 +385,11 @@ local function powerTab(v, ctx, r)
     y = D.buffer(v, 2, y, W - 2, r.buf, r.onBelow or 0.3, r.offAbove or 0.9, "Buffer")
     local dt, tone = drawText(ctx.rec and ctx.rec.power)
     if dt then v:kv(2, y, W - 2, "Grid draw", dt, tone); y = y + 1 end
+    if trip then
+      v:put(2, y, "Breaker tripped: detector capped", "bad", "bg")
+      resetButton(v, ctx, W - 17, y)
+      y = y + 1
+    end
     y = D.section(v, 2, y + 1, W - 2, "REACTOR")
     v:kv(2, y, W - 2, "Fuel", inletText(r))
     v:kv(2, y + 1, W - 2, "Temperature", ("fuel %sC  casing %sC"):format(D.num(r.fuelTemp), D.num(r.casing)))
@@ -390,6 +410,7 @@ local function powerTab(v, ctx, r)
     v:kv(2, y + 1, W - 2, "Temp", ("fuel %sC  casing %sC"):format(D.num(r.fuelTemp), D.num(r.casing)))
     local dt, tone = drawText(ctx.rec and ctx.rec.power)
     if dt and y + 2 < H - 1 then v:kv(2, y + 2, W - 2, "Draw", dt, tone) end
+    if tripped(ctx.rec and ctx.rec.power) and y + 3 < H - 1 then resetButton(v, ctx, 2, y + 3) end
   else
     local width = D.rods(v, 3, 4, rods, 2, 5, running)
     local sx = 3 + width + 2

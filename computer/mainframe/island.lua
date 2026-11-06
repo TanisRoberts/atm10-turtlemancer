@@ -320,6 +320,11 @@ local function watch()
       deficitSince = nil
     end
   end
+  -- Power throttled: the Operator's breaker is tripped. Stays up until Tanis presses Reset on the Operator.
+  if _G.OPERATOR_SEEN and not (os.clock() - _G.OPERATOR_SEEN > tune.v.OPERATOR_SILENT_AFTER) and _G.OPERATOR then
+    local text = opfmt.throttledText(_G.OPERATOR)
+    condition("powerThrottled", text ~= nil, text or "Power throttled.")
+  end
   -- Storage's reactor fuel report (its own radio message, so these hold while the Operator is quiet)
   do
     local seen = _G.REACTOR_FUEL_SEEN

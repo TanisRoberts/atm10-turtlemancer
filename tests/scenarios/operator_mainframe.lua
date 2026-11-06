@@ -309,3 +309,18 @@ T.test("operator mainframe: a stale power report raises no deficit and the use t
   local _, y = mon:find("Operator")
   T.falsy(mon:line(y):find("use ", 1, true), mon:line(y))
 end)
+
+T.test("operator mainframe: Power throttled alert while the breaker is tripped, and it stays after the draw falls", function()
+  local world, mf, opc, chat, mon, ra, rb, det = build{ supply = 100, wide = 130, detector = 1000 }
+  say(world, mf, "$island alerts")
+  world:run(15)
+  T.eq(count(chat, "Power throttled"), 0, dump(chat))
+  det.rate = 6000                                -- 200% of 3000
+  world:run(40)
+  T.eq(count(chat, "Power throttled"), 1, "should alert once\n" .. dump(chat))
+  T.truthy(heard(chat, "Press Reset on the Operator", "Tanis"), dump(chat))
+  det.rate = 500
+  world:run(60)
+  T.eq(count(chat, "Power throttled"), 1, "cleared by itself?\n" .. dump(chat))
+  T.truthy(det.limit < 1000000, "detector uncapped")
+end)

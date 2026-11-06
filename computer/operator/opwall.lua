@@ -159,7 +159,7 @@ return function(S)
   local function throttled(pw) return pw and pw.limit and pw.limit < 1e9 end
 
   -- Rows 59-79 left: POWER USE in block digits, then the figures and a note.
-  local function powerUse(v, t)
+  local function powerUse(v, t, ctx)
     local pw = t.power
     local thr = throttled(pw)
     v:boardHeader(1, 59, 70, "POWER USE")
@@ -183,6 +183,7 @@ return function(S)
           (pw.askedFor and (" for " .. D.age(pw.askedFor)) or "")
         v:put(3, 73, note, "bad", "bg")
       end
+      if ctx and ctx.ctl then S.resetButton(v, ctx, 3, 75) end
     else
       v:put(3, 72, draw .. " of " .. pot .. " FE/t", "fg", "bg")
       if (pct or 0) >= 100 then
@@ -239,7 +240,7 @@ return function(S)
       end
     end
     rule(v, 58)
-    powerUse(v, t)
+    powerUse(v, t, ctx)
     glance(v, rec, R, t)
     for yy = 59, H - 2 do v:put(72, yy, " ", "fg", "bar") end
     v:footer({ back = function() ui.say("This is the top page. Hold Ctrl+T to stop the Operator.", "fg") end })

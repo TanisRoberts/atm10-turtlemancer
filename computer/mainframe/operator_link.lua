@@ -25,7 +25,7 @@ while true do
   end
   local c = _G.OPERATOR_CMD
   if c and (c.left or 0) > 0 and os.clock() - (c.at or -10) >= 1 then
-    rednet.broadcast({ type = "operator_cmd", unit = c.unit, mode = c.mode, level = c.level }, PROTOCOL)
+    rednet.broadcast({ type = "operator_cmd", unit = c.unit, mode = c.mode, level = c.level, power = c.power }, PROTOCOL)
     c.left, c.at = c.left - 1, os.clock()
   end
 end

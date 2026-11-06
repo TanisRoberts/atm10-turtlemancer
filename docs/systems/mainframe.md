@@ -37,7 +37,8 @@ Storage broadcasts `{ type = "reactor_fuel", chests = { { name, label, units, ke
 - **Alerts:** `Fuel chest low` (a chest under its `low`; names the chest label and `units/keep`, clears at or above `low`) and `Nothing left to stock` (`supply == 0`). Both are silent while the report is stale. They replace `Fuel supply low`; `URANIUM_LOW` is no longer used (old `island.env` files keep the line, harmlessly).
 - **Power use:** the Operator row also says `use 64% (1,920 / 3,000 FE/t)` (draw / potential, from the Operator's `power` record, see `docs/systems/operator.md`), after the buffer. `island operator` adds `Power use ...` the same way. Left out with no detector on the cable, no draw yet, or a record older than 30 s (`POWER_STALE`).
 - **Power deficit** alert (`island alerts`, island strip): draw above potential for `DEFICIT_AFTER` seconds (`island.env`, default 30), so a short surge raises nothing. It clears as soon as draw is at or below potential. While the power report is stale (30 s) or the Operator is silent nothing new is raised and an alert already up is left as it is. Not raised when potential is 0 (nothing to compare with). `island operator` adds `Power deficit: ...` while draw is above potential.
-- Code: `operator_fmt.lua` (`fuelText`, `fuelProblems`, `powerText`, `deficit`, `deficitText`), raised from `island.lua`'s `watch()`.
+- **Power throttled** alert (island strip and chat): while the Operator's breaker is tripped (`power.limit` set). It stays until Reset is pressed on the Operator (the mainframe cannot reset it) and the text says so.
+- Code: `operator_fmt.lua` (`fuelText`, `fuelProblems`, `powerText`, `deficit`, `deficitText`, `throttledText`), raised from `island.lua`'s `watch()`.
 
 ## Commands
 

@@ -41,6 +41,15 @@ return function(plant, E, hooks)
     return n > 0
   end
 
+  -- The power breaker (oppower.lua): is it tripped, and lift it. Returns true when it was tripped.
+  function C.breakerTripped() return hooks.grid ~= nil and hooks.grid:tripped() end
+  function C.resetBreaker()
+    if not hooks.grid then return false end
+    local was = hooks.grid:reset()
+    if was then kick() end
+    return was
+  end
+
   -- Hold a power level for HOLD_MIN minutes (the reactor is forced ON, then control returns to Auto).
   function C.hold(ref, level)
     for _, u in ipairs(reactors(ref)) do

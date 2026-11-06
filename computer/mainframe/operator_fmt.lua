@@ -165,6 +165,15 @@ function F.deficitText(op)
   return ("Power deficit: the grid draws %s FE/t but the reactors can only make %s."):format(num(pw.draw), num(pw.potential))
 end
 
+-- The breaker (Operator, issue #121): text of the Power throttled alert while the detector is capped, else nil.
+function F.throttledText(op)
+  local pw = op and (op.power or (op.plant or {}).power)
+  if not pw or not pw.limit then return nil end
+  local want = pw.asked and ("the base wanted %s FE/t"):format(num(pw.asked)) or "the base wanted more than the reactors make"
+  return ("Power throttled: %s, so the energy detector is capped at %s FE/t. Press Reset on the Operator once the batteries have recovered."):format(
+    want, num(pw.limit))
+end
+
 -- Fuel problems from Storage's report (kept apart from the Operator's, so they hold while it is quiet).
 -- Nothing is raised for a stale or missing report.
 function F.fuelProblems(rf, age)

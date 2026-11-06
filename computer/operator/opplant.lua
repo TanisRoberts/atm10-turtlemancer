@@ -67,6 +67,7 @@ function M:load()
       self.cfg.units = type(t.units) == "table" and t.units or {}
       self.cfg.plant = type(t.plant) == "table" and t.plant or {}
       self.cfg.detectors = type(t.detectors) == "table" and t.detectors or nil
+      self.cfg.breaker = type(t.breaker) == "table" and t.breaker or nil     -- the power breaker (oppower.lua)
     end
   end
   self.stamp = stampOf(self.file)

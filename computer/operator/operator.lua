@@ -23,6 +23,7 @@
 -- enabled, onBelow, offAbove, levelMin, levelMax, level, input, output, fuelChest, wasteChest). Log: operator.log.
 -- Commands (mainframe or screen), protocol tanis-operator:
 --   { type = "operator_cmd", unit = <label or id; nil = every reactor>, mode = "auto"|"on"|"off", level = 1..100 }
+--   { type = "operator_cmd", power = "reset" } lifts the power breaker (oppower.lua).
 --   a mode is saved in operator.cfg; a level is a manual hold.
 local envfile = require("envfile")
 local plantlib = require("opplant")
@@ -50,6 +51,9 @@ local env = envfile.new("operator.env", "Operator settings.", {
   { "LEVEL_BAND",   5,  "Auto leaves the rods alone while the level is within this many percent of where it wants to be." },
   { "MANUAL_LEVEL", 0,  "Hold every reactor at this power level (1 to 100). 0 = off, Auto decides." },
   { "HOLD_MIN",     10, "Minutes a level set by hand (screen or mainframe) is held before control returns to Auto." },
+  { "SURGE_MAX",    150, "Power breaker: trips when the grid draws more than this percent of what the reactors can make (potential)..." },
+  { "SURGE_FOR",    10, "...for this many seconds in a row. A shorter surge is let through." },
+  { "THROTTLE_TO",  90, "Tripped, the energy detector is capped at this percent of potential so the batteries can recharge. Only Reset on the Operator lifts it." },
   { "TICK",         2,  "Seconds between control passes." },
   { "SLOW",         30, "Seconds between full re-checks of the cable and of what each reactor needs." },
   { "STUCK_AFTER",  120, "Seconds an outlet port may hold cyanite without ever dropping before it is reported as not clearing." },
@@ -73,7 +77,7 @@ end
 
 local plant = plantlib.new(CFG, function(m) print(m); log(m) end)
 plant.wizard = E.SETUP_WIZARD ~= "no"
-local grid = power.new(plant)
+local grid  -- the power breaker (oppower.lua); made once `event` exists
 
 -- Radio -------------------------------------------------------------------
 local netOn = false
@@ -98,7 +102,8 @@ local function event(label, text)
   while #st.events > 8 do table.remove(st.events) end
 end
 
-local ctlHooks = { log = log, event = event, dirty = function() st.dirty = true end }
+grid = power.new(plant, E, { event = event })
+local ctlHooks = { log = log, event = event, grid = grid, dirty = function() st.dirty = true end }
 local ctl = require("opctl")(plant, E, ctlHooks)
 
 local function fmt(n, d) if type(n) ~= "number" then return "?" end return ("%." .. (d or 0) .. "f"):format(n) end
@@ -157,6 +162,7 @@ local function tick()
     st.lastScan, st.dirty, st.rechecked = now, false, true
   end
   grid:sample(now)
+  grid:guard(plant.units, now)
 
   -- read every reactor
   local list, decide = {}, {}
@@ -368,6 +374,7 @@ local function onEvent(ev, a, b, c3, d)
   elseif ev == "rednet_message" and c3 == PROTOCOL and type(b) == "table" and b.type == "operator_cmd" then
     if b.mode then ctl.mode(b.unit, b.mode) end
     if tonumber(b.level) then ctl.hold(b.unit, tonumber(b.level)) end
+    if b.power == "reset" then ctl.resetBreaker() end
   elseif ev == "peripheral" or ev == "peripheral_detach" then
     st.dirty = true
     syncViews()

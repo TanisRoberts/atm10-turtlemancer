@@ -55,5 +55,11 @@ return function(ctl)
       return true, (ref or "Every reactor") .. ": level " .. p .. "% held"
     end })
 
+  cmds:add({ name = "reset", help = "lift the power breaker", max = 0,
+    run = function()
+      if not ctl.resetBreaker() then return true, "The breaker is not tripped", "plain" end
+      return true, "Breaker reset: the energy detector is no longer capped", "good"
+    end })
+
   return cmds
 end
