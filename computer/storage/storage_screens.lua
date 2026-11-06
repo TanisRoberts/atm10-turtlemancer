@@ -26,6 +26,13 @@ local function fmt(n)
   return commas(n)
 end
 Scr.fmt, Scr.commas = fmt, commas
+-- item bytes of an ME grid: 1.5G, 256M, 40k
+function Scr.bytes(n)
+  if n >= 1e9 then return ("%.1fG"):format(n / 1e9) end
+  if n >= 1e6 then return ("%.1fM"):format(n / 1e6) end
+  if n >= 1e3 then return ("%dk"):format(math.floor(n / 1e3)) end
+  return tostring(math.floor(n))
+end
 
 ---------------------------------------------------------------------------
 -- Take amounts: x1, x16 or one stack (shared by the monitor and the computer's screen)
@@ -130,10 +137,14 @@ local function drawList(v, st)
   local W = v.W
   local pct = stats.total > 0 and math.floor(stats.used / stats.total * 100) or 0
   local right = ("%s/%s slots  %d%%"):format(commas(stats.used), commas(stats.total), pct)
+  if stats.unit == "bytes" then right = ("%s/%s bytes  %d%%"):format(Scr.bytes(stats.used), Scr.bytes(stats.total), pct) end
   local fuel = S.fuelPercent()
   if fuel then right = ("Fuel %d%%  "):format(fuel) .. right end
   if not v.side and S.isLocked() then right = "MONITOR LOCKED  " .. right end
-  v:header("STORAGE", { state = pct >= 90 and ("%d%% full"):format(pct) or "ok", color = pct >= 90 and "warn" or "good", right = right })
+  local state, color = "ok", "good"
+  if pct >= 90 then state, color = ("%d%% full"):format(pct), "warn" end
+  if stats.offline then state, color = "ME offline", "bad" end    -- ME mode, bridge not answering: the list is the last one seen
+  v:header("STORAGE", { state = state, color = color, right = right })
 
   -- Row 3: sort, and take buttons where they fit (the computer's row, else the footer on a monitor)
   local sortId = cfg.sort == "az" and "az" or "qty"

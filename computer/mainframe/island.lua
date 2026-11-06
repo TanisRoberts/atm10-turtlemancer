@@ -188,10 +188,24 @@ local function seagullLine()
     (sg.msg and sg.msg ~= "") and (" " .. tostring(sg.msg)) or "")
 end
 
+-- 1234567 -> "1.2M" (item bytes of the ME cells)
+local function siBytes(n)
+  for _, u in ipairs({ { 1e12, "T" }, { 1e9, "G" }, { 1e6, "M" }, { 1e3, "k" } }) do
+    if n >= u[1] then return ("%.1f%s"):format(n / u[1], u[2]) end
+  end
+  return tostring(math.floor(n))
+end
+
 local function storageLine(s)
   if not s or not s.total or s.total == 0 then return "Storage hasn't reported in yet." end
-  local line = ("Storage %d%% full (%d/%d slots, %d item types)."):format(
-    math.floor(s.used / s.total * 100), s.used, s.total, s.kinds or 0)
+  local line
+  if s.unit == "bytes" then   -- ME mode: used/total are item bytes of the AE2 cells
+    line = ("Storage %d%% full (%s/%s bytes, %d item types)%s."):format(
+      math.floor(s.used / s.total * 100), siBytes(s.used), siBytes(s.total), s.kinds or 0, s.meOffline and ", ME offline" or "")
+  else
+    line = ("Storage %d%% full (%d/%d slots, %d item types)."):format(
+      math.floor(s.used / s.total * 100), s.used, s.total, s.kinds or 0)
+  end
   if s.fuelTarget then
     line = line .. (" Fuel barrel %d%%, %s fuel left in storage."):format(
       math.floor((s.fuelUnits or 0) / s.fuelTarget * 100), tostring(s.fuelAvailable or 0))
@@ -237,7 +251,11 @@ local function watch()
   if s and s.total and s.total > 0 then
     local pct = s.used / s.total
     if pct >= 0.9 then
-      condition("storage90", true, ("Storage is %d%% full (%d/%d slots). Time for more barrels."):format(math.floor(pct * 100), s.used, s.total))
+      if s.unit == "bytes" then
+        condition("storage90", true, ("Storage is %d%% full (%s/%s bytes). Time for more cells."):format(math.floor(pct * 100), siBytes(s.used), siBytes(s.total)))
+      else
+        condition("storage90", true, ("Storage is %d%% full (%d/%d slots). Time for more barrels."):format(math.floor(pct * 100), s.used, s.total))
+      end
     elseif pct < 0.85 then
       condition("storage90", false)
     end

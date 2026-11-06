@@ -69,6 +69,7 @@ local SMELTER_RESERVE = { ["minecraft:coal"] = 64, ["minecraft:charcoal"] = 64 }
 -- Config
 ---------------------------------------------------------------------------
 local cfg = {}
+local ME      -- ME mode (storage_me.lua): an ME Bridge on the cable is the storage
 local RULES   -- depot rules (storage_rules.lua), set up below
 local function loadCfg()
   if fs.exists(CONFIG) then
@@ -411,9 +412,11 @@ local minerFuelLimit, weaverBill = nil, {}   -- heard over the network from Cana
 
 local function keyOf(it) return it.name .. (it.nbt and ("#" .. it.nbt) or "") end
 
+ME = dofile("storage_me.lua")({ info = info, keyOf = keyOf, fill = function(i, d) return RULES.fill(i, d) end })
 RULES = dofile("storage_rules.lua")({ cfg = function() return cfg end, info = info, items = function() return items end })
 
 local function scanInv(n)
+  if ME.isBridge(n) then return end
   cache[n] = call(n, "list") or {}
   if not sizes[n] then sizes[n] = call(n, "size") or 0 end
 end
@@ -423,9 +426,12 @@ local furnaces = {}  -- furnaces on the network, used by auto-smelting
 local function refreshStorageList()
   storage, furnaces = {}, {}
   local present = {}
+  ME.find()
   for _, n in ipairs(inventories()) do
     if isFurnace(n) then
       furnaces[#furnaces + 1] = n
+    elseif ME.on() then
+      -- ME mode: only assigned job inventories are touched; the rest of the cable is none of our business
     elseif not isSpecial(n) then
       storage[#storage + 1] = n
       present[n] = true
@@ -460,6 +466,20 @@ local function buildItems()
   local map = {}
   local used, total = 0, 0
   local missing, missingFns = {}, {}
+  local meOffline = false
+  if ME.on() then
+    -- ME mode: the grid is the storage. Offline, the last list stays on screen.
+    local list = ME.items()
+    if list then
+      for _, e in ipairs(list) do map[e.key] = e end
+      local b, t = ME.bytes()
+      if b then used, total = b, t else used, total = stats.used, stats.total end
+    else
+      meOffline = true
+      for _, e in ipairs(items) do map[e.key] = { key = e.key, name = e.name, count = e.count } end
+      used, total = stats.used, stats.total
+    end
+  end
   for _, n in ipairs(storage) do
     total = total + (sizes[n] or 0)
     for slot, it in pairs(cache[n] or {}) do
@@ -508,6 +528,8 @@ local function buildItems()
     end)
   end
   stats.used, stats.total, stats.kinds, stats.inv = used, total, #items, #storage
+  stats.unit = ME.on() and "bytes" or nil
+  stats.offline = meOffline
 end
 
 -- How big one drawer slot is, in STACKS (a 1x1 drawer = 32, upgrades multiply it). Functional
@@ -518,7 +540,7 @@ end
 local VOID_LIMIT = 2 ^ 30
 local function maxOf(key, n, slot)
   local i = info[key]
-  if i and i.tags then return i.max end
+  if i and i.tags and not i.guessedMax then return i.max end
   if n then
     local d = call(n, "getItemDetail", slot)
     if d then
@@ -627,6 +649,7 @@ end
 -- /tidy later hands the drawers to the items with the most stacks (see planDrawers).
 -- Each target is { n = inventory, mode = "held" | "empty" | "barrel" }.
 local function targetsFor(key)
+  if ME.on() then return ME.online() and { { n = ME.name(), mode = "me" } } or {} end
   local tiers = { {}, {}, {}, {} }
   for _, n in ipairs(storage) do
     if isDrawer(n) then
@@ -665,6 +688,7 @@ end
 --          gives up after a few refusals: locked drawers)
 local function moveInto(from, slot, count, t, key)
   local n = t.n
+  if t.mode == "me" then return ME.import(from, slot, count, key) end
   if t.mode == "held" then
     local moved = 0
     for _, s in ipairs(drawerSlotsFor(n, key)) do
@@ -1094,7 +1118,7 @@ local function deposit()
     moved = moved + m
     if left > 0 then stuck = true end
   end
-  inputStuck = stuck
+  inputStuck = stuck and not ME.offline()   -- "ME offline" has its own warning
   return moved
 end
 
@@ -1102,6 +1126,10 @@ end
 -- Takes from barrels before drawers. Returns how many moved and whether the target filled up.
 local function retrieve(key, amount, target, toSlot)
   target = target or cfg.output
+  if ME.on() then
+    if not target or amount <= 0 or not ME.online() then return 0, false end
+    return ME.export(key, amount, target, toSlot)
+  end
   local got, full = 0, false
   local order = {}
   for _, n in ipairs(storage) do if not isDrawer(n) then order[#order + 1] = n end end
@@ -1179,9 +1207,9 @@ local function topUpDepots()
       local size = call(d, "size") or 0
       if list then
         local used, room = 0, false
-        for _, it in pairs(list) do
+        for slot, it in pairs(list) do
           used = used + 1
-          local max = (info[keyOf(it)] and info[keyOf(it)].max) or 64
+          local max = ME.on() and maxOf(keyOf(it), d, slot) or (info[keyOf(it)] and info[keyOf(it)].max) or 64
           if it.count < max then room = true end
         end
         if used < size or room then
@@ -1455,6 +1483,7 @@ local function statusMsg()
   return {
     type = "storage", id = os.getComputerID(), label = os.getComputerLabel(),
     used = stats.used, total = stats.total, kinds = stats.kinds, inputStuck = inputStuck,
+    unit = stats.unit, meOffline = stats.offline or nil,   -- unit = "bytes" in ME mode (used/total are item bytes)
     fuelUnits = #cfg.fuels > 0 and fuelUnits or nil,
     fuelTarget = #cfg.fuels > 0 and canaryFuelTarget() or nil,
     fuelBarrels = #cfg.fuels,
@@ -1976,6 +2005,8 @@ end
 
 cmds:add({ name = "assign", help = "inputs, output, docks, fuel...: add/edit/delete",
   run = function() Scr.later(assignScreen); return true end })
+ME.find()
+if not ME.on() then   -- ME mode has no marker setup, drawers or tidy
 cmds:add({ name = "setup", help = "assign chests with marker items",
   run = function() Scr.plain(function() setup(); scanAll(); buildItems() end); return true end })
 cmds:add({ name = "rescan", help = "re-read every chest now",
@@ -2006,6 +2037,7 @@ cmds:add({ name = "tidy", help = "biggest piles into biggest drawers",
     Scr.report({ title = "TIDY", rows = tidyReport(res) })
     return true
   end })
+end
 cmds:add({ name = "fuelinfo", help = "Canary fuel barrels and fuel stock",
   run = function()
     rescan("FUEL INFO", "Rescanning...")

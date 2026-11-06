@@ -288,7 +288,7 @@ end
 local function storageLine()
   local s = _G.STORAGE_STATS
   if not s or not s.total or s.total == 0 then return nil end
-  return ("Storage is %d%% full."):format(math.floor(s.used / s.total * 100))
+  return ("Storage is %d%% full%s."):format(math.floor(s.used / s.total * 100), s.unit == "bytes" and " (ME cells)" or "")
 end
 
 local function arrived(name, owner)

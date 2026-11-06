@@ -9,6 +9,7 @@ The only computer that moves items in or out of storage. This note covers the sc
 - `storage_lock.lua`: the padlock screen.
 - `storage_rules.lua`, `storage_docks.lua`: depot rules and dock links (see the design doc).
 - `storage_reactor.lua`: the Reactor fuel job (below).
+- `storage_me.lua`: ME mode, AE2 through an ME Bridge as the storage (below).
 - `shared/assignui.lua` + `shared/assignrules.lua`: the `/assign` pages, shared with the Nether and MD Foremen.
 
 ## Screens
@@ -52,3 +53,17 @@ An assigned inventory of type **Reactor fuel** (`cfg.reactorFuels`, `/assign`, o
 - `/assign` shows each chest as `48/64 units`.
 
 Test: `tests/scenarios/storage_reactor.lua`.
+
+## ME mode (`storage_me.lua`, #124)
+
+When an **ME Bridge** (`me_bridge`, the first one by name) is on the cable, AE2 is the storage. Without one, storage works as described above (drawers, barrels, `/tidy`). The mode is read on every rescan; the command list is fixed at boot, so reboot after plugging in or removing a bridge.
+
+- **Storage is the bridge.** No inventory on the cable is storage: only assigned job inventories are touched. Unassigned ones, ME drives, interfaces and IO ports with modems are never sorted into, taken from or counted.
+- **Two seams.** `retrieve()` is `exportItem(target, {name, nbtHash, count, toSlot})`: one call moves any amount. Deposit (`moveInto` with the single target `mode = "me"`) is `importItem(source, {name, fromSlot, count})`: the slot pins the exact stack, so no hash is needed. Every job goes through them unchanged: inputs, output, docks and keep lists, depots and rules, Canary fuel and dump, smelter and neural ops, Weaver supply, pocket dump and restock, reactor fuel. Junk caps read `byName`.
+- **Variants.** The item list is `getItems()`; a variant's key is `name` or `name#<hash>` (the bridge's `nbt`). A depot gets its winner's exact key, so it never receives another variant of the same item. A plain-name request (docks, fuel) leaves the variant to AE2, because the filter cannot ask for "no NBT". Stack sizes of items the bridge lists are guessed at 64 until a real stack of that item passes through a job inventory (`getItemDetail`).
+- **Refresh.** The list is rebuilt from `getItems()` on the FULL_SCAN rhythm and after any move.
+- **Off in ME mode:** drawer planning, `/drawers`, `/tidy` and `/setup` (not in `/help` or the command list). Fluids are unchanged (tanks, fluid depots).
+- **Status** (`type = "storage"`): `used` and `total` are item **bytes** (`getUsedItemStorage` / `getMaxItemStorage`), `unit = "bytes"`, `meOffline = true` while the bridge is down. There is no `types`: the bridge reports no used types per cell. The mainframe words it as bytes and "time for more cells" (`island.lua`, `butler.lua`).
+- **Item list.** The header shows `used/total bytes NN%`; `NN% full` in orange from 90%. Offline (`isConnected`/`isOnline` false, or no answer) it shows `ME offline` in red, keeps the last list, and the jobs run on what is on the cable: inputs wait (no "input stuck" alert) and refills do nothing until AE2 is back.
+
+Test: `tests/scenarios/storage_me.lua` (uses the bridge mock `tests/sim/me.lua`).
