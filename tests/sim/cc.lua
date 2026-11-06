@@ -131,6 +131,9 @@ function World:furnace(opts)
   return Inv.Furnace.new(opts)
 end
 
+-- An Advanced Peripherals ME Bridge on a simulated AE2 grid (sim/me.lua); add it to a net with net:add
+function World:meBridge(opts) return require("sim.me").new(opts) end
+
 function World:factory(opts)
   opts = opts or {}
   opts.clock = function() return self.now end

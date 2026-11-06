@@ -22,6 +22,7 @@ Exit code is 0 only if everything passed. Run it before every push to main.
 | `term.lua` | Screens (computer, turtle, monitor) with text and colour per cell, `:text()`, `:find()`, `:dump()` |
 | `inv.lua` | Inventories (chests, barrels, drawers) with one-stack-per-call `pushItems`/`pullItems`, and a furnace that cooks in virtual time |
 | `turtle.lua` | A turtle in the voxel world: moves, digs (with drops), inspect, suck/drop, refuel, place, equip; every action takes game time |
+| `me.lua` | An Advanced Peripherals ME Bridge on an AE2 grid: `w:meBridge{}` then `net:add("me_bridge_0", me)`. Drives/racks/cells with AE2's byte maths, storage buses (priority, capacity, `void`), insert order (highest priority, cells already holding the item first), extract order (lowest priority first), `exportItem`/`importItem` over many stacks, AP's `getDrives` zero-bytes quirk, offline (`me:setOnline(false)`). Helpers: `addRack`, `addDrive`, `addCell`, `addBus`, `fill`, `where`, `total`. Header of `me.lua` lists the source facts |
 | `test.lua` | `T.test`, `T.eq`, `T.contains`, `T.waitFor`, `T.running` |
 
 Nothing runs unless the scenario advances time: `w:run(30)` runs 30 virtual seconds,
