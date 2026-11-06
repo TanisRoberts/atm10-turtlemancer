@@ -51,6 +51,11 @@ ME.cellItems = {
   ["1M"] = "megacells:item_cell_1m", ["4M"] = "megacells:item_cell_4m", ["16M"] = "megacells:item_cell_16m",
   ["64M"] = "megacells:item_cell_64m", ["256M"] = "megacells:item_cell_256m",
 }
+-- Cells the bridge gives no size for (ExtendedAE Infinity, MEGA Bulk): getDrives lists them without maxBytes/usedBytes.
+-- The item names are guesses (not verified against the mods); the server board matches "infinity" / "bulk".
+ME.sizes["infinity"], ME.cellItems["infinity"] = 2 ^ 40, "extendedae:infinity_cell"
+ME.sizes["bulk"], ME.cellItems["bulk"] = 2 ^ 40, "megacells:bulk_item_cell"
+ME.noSize = { infinity = true, bulk = true }
 local PER_BYTE, MAX_TYPES = 8, 63
 
 local function pretty(name)
@@ -173,6 +178,23 @@ function ME:addRack(opts)
   end
   return out
 end
+-- A rack laid out like the server room (docs/design/server.md): 2 columns x 5 rows of drives in one wall plane.
+--   axis "x": the wall is the plane x = at and its columns run along z (axis "z": plane z = at, columns along x)
+--   col0: the coordinate of the first column, y0: the lowest row, drives fill bottom row first, left column first
+--   cell: a size for every slot of every drive (nil = empty drives); `skip` = number of drives left unbuilt at the end
+function ME:addRackAt(opts)
+  local out, cols, rows = {}, opts.cols or 2, opts.rows or 5
+  local n = cols * rows - (opts.skip or 0)
+  for i = 1, n do
+    local c, r = (i - 1) % cols, math.floor((i - 1) / cols)
+    local col = (opts.col0 or 0) + c
+    local d = self:addDrive{ priority = opts.priority, slots = opts.slots, y = (opts.y0 or 64) + r,
+                             x = opts.axis == "x" and opts.at or col, z = opts.axis == "x" and col or opts.at }
+    if opts.cell then for _ = 1, d.slots do self:addCell(d, opts.cell) end end
+    out[i] = d
+  end
+  return out
+end
 -- a storage bus on an external inventory: priority, capacity (per item, nil = unlimited), void, item (a filter: a
 -- drawer holds one item; nil = takes any)
 function ME:addBus(opts)
@@ -266,8 +288,10 @@ end
 
 local function cellInfo(c)
   local item = ME.cellItems[c.size]
-  return { item = { name = item, displayName = pretty(item), count = 1 }, type = "ae2:i",
-           bytesPerType = c.bytesPerType, maxBytes = c.maxBytes, maxTypes = c.maxTypes, usedBytes = c:usedBytes() }
+  local info = { item = { name = item, displayName = pretty(item), count = 1 }, type = "ae2:i",
+                 bytesPerType = c.bytesPerType, maxBytes = c.maxBytes, maxTypes = c.maxTypes, usedBytes = c:usedBytes() }
+  if ME.noSize[c.size] then info.bytesPerType, info.maxBytes, info.usedBytes = nil, nil, nil end
+  return info
 end
 
 -- ---- peripheral methods
