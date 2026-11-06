@@ -188,7 +188,11 @@ function S.grid(v, x, y0, w, last, rec, t)
   v:kv(x + 1, y, w - 2, "Net", netText(t))
   y = y + 1
   local dt, tone = drawText(t.power)
-  if dt then v:kv(x + 1, y, w - 2, "Draw", dt, tone); y = y + 1 end
+  if dt then
+    v:put(x + 1, y, "Draw", "dim", "bg")
+    v:put(x + 1, y + 1, D.fit(dt, w - 2), tone or "fg", "bg")
+    y = y + 2
+  end
   y = y + 1
   local rows = gridRows(t)
   for i, row in ipairs(rows) do
