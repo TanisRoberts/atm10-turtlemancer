@@ -30,6 +30,7 @@ local policies = require("oppolicy")
 local needs = require("opneeds")
 local rods = require("oprods")
 local chests = require("opchests")
+local power = require("oppower")
 local ui = require("ui")
 local screen = require("opscreen")
 
@@ -72,6 +73,7 @@ end
 
 local plant = plantlib.new(CFG, function(m) print(m); log(m) end)
 plant.wizard = E.SETUP_WIZARD ~= "no"
+local grid = power.new(plant)
 
 -- Radio -------------------------------------------------------------------
 local netOn = false
@@ -151,8 +153,10 @@ local function tick()
   local now = os.clock()
   if st.dirty or now - st.lastScan >= E.SLOW then
     if plant:scan() then log("cable changed: " .. plant.sig) end
+    grid:scan()
     st.lastScan, st.dirty, st.rechecked = now, false, true
   end
+  grid:sample(now)
 
   -- read every reactor
   local list, decide = {}, {}
@@ -284,9 +288,10 @@ local function record()
     tot.avgHour = t / #st.feS
   end
   tot.hist, tot.events = st.hist, st.events
+  tot.power = grid:record(plant.units, os.clock())
   tot.fuelChest = supply() ~= nil and st.fuelRep or nil
   return { type = "operator", id = os.getComputerID(), label = os.getComputerLabel() or "Operator", t = os.clock(),
-           units = units, plant = tot }
+           units = units, plant = tot, power = tot.power }
 end
 
 -- First boot: say what was found -------------------------------------------------
@@ -309,7 +314,7 @@ end
 -- Main loop ---------------------------------------------------------------------
 term.clear(); term.setCursorPos(1, 1)
 print("Operator starting. Reboot (hold Ctrl+R) to update. Type reset to give this computer a new role.")
-plant:scan(); st.lastScan = os.clock()
+plant:scan(); grid:scan(); st.lastScan = os.clock()
 report()
 event("Operator", ("started, %d reactor%s found"):format(#plant.found.reactor, #plant.found.reactor == 1 and "" or "s"))
 

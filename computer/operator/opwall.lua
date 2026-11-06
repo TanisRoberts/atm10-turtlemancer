@@ -63,6 +63,8 @@ return function(S)
       { "Hottest casing", t.hot and (floor(t.hot + 0.5) .. "C") or "?" },
       { "Waste outlets", t.wasteFull > 0 and (t.wasteFull .. " full") or "clear", t.wasteFull > 0 and "bad" or nil },
     }
+    local dt, dtone = S.drawText(t.power)
+    if dt then table.insert(rows, 2, { "Draw", dt, dtone }) end
     if t.avgHour then rows[#rows + 1] = { "Output last hour", D.num(t.avgHour) .. " avg" } end
     y = rowsFor(v, x, y, w, rows)
     y = D.section(v, x, y + 1, w, "NEEDS ATTENTION")

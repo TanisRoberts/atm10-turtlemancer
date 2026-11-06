@@ -61,7 +61,7 @@ end
 function S.totals(rec, R)
   local p = rec.plant or {}
   local t = { fe = p.fe, buf = p.buf, net = p.net, n = #R, on = 0, problems = 0, supply = p.supply,
-              avgHour = p.avgHour, wasteFull = 0, awaiting = 0 }
+              avgHour = p.avgHour, wasteFull = 0, awaiting = 0, power = p.power }
   local lvl, nl, fuel, nf, hot = 0, 0, 0, 0, nil
   for _, r in ipairs(R) do
     if r.active then t.on = t.on + 1; if r.level then lvl, nl = lvl + r.level, nl + 1 end end
@@ -160,6 +160,16 @@ local function gridRows(t)
   return rows
 end
 
+-- "Draw 1,200 FE/t  62%" for the Power Grid; nil when there is no detector on the cable
+local function drawText(pw)
+  if not pw then return nil end
+  if not pw.draw or (pw.seen and pw.seen > 30) then return "no reading", "warn" end
+  local s = D.num(pw.draw) .. " FE/t"
+  if pw.pct then s = s .. "  " .. floor(pw.pct + 0.5) .. "%" end
+  return s
+end
+S.drawText = drawText
+
 local function netText(t)
   if not t.net then return "-" end
   return (t.net >= 0 and "+" or "-") .. D.num(math.abs(t.net)) .. "/t"
@@ -176,7 +186,10 @@ function S.grid(v, x, y0, w, last, rec, t)
   D.track(v, x + 1, y + 1, w - 2, t.buf, "good")
   y = y + 3
   v:kv(x + 1, y, w - 2, "Net", netText(t))
-  y = y + 2
+  y = y + 1
+  local dt, tone = drawText(t.power)
+  if dt then v:kv(x + 1, y, w - 2, "Draw", dt, tone); y = y + 1 end
+  y = y + 1
   local rows = gridRows(t)
   for i, row in ipairs(rows) do
     if y > last - 2 then break end
@@ -351,6 +364,8 @@ local function powerTab(v, ctx, r)
     v:put(2, 4 + rh, D.fit(caption, W - 2), "dim", "bg")
     local y = D.section(v, 2, 5 + rh, W - 2, "BUFFER")
     y = D.buffer(v, 2, y, W - 2, r.buf, r.onBelow or 0.3, r.offAbove or 0.9, "Buffer")
+    local dt, tone = drawText(ctx.rec and ctx.rec.power)
+    if dt then v:kv(2, y, W - 2, "Grid draw", dt, tone); y = y + 1 end
     y = D.section(v, 2, y + 1, W - 2, "REACTOR")
     v:kv(2, y, W - 2, "Fuel", inletText(r))
     v:kv(2, y + 1, W - 2, "Temperature", ("fuel %sC  casing %sC"):format(D.num(r.fuelTemp), D.num(r.casing)))
@@ -369,6 +384,8 @@ local function powerTab(v, ctx, r)
     local y = D.buffer(v, 2, 4 + rh, W - 2, r.buf, r.onBelow or 0.3, r.offAbove or 0.9, "Buffer")
     v:kv(2, y, W - 2, "Fuel", inletText(r))
     v:kv(2, y + 1, W - 2, "Temp", ("fuel %sC  casing %sC"):format(D.num(r.fuelTemp), D.num(r.casing)))
+    local dt, tone = drawText(ctx.rec and ctx.rec.power)
+    if dt and y + 2 < H - 1 then v:kv(2, y + 2, W - 2, "Draw", dt, tone) end
   else
     local width = D.rods(v, 3, 4, rods, 2, 5, running)
     local sx = 3 + width + 2

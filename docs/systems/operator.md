@@ -1,6 +1,6 @@
 # Operator
 
-Runs the Extreme Reactors 2 power plant headless. `computer/operator/`: `operator.lua` (loop, status, text screen), `opplant.lua` (what is on the cable, units, ports), `opchests.lua` (the chests and every item move), `opdrivers.lua` (reactor drivers), `oppolicy.lua` (who runs), `opneeds.lua` (needs / has / missing), `oprods.lua` (rod stepping and manual holds), `opctl.lua` (what a person can change), `opscreen.lua`, `opwall.lua` and `opdraw.lua` (the screens). `shared/envfile.lua` reads `operator.env`.
+Runs the Extreme Reactors 2 power plant headless. `computer/operator/`: `operator.lua` (loop, status, text screen), `opplant.lua` (what is on the cable, units, ports), `opchests.lua` (the chests and every item move), `opdrivers.lua` (reactor drivers), `oppolicy.lua` (who runs), `opneeds.lua` (needs / has / missing), `oprods.lua` (rod stepping and manual holds), `opctl.lua` (what a person can change), `oppower.lua` (power use from the energy detector), `opscreen.lua`, `opwall.lua` and `opdraw.lua` (the screens). `shared/envfile.lua` reads `operator.env`.
 
 ## Plant model (`opplant.lua`)
 
@@ -42,6 +42,16 @@ Design: `docs/design/operator.md`. The computer's screen and every monitor touch
 - **Wall** (120 wide and 50 tall or more): Power Grid, up to three whole reactor panels, the plant buffer chart (last 30 minutes) and the recent events. More than three reactors become tiles. Chart and events come from `plant.hist` (one sample every 15 s, 120 of them) and `plant.events` (the last 8) in the status record.
 - A command from the mainframe or the screen acts at once, not at the next pass.
 
+## Power use (`oppower.lua`)
+
+Energy detectors (Advanced Peripherals `energy_detector`) on the reactor-room cable are found by type, not as units (`opplant` ignores them). They are labelled `Detector-1`, ... in `operator.cfg` (`detectors`), numbers never reused. The detector needs a **wired** modem on the cable (an ender modem on it does not join the cable).
+
+- **Draw** = the sum of every detector's `getTransferRate()` (FE/t), averaged over the last 5 seconds (one reading per pass, `TICK`).
+- **Potential** = what the running reactors would make at full power: each running reactor's FE/t (`getEnergyProducedLastTick`) scaled up from its rod level, `fe * 100 / level` (output follows the withdrawn percentage). A reactor with no reading yet (just switched on, `fe` 0) uses the figure from its last run; one with no rod methods uses its FE/t as is. Switched-off reactors count for nothing. Active (turbine) reactors will need the turbine's maximum when that driver arrives.
+- **Utilisation** `pct` = draw / potential x 100 (nil while potential is 0).
+- Status: `power = { draw, potential, pct, limit, seen, detectors }` at the top of the `operator` record (also `plant.power`). `limit` = summed `getTransferRateLimit()`; `seen` = seconds since a detector last answered; the whole field is nil with no detector on the cable.
+- Screens (plain text for now): `Draw  1,200 FE/t  62%` in the Power Grid column and on the wall's Plant list; a `Draw` / `Grid draw` line on the Power tab. `no reading` (warn) when the detector has not answered for 30 s.
+
 ## Power taps: always the active kind
 
 Every Extreme Reactors build (reactors now, turbines later) uses an **active** FE power tap, never a passive one. A passive tap only gives energy when something pulls from it, and in game (16 Oct 2026) a *Reinforced Passive Forge Energy Power Tap* filled its buffer to about 38 MFE and nothing flowed: not into Advanced Universal Cables (Normal or Pull), not into a machine placed directly on the tap, reactor on or off. Swapping in a *Reinforced Active Forge Energy Power Tap* fixed it at once with the cable on Normal. The mod author confirms it: ZeroNoRyouki/ExtremeReactors2#135. (#180, energy stopping when the buffer is full, does not apply.) The symptom of a wrong tap is a buffer that fills and stays full. Note that "passive" elsewhere on this page means a reactor that is not actively cooled, which has nothing to do with the tap.
@@ -79,4 +89,5 @@ Protocol `tanis-operator`, a `{type="operator", units={...}, plant={...}}` broad
 `tests/scenarios/operator_screen.lua`: the overview at 51x19, 39x13, 26x20 and 164x81, taps for tile / level / hold / ON / OFF / AUTO, limits, Needs, Set (one reactor, all, reset), the narrow single-reactor start, and the wall.
 `tests/scenarios/operator_rods.lua`: steps out and in, steady load, off keeps the level, manual level and limits, a hold that expires, no rod methods.
 `tests/scenarios/operator_chests.lua`: blocks before ingots, never over the reactor's room, outlet into the waste chest, fuel held back while the waste chest is full (and resumed), a missing waste chest, chests worked out / unknown / missing, the `reactor_fuel` report in the status.
+`tests/scenarios/operator_power.lua`: the energy detector mock (`w:detector{rate, limit}`): draw smoothed, potential from the rod level, percent, limit, the detector not a unit, no `power` without one.
 `tests/scenarios/operator_core.lua` with the `BigReactors-Reactor` mock in `tests/sim/reactor.lua`: hysteresis, ports worked out with Storage draining the outlet, an outlet that doesn't empty, a full outlet, two reactors with their own thresholds and a manual override, needs lists for different reactors, a silent reactor.

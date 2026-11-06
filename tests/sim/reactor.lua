@@ -80,4 +80,17 @@ function Reactor:isActivelyCooled() return self.cooled == true end
 function Reactor:getCoolantAmount() return 1000 end
 function Reactor:getHotFluidAmount() return 0 end
 
+-- An Advanced Peripherals energy detector (type energy_detector): w:detector{ rate = FE/t, limit = FE/t }.
+-- `rate` may be a number or a function returning one; a scenario sets d.rate any time.
+local Detector = {}
+Detector.__index = Detector
+Detector.peripheralMethods = { "getTransferRate", "getTransferRateLimit", "setTransferRateLimit" }
+function Reactor.detector(opts)
+  opts = opts or {}
+  return setmetatable({ types = { "energy_detector" }, rate = opts.rate or 0, limit = opts.limit or 1000000000 }, Detector)
+end
+function Detector:getTransferRate() return type(self.rate) == "function" and self.rate() or self.rate end
+function Detector:getTransferRateLimit() return self.limit end
+function Detector:setTransferRateLimit(n) self.limit = n end
+
 return Reactor

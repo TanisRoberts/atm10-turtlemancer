@@ -66,6 +66,7 @@ function M:load()
       self.cfg.nextNum = type(t.nextNum) == "table" and t.nextNum or {}
       self.cfg.units = type(t.units) == "table" and t.units or {}
       self.cfg.plant = type(t.plant) == "table" and t.plant or {}
+      self.cfg.detectors = type(t.detectors) == "table" and t.detectors or nil
     end
   end
   self.stamp = stampOf(self.file)

@@ -143,6 +143,8 @@ function World:reactor(opts)
   return require("sim.reactor").new(opts)
 end
 
+function World:detector(opts) return require("sim.reactor").detector(opts) end
+
 -- Timers (and one-off world callbacks) live in one list ordered by time.
 function World:_addTimer(at, rec)
   self.timerSeq = self.timerSeq + 1
