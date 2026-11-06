@@ -165,7 +165,7 @@ local M = {
             .. "the GPS pylons, and generative art you can poke. Three bars in "
             .. "the bottom-right corner switch screens. Needs an ender modem and an advanced monitor.",
           run = "art",
-          files = { "computer/art/art.lua", "computer/art/art_gfx.lua", "computer/art/art_scenes.lua", "shared/screens.lua" },
+          files = { "computer/art/art.lua", "computer/art/art_gfx.lua", "computer/art/art_scenes.lua", "shared/screens.lua", "shared/ui.lua", "shared/ui_widgets.lua", "shared/ui_parts.lua", "shared/ui_motion.lua" },
         },
         cartographer = {
           name = "Cartographer",
