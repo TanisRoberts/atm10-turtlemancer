@@ -49,6 +49,7 @@ Loaded by `ui.lua` after `ui_widgets.lua`; every role that uses the kit lists al
 Loaded by `ui.lua` last; every role that uses the kit lists it. Design: `docs/design/ui-kit.md` section 9.
 
 - `ui.anim` is `"full"` (default), `"calm"` (dashboard glyphs only, no bar) or `"off"` (everything still). `ui.setAnim(mode)`; `ui.loadAnim("x.env", default)` reads `ANIM=` from a device's .env-style file and appends the line if it is missing (an existing line is never overwritten). Read at start, so a change needs a reboot. Glasses should pass `"calm"`.
+- Big-wall parts (`ui_parts.lua`, design 10.12-10.14): `v:board(x, y, w, rows, { tworow = true, slots = n, page = k })` draws two-row entries (name 14, glyph, state, last heard; detail dim on row 2, indented 4). With more entries than `slots`, the list turns pages every `ui.PAGE_S` (3) s by the clock, a dot row shows the page, and the view re-arms its redraw. `v:bigNumber(x, y, "113%", tone, { px, py })` draws 3x5 block glyphs (`ui.bigFont`: digits, `%`, `:`, `-`; `screens.lua` uses the same font) and returns the last column. `v:needsYou(x, y, w, n, alerts, { summary })` draws a gold label and exactly `n` slots, red first, `+k more: ...` in the last slot when they overflow, and `Nothing needs you.` when empty; it returns `y + 1 + n`.
 - `ui.beat(rate)`: an integer that goes up `rate` times a second. Dashboards use 2, waiting screens 4. `ui.nextBeat(rate)` is the `os.clock()` time of the next one.
 - `v:glyph(x, y, state, { rate, stale, since })`: one character in the state's colour (working `\ | / |`, building, farming, smelting, waiting, returning, rebooting; still `=` docked, `+` done, `-` idle, `?` stale, `!` lost/error). Still when `ui.anim == "off"`, on a terminal without colour, for `stale`, and past 24 moving glyphs a view. `since` (an `os.clock()` time) makes an error pulse red/white for 3 seconds. `v:glyphChar(state, o)` gives the character and colour role without drawing.
 - `v:spinner(x, y, state)`: the waiting glyph at 4 a second. `v:indeterminate(x, y, w)`: a track with a 6-cell block bouncing one cell a beat; still on `calm` and `off`. `v:spinner_line` (part 3) uses the spinner.
@@ -88,5 +89,7 @@ v:search(st.field, { commands = cmds:commands() })
 `tests/scenarios/ui_core.lua` with the demo screen `tests/demo/ui_demo.lua`, and `tests/scenarios/ui_more.lua` with `tests/demo/ui_demo2.lua` (tabs: tiles, list, map, form): layout and tap targets at 57x24, 51x19, 39x13 and 26x20, confirm timer, notices, colourless fallback, monitors, resize.
 
 `tests/scenarios/ui_parts.lua` with `tests/demo/ui_demo3.lua` (screens: parts, board, picker, report, wait): every part-3 component at the four sizes, taps and keys, the squeeze, a monitor, and the colourless fallback.
+
+`tests/scenarios/ui_big.lua`: the two-row board and paging, block number and Needs you slots.
 
 `tests/scenarios/ui_motion.lua` (beat, frames and colours, budget, `ANIM`, stale, cost of a beat, spinner and bar, busy button, no colour) and `tests/scenarios/smelter_motion.lua` (the smelter dashboard).

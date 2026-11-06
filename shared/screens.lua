@@ -28,14 +28,8 @@ local okUi, ui = pcall(require, "ui")
 local C = colours or colors
 local role = (okUi and ui.c) or { bg = C.black, dim = C.lightGrey, fg = C.white, gold = C.yellow }
 
--- 3x5 digits, one string per row, # = lit
-local FONT = {
-  ["0"] = { "###", "# #", "# #", "# #", "###" }, ["1"] = { " # ", "## ", " # ", " # ", "###" },
-  ["2"] = { "###", "  #", "###", "#  ", "###" }, ["3"] = { "###", "  #", "###", "  #", "###" },
-  ["4"] = { "# #", "# #", "###", "  #", "  #" }, ["5"] = { "###", "#  ", "###", "  #", "###" },
-  ["6"] = { "###", "#  ", "###", "# #", "###" }, ["7"] = { "###", "  #", "  #", "  #", "  #" },
-  ["8"] = { "###", "# #", "###", "# #", "###" }, ["9"] = { "###", "# #", "###", "  #", "###" },
-}
+-- the 3x5 block digits live in the UI kit (ui.bigFont, docs/design/ui-kit.md 10.13)
+local FONT = okUi and ui.bigFont or {}
 
 local function setOf(list)
   local t = {}

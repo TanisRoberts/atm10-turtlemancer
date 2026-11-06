@@ -338,4 +338,136 @@ function View:scroll(dir)
   baseScroll(self, dir)
 end
 
+---------------------------------------------------------------------------------------------------------
+-- 10.12 Two-row board entry and departures paging (v:board with { tworow = true })
+---------------------------------------------------------------------------------------------------------
+ui.PAGE_S = 3                                      -- seconds a departures page stays up (mainframe wall)
+
+-- Two rows an entry: the stripe runs down both; row 1 name (14), glyph, state word, last heard at the right;
+-- row 2 the detail, indented 4, dim. Not heard for 30 s: all grey, last heard orange.
+local function entry2(self, x, y, w, r)
+  local stale = type(r.age) == "number" and r.age >= STALE_S
+  local state = tostring(r.state or "")
+  local tone = stale and "dim" or (r.color or ui.stateRole(state))
+  for i = 0, 1 do
+    if self.colour then self:put(x, y + i, " ", "fg", stale and "bar" or tone)
+    else self:put(x, y + i, stale and "?" or "|", "fg", "bg") end
+  end
+  local a = age(r.age)
+  local ax = x + w - #a
+  self:put(x + 2, y, fit(tostring(r.name or ""), 14), stale and "dim" or "fg", "bg")
+  local gx = x + 17
+  if gx + 2 < ax then
+    if not stale and not r.glyph and self.glyph then self:glyph(gx, y, state)
+    else self:put(gx, y, stale and "?" or r.glyph or STILL[state] or "-", tone, "bg") end
+    self:put(gx + 2, y, fit(state, ax - gx - 3), tone, "bg")
+  end
+  self:put(ax, y, a, stale and "warn" or "dim", "bg")
+  if r.detail and w > 6 then self:put(x + 4, y + 1, fit(tostring(r.detail), w - 4), "dim", "bg") end
+end
+
+local function board2(self, x, y, w, rows, o)
+  if rows.title then y = self:boardHeader(x, y, w, rows.title) end
+  local list = {}
+  for _, r in ipairs(rows) do if not r.section then list[#list + 1] = r end end
+  local slots = o.slots or #list
+  local pages = max(1, math.ceil(#list / max(1, slots)))
+  local page = 1
+  if pages > 1 then
+    page = o.page or (floor(os.clock() / ui.PAGE_S) % pages + 1)
+    page = clamp(page, 1, pages)
+    self.animated = true                           -- the page turns by itself: ui.run re-arms for it
+    self.animRate = max(self.animRate or 0, 1 / ui.PAGE_S)
+  end
+  for i = 1, slots do                              -- fixed slots: a short last page leaves them blank
+    local r = list[(page - 1) * slots + i]
+    if r then entry2(self, x, y + (i - 1) * 2, w, r) end
+  end
+  y = y + slots * 2
+  if pages > 1 then                                -- dots: o on the shown page, . on the others
+    local dots = {}
+    for p = 1, pages do dots[p] = p == page and "o" or "." end
+    local text = table.concat(dots, " ")
+    local dx = x + floor((w - #text) / 2)
+    for p = 1, pages do self:put(dx + (p - 1) * 2, y, dots[p], p == page and "fg" or "dim", "bg") end
+    y = y + 1
+  end
+  return y
+end
+
+local board1 = View.board
+-- o: tworow = true, slots = entries a page (default all), page = fixed page (default turns every ui.PAGE_S).
+function View:board(x, y, w, rows, o)
+  if o and o.tworow then return board2(self, x, y, w, rows, o) end
+  return board1(self, x, y, w, rows)
+end
+
+---------------------------------------------------------------------------------------------------------
+-- 10.13 Block number
+---------------------------------------------------------------------------------------------------------
+-- 3x5 font, one string per row, # = lit. screens.lua draws its picker numbers from this table.
+ui.bigFont = {
+  ["0"] = { "###", "# #", "# #", "# #", "###" }, ["1"] = { " # ", "## ", " # ", " # ", "###" },
+  ["2"] = { "###", "  #", "###", "#  ", "###" }, ["3"] = { "###", "  #", "###", "  #", "###" },
+  ["4"] = { "# #", "# #", "###", "  #", "  #" }, ["5"] = { "###", "#  ", "###", "  #", "###" },
+  ["6"] = { "###", "#  ", "###", "# #", "###" }, ["7"] = { "###", "  #", "  #", "  #", "  #" },
+  ["8"] = { "###", "# #", "###", "# #", "###" }, ["9"] = { "###", "# #", "###", "  #", "###" },
+  ["%"] = { "# #", "  #", " # ", "#  ", "# #" }, [":"] = { "   ", " # ", "   ", " # ", "   " },
+  ["-"] = { "   ", "   ", "###", "   ", "   " },
+}
+local BLANK_GLYPH = { "   ", "   ", "   ", "   ", "   " }
+
+-- v:bigNumber(x, y, "113%", "warn", { px = 2, py = 1 }): each font pixel is px cells wide and py rows tall, one
+-- pixel gap between glyphs; lit pixels are background colour in the tone (no colour: a # instead). Returns the
+-- last column drawn. Width is (4 * #text - 1) * px, height 5 * py.
+function View:bigNumber(x, y, text, tone, o)
+  o = o or {}
+  local px, py = max(1, o.px or 2), max(1, o.py or 1)
+  text = tostring(text)
+  local lit = self.colour and (" "):rep(px) or ("#"):rep(px)
+  for i = 1, #text do
+    local g = ui.bigFont[text:sub(i, i)] or BLANK_GLYPH
+    local gx = x + (i - 1) * 4 * px
+    for row = 1, 5 do
+      for col = 1, 3 do
+        if g[row]:sub(col, col) == "#" then
+          for dy = 0, py - 1 do self:put(gx + (col - 1) * px, y + (row - 1) * py + dy, lit, tone or "gold", tone or "gold") end
+        end
+      end
+    end
+  end
+  return x + max(0, (4 * #text - 1) * px) - 1
+end
+
+---------------------------------------------------------------------------------------------------------
+-- 10.14 Needs you slots
+---------------------------------------------------------------------------------------------------------
+-- v:needsYou(x, y, w, n, alerts, { summary = "6 systems fine" }): a gold NEEDS YOU label, then n fixed slots.
+-- alerts = { { text, tone = "bad"|"warn", name = "Smelter" }, ... } (any order: red first, then orange).
+-- More than n: the last slot says "+k more: Smelter, Seagull, ..." in orange. None: "Nothing needs you." (lime)
+-- and a dim summary line. Always draws n slots; returns the next free row (y + 1 + n).
+function View:needsYou(x, y, w, n, alerts, o)
+  o = o or {}
+  local label = fit("NEEDS YOU", w - 2)
+  local nx = self:put(x, y, label, "gold", "bg")
+  if w - #label - 1 > 0 then self:put(nx + 1, y, rule(self):rep(w - #label - 1), "bar", "bg") end
+  local list = {}
+  for i, a in ipairs(alerts or {}) do list[i] = { a = a, i = i, bad = a.tone == "bad" and 0 or 1 } end
+  table.sort(list, function(p, q) if p.bad ~= q.bad then return p.bad < q.bad end return p.i < q.i end)
+  local sy = y + 1
+  if #list == 0 then
+    if n >= 1 then self:alert(x, sy, w, "Nothing needs you.", "good") end
+    if n >= 2 and o.summary then self:put(x + 2, sy + 1, fit(tostring(o.summary), w - 2), "dim", "bg") end
+  else
+    local shown = #list > n and n - 1 or #list
+    for i = 1, shown do self:alert(x, sy + i - 1, w, list[i].a.text, list[i].a.tone) end
+    if #list > n then
+      local names = {}
+      for i = shown + 1, #list do names[#names + 1] = list[i].a.name or list[i].a.text end
+      self:alert(x, sy + n - 1, w, ("+%d more: %s"):format(#list - shown, table.concat(names, ", ")), "warn")
+    end
+  end
+  return sy + n
+end
+
 end
