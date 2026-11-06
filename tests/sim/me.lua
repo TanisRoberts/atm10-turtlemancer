@@ -7,7 +7,7 @@
 --   net:add("me_bridge_0", me)
 --   local racks = me:addRack{ priority = 10, cell = "256M" }       -- 8 drives x 10 cells
 --   me:addRack{ priority = 0, cell = "1k" }
---   me:addBus{ priority = 9999, capacity = 256000, void = true }    -- a drawer with a void upgrade
+--   me:addBus{ priority = 9999, capacity = 256000, void = true, item = "minecraft:deepslate" }  -- a void drawer
 --   me:fill(cell, "minecraft:cobblestone", 500)                     -- set up fragmentation directly
 --   me:where("minecraft:cobblestone")                               -- { {drive=, slot=, count=}, ... }
 --
@@ -107,6 +107,7 @@ Bus.__index = Bus
 function Bus:count(name) return self.piles[name] or 0 end
 function Bus:holds(name) return (self.piles[name] or 0) > 0 end
 function Bus:room(name)
+  if self.item and name ~= self.item then return 0 end
   if self.void then return math.huge end
   if not self.capacity then return math.huge end
   return math.max(0, self.capacity - (self.piles[name] or 0))
@@ -172,10 +173,11 @@ function ME:addRack(opts)
   end
   return out
 end
--- a storage bus on an external inventory: priority, capacity (per item, nil = unlimited), void
+-- a storage bus on an external inventory: priority, capacity (per item, nil = unlimited), void, item (a filter: a
+-- drawer holds one item; nil = takes any)
 function ME:addBus(opts)
   opts = opts or {}
-  local b = setmetatable({ kind = "bus", prio = opts.priority or 0, capacity = opts.capacity, void = opts.void,
+  local b = setmetatable({ kind = "bus", prio = opts.priority or 0, capacity = opts.capacity, void = opts.void, item = opts.item,
                            piles = {}, seq = self:_seq() }, Bus)
   self.buses[#self.buses + 1] = b
   return b

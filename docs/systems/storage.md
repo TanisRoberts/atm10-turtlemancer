@@ -10,6 +10,7 @@ The only computer that moves items in or out of storage. This note covers the sc
 - `storage_rules.lua`, `storage_docks.lua`: depot rules and dock links (see the design doc).
 - `storage_reactor.lua`: the Reactor fuel job (below).
 - `storage_me.lua`: ME mode, AE2 through an ME Bridge as the storage (below).
+- `storage_defrag.lua`: `/defrag` in ME mode (below).
 - `shared/assignui.lua` + `shared/assignrules.lua`: the `/assign` pages, shared with the Nether and MD Foremen.
 
 ## Screens
@@ -67,3 +68,17 @@ When an **ME Bridge** (`me_bridge`, the first one by name) is on the cable, AE2 
 - **Item list.** The header shows `used/total bytes NN%`; `NN% full` in orange from 90%. Offline (`isConnected`/`isOnline` false, or no answer) it shows `ME offline` in red, keeps the last list, and the jobs run on what is on the cable: inputs wait (no "input stuck" alert) and refills do nothing until AE2 is back.
 
 Test: `tests/scenarios/storage_me.lua` (uses the bridge mock `tests/sim/me.lua`).
+
+## Defrag (`storage_defrag.lua`, #126)
+
+`/defrag` (ME mode only) moves piles out of low-priority drives (small cells) into the highest-priority drives with room. AE2 inserts at the highest priority first and extracts from the lowest, so a **round trip** (export a chunk to the buffer, import all of it back) moves it from the lowest tier holding it into the top tier. A **tier** is a drive priority (a rack shares one). Priority 9999 storage buses (void drawers) are not drives and never show as tiers, but a round trip fills them first.
+
+- **Defrag buffer.** An `/assign` job (one, any inventory, bigger = fewer trips; `cfg.defragBuffer`). Not storage, never counted. Whatever is in it goes back into AE2 at boot, after every run and every 30 s.
+- **Start page.** Tiers (`P10: 1 rack, 8 drives  used/total bytes`), warnings (all drives at one priority: Start is off; no buffer), items it would move (piles of at least `DEFRAG_MIN`, biggest first) and the **voided** list. A bus cannot be seen from the bridge, so a void drawer is declared in `storage.env`.
+- **Run.** Per item, round trips of up to buffer capacity. After each, `getDrives` is read; if the used bytes of the lower tiers did not fall, the item is done. Stops when the top tier has under 5% free, on Stop, or when the list is done. An item whose total drops without being in `DEFRAG_VOID` was voided by a bus nobody declared: shown in red and left alone from then on.
+- **Yields.** The step is the worker's last job each pass, so docks, depots, fuel, smelter and Weaver run on time. It does not run while `paused` (Find it, barrel probe, setup) or while `/assign` holds the worker.
+- **Progress page.** Item now, items done/left, bytes freed in the low tiers, Stop. Back leaves it running; `/defrag` again reopens it. The bridge has no used types per cell, so progress is in bytes.
+- **Settings** (`storage.env`): `DEFRAG_SKIP=` item ids or `#tags` never moved; `DEFRAG_MIN=0` skip piles smaller than this (0 = one stack); `DEFRAG_VOID=minecraft:deepslate=256000` items behind a void drawer and how many it keeps.
+- **Broadcast** on `tanis-base` every 3 s while running and once at the end: `{ type = "defrag", running, item, done, left, freedBytes }`.
+
+Test: `tests/scenarios/storage_defrag.lua`.

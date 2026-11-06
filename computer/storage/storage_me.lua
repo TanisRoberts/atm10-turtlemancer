@@ -85,6 +85,16 @@ return function(o)
     return out
   end
 
+  -- How many of `key` the grid holds right now (nil when the bridge can't answer). One cheap call, no full list.
+  function ME.count(key)
+    local n, hash = splitKey(key)
+    local f = { name = n }
+    if hash then f.nbtHash = hash end
+    local it = bridge("getItem", f)
+    if type(it) ~= "table" then return nil end
+    return it.count or 0
+  end
+
   -- Item bytes in use / in all (nil when offline)
   function ME.bytes()
     local used = bridge("getUsedItemStorage")

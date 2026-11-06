@@ -170,7 +170,7 @@ end
 local function isSpecial(n)
   if isTank(n) then return true end
   if isSmelterFeed(n) or isSmelterOut(n) then return true end
-  if n == cfg.output or n == cfg.weaver or n == cfg.pocketIn or n == cfg.pocketOut then return true end
+  if n == cfg.output or n == cfg.weaver or n == cfg.pocketIn or n == cfg.pocketOut or n == cfg.defragBuffer then return true end
   for _, d in ipairs(cfg.docks or {}) do if d == n then return true end end
   for _, d in ipairs(cfg.fuels) do if d == n then return true end end
   for _, d in ipairs(cfg.reactorFuels or {}) do if d == n then return true end end
@@ -199,6 +199,8 @@ local TYPES = {
     about = "The butler's $dump lands here and gets sorted. Only one." },
   { key = "pocketOut", label = "Pocket restock", short = "P.stock", tag = "P.STCK", col = colours.magenta,
     about = "The butler's top-ups wait here. Only one." },
+  { key = "defragBuffer", label = "Defrag buffer", short = "Defrag", tag = "DEFRAG", col = colours.green,
+    about = "ME mode: /defrag round-trips piles through it. Never storage, never counted; whatever is left goes back into AE2. Any inventory, bigger is faster. Only one." },
   { key = "drawer",    label = "Drawers",        short = "Drawers", tag = "DRAWER", col = colours.lightBlue,
     about = "Bulk storage (a drawer controller): items it holds go there first. Still storage." },
   { key = "depot",     label = "Depot",          short = "Depot",   tag = "DEPOT",  col = colours.brown,
@@ -211,7 +213,7 @@ local TYPES = {
 local TYPE_BY = {}
 for _, t in ipairs(TYPES) do TYPE_BY[t.key] = t end
 local LISTS   = { input = "inputs", dock = "docks", fuel = "fuels", reactorFuel = "reactorFuels", drawer = "drawers", ignore = "ignored" }
-local SINGLES = { output = "output", weaver = "weaver", pocketIn = "pocketIn", pocketOut = "pocketOut" }
+local SINGLES = { output = "output", weaver = "weaver", pocketIn = "pocketIn", pocketOut = "pocketOut", defragBuffer = "defragBuffer" }
 
 local function typeOf(n)
   if cfg.fluidDepots and cfg.fluidDepots[n] ~= nil then return "fluidDepot" end
@@ -1260,6 +1262,12 @@ local REACTOR = dofile("storage_reactor.lua")({
   retrieve = retrieve, env = require("envfile"),
 })
 
+-- /defrag (storage_defrag.lua): moves piles out of the low-priority drives. Its step is the worker's last job.
+local DEFRAG = dofile("storage_defrag.lua")({
+  ME = ME, cfg = function() return cfg end, info = info, call = call, env = require("envfile"),
+  broadcast = function(msg) if rednet.isOpen() then rednet.broadcast(msg, BASE) end end,
+})
+
 local function topUpFuel()
   if #cfg.fuels == 0 then return false end
   local target = canaryFuelTarget()
@@ -1501,7 +1509,7 @@ end
 
 -- Wait for the next tick, waking early when the network hands us work
 local function waitTick()
-  if not paused and not picking and (#jobs > 0 or (weaverReq and weaverReq.seq ~= lastWeaverseq)
+  if not paused and not picking and (DEFRAG.running() or #jobs > 0 or (weaverReq and weaverReq.seq ~= lastWeaverseq)
     or (pocketReq and pocketReq.seq ~= lastPocketSeq)) then return end
   local t = os.startTimer(TICK)
   while true do
@@ -1530,6 +1538,7 @@ local function workerLoop()
       topUpFluidDepots()
       if supplyWeaver() then buildItems() end
       if fillPocket() then buildItems() end
+      DEFRAG.tick()
       if #jobs > 0 then
         while #jobs > 0 do
           local j = table.remove(jobs, 1)
@@ -2037,6 +2046,10 @@ cmds:add({ name = "tidy", help = "biggest piles into biggest drawers",
     Scr.report({ title = "TIDY", rows = tidyReport(res) })
     return true
   end })
+end
+if ME.on() then
+  cmds:add({ name = "defrag", help = "move piles out of small cells into the top-priority drives",
+    run = function() Scr.later(function() DEFRAG.screen(Scr.view(), require("ui")) end); return true end })
 end
 cmds:add({ name = "fuelinfo", help = "Canary fuel barrels and fuel stock",
   run = function()
