@@ -17,6 +17,7 @@ local function build(w, h, mon, opts)
   local rb = world:reactor{ stored = 910000, active = false, prod = 3000, demand = 1200, rodScale = true, rodLevel = 40,
     inPort = i2, outPort = o2, fuel = 1600 }
   net:add("BigReactors-Reactor_0", ra); net:add("BigReactors-Reactor_1", rb)
+  if opts.detector then net:add("energy_detector_0", world:detector(opts.detector)) end
   net:add("in_0", i1); net:add("out_0", o1); net:add("in_1", i2); net:add("out_1", o2)
   o1:give("bigreactors:cyanite_ingot", 64 * 9)                      -- reactor 1's outlet is full and never drains
   local c = world:computer{ id = 5, label = "Operator", w = w, h = h }
@@ -233,24 +234,59 @@ T.test("operator screen: one reactor on a narrow screen opens straight on its Po
   T.truthy(c.screen:find("OPERATOR"), "Back should show the overview\n" .. c.screen:text())
 end)
 
-T.test("operator screen: the wall shows panels, the chart and the recent events", function()
-  local world, c, m, ra = build(51, 19, { 164, 81 }, { run = 400 })
+T.test("operator screen: the wall shows the chart on top, panels in the middle, the glance band below", function()
+  local world, c, m, ra = build(51, 19, { 164, 81 }, { run = 400, detector = { rate = 5000, limit = 2147483647 } })
   T.eq(c.error, nil)
-  for _, t in ipairs({ "POWER GRID", "OUTPUT", "BUFFER", "PLANT", "NEEDS ATTENTION", "Reactor-1", "Reactor-2", "POWER LEVEL", "READINGS",
-    "PLANT BUFFER, LAST 30 MINUTES", "RECENT", "Operator   started", "-30 min", "now", "Supply (Storage)" }) do
+  for _, t in ipairs({ "PLANT BUFFER, LAST 30 MINUTES", "now ", "-30 min", "-15 min", "100%", "POWER GRID", "REACTORS", "Reactors on",
+    "Supply (Storage)", "Reactor-1", "Reactor-2", "POWER LEVEL", "Output", "Waste outlet", "POWER USE", "NEEDS YOU", "RECENT",
+    "Operator  started", "2 reactors", "of" }) do
     T.truthy(m:find(t), "missing on the wall: " .. t .. "\n" .. m:text())
   end
   for yy = 1, 81 do T.truthy(#m:line(yy) <= 164, "row too wide") end
-  -- the chart has lime bars
-  local lime = 0
-  for yy = 40, 75 do for xx = 46, 160 do local _, b = m:colourAt(xx, yy); if b == COL.lime then lime = lime + 1 end end end
-  T.truthy(lime > 20, "no lime in the chart")
+  local function rowOf(s) for yy = 1, 81 do if m:line(yy):find(s, 1, true) then return yy end end end
+  T.eq(rowOf("PLANT BUFFER"), 3, "chart label row")
+  T.eq(rowOf("-30 min"), 26, "time axis row")
+  T.eq(rowOf("POWER GRID"), 29, "middle header row")
+  T.eq(rowOf("POWER USE"), 59, "glance band header row")
+  T.eq(rowOf("RECENT"), 65, "recent label row")
+  T.eq(m:line(81):sub(1, 3), " < ", "footer back")
+  T.absent(m:text(), "NEEDS ATTENTION", "the old alert list is gone")
+  T.absent(m:text(), "NEEDS  ", "no per-reactor needs list on the wall")
+  -- the chart is cyan, its newest column white, within rows 4-25
+  local cyan, white = 0, 0
+  for yy = 4, 25 do
+    local _, b = m:colourAt(150, yy); if b == COL.cyan then cyan = cyan + 1 end
+    local _, bw = m:colourAt(163, yy); if bw == COL.white then white = white + 1 end
+  end
+  T.truthy(cyan > 3, "no cyan fill in the chart")
+  T.truthy(white > 3, "the newest column is not white")
+  -- block digits: 4 wide, 2 tall pixels in rows 61-70
+  local lit = 0
+  for yy = 61, 70 do for xx = 3, 70 do local _, b = m:colourAt(xx, yy); if b == COL.lime or b == COL.orange then lit = lit + 1 end end end
+  T.truthy(lit > 40, "no block digits in the power use slot")
+  T.truthy(m:line(72):find("FE/t", 1, true), "figures row")
+  -- Needs you: the reactor with the stuck outlet is listed in the right half, red
+  local nx = m:line(60):find("Reactor-1", 74, true)
+  T.truthy(nx, "Needs you shows reactor 1's problem\n" .. m:line(60))
   -- the controls on a panel work by touch
   local before = level(ra)
   touch(world, m, ">>")
   T.eq(level(ra), before + 5, "level step on the wall")
   T.truthy(m:find("Manual Hold:"))
-  -- a tap on a panel's controls works
+end)
+
+T.test("operator screen: the wall's power use slot, throttled and without a detector", function()
+  local world, c, m = build(51, 19, { 164, 81 }, { run = 60, detector = { rate = 5000, limit = 2000 } })
+  T.eq(c.error, nil)
+  T.truthy(m:find("THROTTLED"), "throttle tag\n" .. m:text())
+  T.truthy(m:find("Throttled at 2,000 FE/t"), "capped figure")
+  T.truthy(m:find("Power throttled"), "needs you line")
+  local red = 0
+  for yy = 61, 70 do for xx = 3, 70 do local _, b = m:colourAt(xx, yy); if b == COL.red then red = red + 1 end end end
+  T.truthy(red > 40, "digits are red")
+  local w2, c2, m2 = build(51, 19, { 164, 81 }, { run = 60 })
+  T.truthy(m2:find("No energy detector on the cable"), "no detector text\n" .. m2:text())
+  T.absent(m2:text(), "THROTTLED", "no tag without a detector")
 end)
 
 local function row(s, text, from) local _, y = at(s, text, from or 3); return s:line(y) end
