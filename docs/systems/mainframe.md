@@ -16,8 +16,11 @@ The programs that used to draw now hand data over in globals, and `wall.lua` red
 
 `wall.layout(W, H)` says where things go.
 
-- **Text size:** `SCALE=1` in `wall.env` (read by `mainframe.lua` at boot; 0.5 to 5 in steps of 0.5; reboot after an edit). An 8x6 wall is 82x40 at 1 (164x81 at 0.5).
+- **Text size:** `SCALE=1` in `wall.env` (with `PAGE_S`, both read by `mainframe.lua` at boot; 0.5 to 5 in steps of 0.5; reboot after an edit). An 8x6 wall is 82x40 at 1 (164x81 at 0.5).
 - **Normal wall** (57x24, 57x38, 36x24): strip on rows 1-3 (island chip, time, phase with Night red, day, weather; moon, biome, light; danger red, alert orange, or "All clear" lime), a rule, then the `MACHINES` board. At 50 wide and up, the `VISITORS` column sits at the right (20 wide) with "You're home" (lime) or "Away 12m, locked" (orange) on its last row.
+- **Floor wall** (80 wide and 40 high or more, under the big wall's size; an 8x6 at scale 1 is 82x40): `L.glance` in `wall.layout`. Top half: `MACHINES` header (row 1), nine two-row entries (rows 2-19) from the kit's `v:board(..., { tworow = true, slots = 9 })`, page dots on row 20, visitors at the right (rows 2-19, foot on row 20). The board is grouped Storage, Mining, Farming, Building, Labs and pages every `PAGE_S` seconds (`wall.env`, default 3; `ui.PAGE_S`). Row 21 is a rule. Bottom half: clock column (ISLAND chip row 23, `bigNumber` time rows 25-29, phase/day/weather row 31, moon/biome/light row 32) and power column (x 42-81: `POWER USE` header, use % in block digits, `draw of potential FE/t`, a note). `NEEDS YOU` is row 34 with four slots; row 40 is the island line. Nothing moves: fixed rows, empty slots stay blank.
+  - **Power slot:** lime under 100%, orange at 100% and up (not an alert). Red digits, a red `THROTTLED` tag and a `Power throttled: ...` first entry in Needs you only while the Operator's `power.limit` (FE/t) is set (#121; `power.asked` and `power.askedFor` add the "Asked for ..." line). No fresh power record (30 s, `POWER_STALE`): dim `--` and `Operator not reporting`.
+  - **Needs you** is built from the board rows in `wall.lua` (`needs()`): lost, error, offline, stuck and failed are red, `waiting` is orange; over four, the last slot folds the rest. With none: `Nothing needs you.` and a summary line.
 - **Big wall** (120 wide and 60 high or more, e.g. 164x81): three columns: the Island Station (key/value rows, danger line, the nearby list), the board with machines grouped under Storage, Mining, Farming, Building and Labs, and visitors.
 - **Board rows** are the kit's `v:board`: stripe, glyph, state word, detail, last heard. A row not heard from for 30 s goes grey with a still `?`; a machine never heard from says `never`. `returning` is cyan. When rows do not fit, the board pages every 8 s and the last row shows `o . .` dots.
 - Motion follows `ANIM=` in `wall.env` (full, calm or off; made on first run).
@@ -42,7 +45,7 @@ The wall has nothing to type into and the mainframe has no kit screen on its own
 
 ## Tests
 
-`tests/scenarios/mainframe_wall.lua` runs the real `mainframe.lua` with stand-in machines at 57x24, 57x38, 36x24 and 164x81: rows, colours, the visitor column, grey rows after 30 s, paging. `operator_mainframe.lua` checks the Operator rows on the wall, the fuel chest text (report, stale, none) and both fuel alerts.
+`tests/scenarios/mainframe_wall.lua` runs the real `mainframe.lua` with stand-in machines at 57x24, 57x38, 36x24, 82x40 and 164x81 (82x40: pages, dots, block digits, Needs you, the power colours and THROTTLED): rows, colours, the visitor column, grey rows after 30 s, paging. `operator_mainframe.lua` checks the Operator rows on the wall, the fuel chest text (report, stale, none) and both fuel alerts.
 
 ## Which monitor is the wall
 

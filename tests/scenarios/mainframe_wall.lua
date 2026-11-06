@@ -51,7 +51,7 @@ local function build(opts)
     c:writeFile("c.lua", CANARY:format(quiet and tostring(quiet) or "nil", num, label, state)); c:run("c")
   end
   canary(21, 4, "Canary-04", "working")
-  canary(22, 7, "Canary-07", "waiting", opts.quiet)
+  canary(22, 7, "Canary-07", opts.calm and "working" or "waiting", opts.quiet)
   for i = 1, (opts.canaries or 0) do canary(30 + i, 10 + i, ("Canary-%02d"):format(10 + i), "working") end
   if opts.visitors ~= false then
     world:at(3, function() mf.G.WALL_VISITORS = VISITORS end)
@@ -145,18 +145,6 @@ T.test("mainframe wall 164x81: station, grouped board and visitors in three colu
   T.truthy(xv and xv > 120, mon:text())
 end)
 
-T.test("mainframe wall 82x40 (an 8x6 wall at scale 1): wall.env made with SCALE=1, old layout, no reboot", function()
-  local world, mf, mon = build{ w = 82, h = 40 }
-  world:run(20)
-  T.eq(mf.error, nil)
-  local env = mf:readFile("wall.env")
-  T.truthy(env and env:find("SCALE=1", 1, true) and env:find("ANIM=", 1, true), env)
-  T.eq(mon:getTextScale(), 1)
-  T.eq(mf.bootAt, 0)
-  T.truthy(mon:line(1):find("ISLAND", 1, true), mon:text())
-  T.truthy(mon:line(5):find("MACHINES", 1, true), mon:text())
-end)
-
 T.test("mainframe wall: SCALE=0.5 in wall.env keeps the smallest text", function()
   local world = cc.world()
   local mf = world:computer{ id = 1, label = "Mainframe" }
@@ -171,4 +159,123 @@ T.test("mainframe wall: SCALE=0.5 in wall.env keeps the smallest text", function
   T.eq(mf.error, nil)
   T.eq(mon:getTextScale(), 0.5)
   T.truthy(mon:line(5):find("MACHINES", 1, true), mon:text())
+end)
+
+-- 82x40 (an 8x6 wall at scale 1): the floor-readable wall
+-- The Operator's record goes straight into the mainframe's globals, as operator_link would hand it.
+local function setPower(mf, pw)
+  mf.G.OPERATOR = { label = "Operator", plant = { fe = 1000, buf = 0.41 }, units = {}, power = pw }
+  mf.G.OPERATOR_SEEN = mf.G.os.clock()
+end
+
+local function bgAt(mon, x, y) local _, b = mon:colourAt(x, y); return b end
+local COL = require("sim.env").colors
+
+T.test("mainframe wall 82x40: board half, dots, glance half, wall.env", function()
+  local world, mf, mon = build{ w = 82, h = 40, canaries = 12 }
+  world:run(20)
+  T.eq(mf.error, nil)
+  local env = mf:readFile("wall.env")
+  T.truthy(env and env:find("SCALE=1", 1, true) and env:find("PAGE_S=3", 1, true), env)
+  T.eq(mon:getTextScale(), 1)
+  T.eq(mf.bootAt, 0)
+  T.truthy(mon:line(1):find("MACHINES", 1, true) and mon:line(1):find("VISITORS", 1, true), mon:line(1))
+  T.eq(mon:line(1):sub(62, 62), " ", "divider")
+  -- two-row entries: name and state on one row, detail under it, fixed slots
+  local r, y = rowOf(mon, "Storage")
+  T.truthy(r:find("ok", 1, true), r)
+  T.truthy(mon:line(y + 1):find("79% full", 1, true), mon:line(y + 1))
+  T.eq(y, 2, "first slot on row 2")
+  -- 16 machines on 9 slots: two pages, dots on row 20
+  T.truthy(mon:line(20):find("[o%.] [o%.]"), mon:line(20))
+  T.truthy(mon:find("Alex"), mon:text())
+  T.truthy(mon:line(20):find("You're home", 1, true), mon:line(20))
+  local first = mon:text()
+  world:run(3)
+  T.truthy(mon:text() ~= first, "the page turned after 3 s")
+  T.falsy(mon:find("Storage"), "storage was on page 1 only")
+  -- rows 21 rule, 23 chip and header, 34 Needs you, 40 island line
+  T.truthy(mon:line(21):find("^%-*$") or mon:line(21):find("\140", 1, true), mon:line(21))
+  T.truthy(mon:line(23):find("ISLAND", 1, true) and mon:line(23):find("POWER USE", 1, true), mon:line(23))
+  T.truthy(mon:line(34):find("NEEDS YOU", 1, true), mon:line(34))
+  T.truthy(mon:line(40):find("All clear on the island", 1, true), mon:line(40))
+  T.truthy(mon:line(31):find("day ", 1, true), mon:line(31))
+  T.truthy(mon:line(32):find("Moon ", 1, true), mon:line(32))
+end)
+
+T.test("mainframe wall 82x40: clock in block digits, Needs you slots", function()
+  local world, mf, mon = build{ w = 82, h = 40, quiet = 6 }
+  world:run(30)
+  T.eq(mf.error, nil)
+  local lit = 0
+  for y = 25, 29 do for x = 2, 39 do if bgAt(mon, x, y) == COL.white then lit = lit + 1 end end end
+  T.truthy(lit > 20, "clock digits drawn in rows 25-29, lit cells: " .. lit)
+  T.truthy(mon:line(25):sub(2, 39):find("^%s*$"), "digits are cells, not letters")
+  -- Canary-07 waiting is orange in slot 1; nothing red
+  T.truthy(mon:line(35):find("Canary-07 waiting", 1, true), mon:line(35))
+  T.eq(bgAt(mon, 2, 35), COL.orange)
+  T.falsy(mon:find("Nothing needs you."), mon:text())
+end)
+
+T.test("mainframe wall 82x40: nothing needs you says so and sums up", function()
+  local world, mf, mon = build{ w = 82, h = 40, calm = true }
+  world:run(20)
+  T.eq(mf.error, nil)
+  T.truthy(mon:line(35):find("Nothing needs you.", 1, true), mon:text())
+  T.eq(bgAt(mon, 2, 35), COL.lime)
+  T.truthy(mon:line(36):find("machines:", 1, true) and mon:line(36):find("none lost", 1, true), mon:line(36))
+  T.eq(mon:line(37):gsub("%s", ""), "", "slots 3-4 blank")
+end)
+
+T.test("mainframe wall 82x40: power slot lime under 100%, orange over, dim without data", function()
+  local world, mf, mon = build{ w = 82, h = 40 }
+  world:run(10)
+  local function lit(tone)
+    local n = 0
+    for y = 25, 29 do for x = 42, 81 do if bgAt(mon, x, y) == tone then n = n + 1 end end end
+    return n
+  end
+  -- no Operator: dim dashes and the note
+  T.truthy(mon:line(31):find("Operator not reporting", 1, true), mon:line(31))
+  T.truthy(lit(COL.lightGrey) > 0 or lit(COL.grey) > 0)
+  -- 62%: lime digits, Buffer note
+  world:at(world.now + 0.1, function() setPower(mf, { draw = 1860, potential = 3000, pct = 62, seen = 0 }) end)
+  world:run(1.5)
+  T.truthy(mon:line(31):find("1,860 of 3,000 FE/t", 1, true), mon:line(31))
+  T.truthy(mon:line(32):find("Buffer 41%", 1, true), mon:line(32))
+  T.truthy(lit(COL.lime) > 20, "lime digits")
+  T.eq(lit(COL.orange), 0)
+  T.falsy(mon:line(23):find("THROTTLED", 1, true))
+  -- 113%: orange, not an alert
+  mf.G.OPERATOR.power = { draw = 3400, potential = 3000, pct = 113, seen = 0 }
+  world:run(1.5)
+  T.truthy(lit(COL.orange) > 20, "orange digits")
+  T.eq(lit(COL.lime), 0)
+  T.truthy(mon:line(32):find("Over output, buffer 41% falling", 1, true), mon:line(32))
+  T.falsy(mon:find("Power throttled"), "over output is not an alert")
+  T.falsy(mon:line(23):find("THROTTLED", 1, true))
+  -- exactly 100%: orange
+  mf.G.OPERATOR.power = { draw = 3000, potential = 3000, pct = 100, seen = 0 }
+  world:run(1.5)
+  T.truthy(lit(COL.orange) > 20)
+end)
+
+T.test("mainframe wall 82x40: THROTTLED only while power.limit is set, red, and first in Needs you", function()
+  local world, mf, mon = build{ w = 82, h = 40 }
+  world:run(10)
+  setPower(mf, { draw = 2700, potential = 3000, pct = 90, seen = 0, limit = 2700, asked = 4800, askedFor = 120 })
+  world:run(1.5)
+  T.truthy(mon:line(23):find("THROTTLED", 1, true), mon:line(23))
+  T.truthy(mon:line(31):find("Throttled at 2,700 FE/t", 1, true), mon:line(31))
+  T.truthy(mon:line(32):find("Asked for 4,800 (160%) for 2m", 1, true), mon:line(32))
+  T.truthy(mon:line(35):find("Power throttled", 1, true), mon:line(35))
+  T.eq(bgAt(mon, 2, 35), COL.red)
+  local n = 0
+  for y = 25, 29 do for x = 42, 81 do if bgAt(mon, x, y) == COL.red then n = n + 1 end end end
+  T.truthy(n > 20, "red digits")
+  -- the limit goes: the tag and the entry go with it
+  mf.G.OPERATOR.power = { draw = 2000, potential = 3000, pct = 67, seen = 0 }
+  world:run(1.5)
+  T.falsy(mon:line(23):find("THROTTLED", 1, true))
+  T.falsy(mon:find("Power throttled"))
 end)
