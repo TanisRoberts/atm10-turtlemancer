@@ -25,8 +25,8 @@ local M = {
     computer = {
       name = "Computer",
       about = "A computer that sits at the base",
-      details = "The base's brains: storage, smelting, the mainframe, the Foreman, the MD and Nether Foremans, the Farmhand, the Architect, the Operator, GPS, the plastic factory, the neural lab and the art wall.",
-      order = { "mainframe", "storage", "smelter", "foreman", "mdforeman", "nether", "farmhand", "architect", "operator", "gps", "plastic", "neural", "art", "cartographer" },
+      details = "The base's brains: storage, smelting, the mainframe, the Foreman, the MD and Nether Foremans, the Farmhand, the Architect, the Operator, GPS, the plastic factory, the neural lab, the art wall and the server room board.",
+      order = { "mainframe", "storage", "smelter", "foreman", "mdforeman", "nether", "farmhand", "architect", "operator", "gps", "plastic", "neural", "art", "cartographer", "server" },
       roles = {
         mainframe = {
           name = "Mainframe",
@@ -147,6 +147,16 @@ local M = {
             .. "plastic in a dock barrel that storage empties and keeps fuelled (/dock on storage).",
           run = "plastic",
           files = { "computer/plastic/plastic.lua", "computer/plastic/plastic_screens.lua", "shared/slash.lua", "shared/screens.lua", "shared/ui.lua", "shared/ui_widgets.lua", "shared/ui_parts.lua", "shared/ui_motion.lua" },
+        },
+        server = {
+          name = "Server room board",
+          about = "ME drive racks, fill and defrag on a big monitor",
+          details = "Reads the ME Bridge on the storage cable (it never moves items) and draws the server room "
+            .. "on a 4x5 monitor: every rack and drive cell by fill, the priority tiers, storage's defrag progress, "
+            .. "energy and the biggest piles. The layout comes from the drives' positions; server.env says how big "
+            .. "the finished room is. Needs a wireless or ender modem for the defrag news.",
+          run = "server",
+          files = { "computer/server/server.lua", "computer/server/server_layout.lua", "computer/server/server_board.lua", "shared/envfile.lua", "shared/slash.lua", "shared/screens.lua", "shared/ui.lua", "shared/ui_widgets.lua", "shared/ui_parts.lua", "shared/ui_motion.lua" },
         },
         neural = {
           name = "Neural lab",
