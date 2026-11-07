@@ -182,6 +182,18 @@ local function drawText(pw, noEst)
 end
 S.drawText = drawText
 
+-- "avg 64%  peak 131% (14:20)": the 10 minute average and the 24 h peak, as % of potential (#135); nil until there is an average
+local function avgText(pw)
+  if not pw or not pw.avg10Pct then return nil end
+  local s = "avg " .. floor(pw.avg10Pct + 0.5) .. "%"
+  if pw.peakPct then
+    local ok, at = pcall(os.date, "%H:%M", floor(pw.peakAt or 0))
+    s = s .. "  peak " .. floor(pw.peakPct + 0.5) .. "%" .. ((ok and pw.peakAt) and (" (" .. at .. ")") or "")
+  end
+  return s
+end
+S.avgText = avgText
+
 local function netText(t)
   if not t.net then return "-" end
   return (t.net >= 0 and "+" or "-") .. D.num(math.abs(t.net)) .. "/t"
@@ -204,6 +216,8 @@ function S.grid(v, x, y0, w, last, rec, t, ctx)
     v:put(x + 1, y, (t.power and t.power.estimated) and "Draw  est." or "Draw", t.power and t.power.estimated and "warn" or "dim", "bg")
     v:put(x + 1, y + 1, D.fit(dt, w - 2), tone or "fg", "bg")
     y = y + 2
+    local at = avgText(t.power)
+    if at and y < last - 3 then v:put(x + 1, y, D.fit(at, w - 2), "dim", "bg"); y = y + 1 end
   end
   y = y + 1
   local rows = gridRows(t)
@@ -434,12 +448,15 @@ local function powerTab(v, ctx, r)
     y = D.buffer(v, 2, y, W - 2, r.buf, r.onBelow or 0.3, r.offAbove or 0.9, "Buffer")
     local dt, tone = drawText(ctx.rec and ctx.rec.power)
     if dt then v:kv(2, y, W - 2, "Grid draw", dt, tone); y = y + 1 end
+    local at = avgText(ctx.rec and ctx.rec.power)
+    local gap = H >= 21
+    if dt and at then v:put(2, y, D.fit(at, W - 2), "dim", "bg"); y = y + 1; gap = H >= 33 end   -- keeps the Max output rows in view
     if trip then
       v:put(2, y, "Breaker tripped: detector capped", "bad", "bg")
       resetButton(v, ctx, W - 17, y)
       y = y + 1
     end
-    y = D.section(v, 2, H >= 21 and y + 1 or y, W - 2, "REACTOR")      -- a short screen has no spare row for the gap
+    y = D.section(v, 2, gap and y + 1 or y, W - 2, "REACTOR")      -- a short screen has no spare row for the gap
     v:kv(2, y, W - 2, "Fuel", inletText(r))
     v:kv(2, y + 1, W - 2, "Temperature", ("fuel %sC  casing %sC"):format(D.num(r.fuelTemp), D.num(r.casing)))
     if H >= 21 and y + 2 < H then maxLine(v, ctx, r, y + 2, H - 2) end

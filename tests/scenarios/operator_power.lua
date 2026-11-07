@@ -181,3 +181,26 @@ T.test("operator breaker: potential 0 never trips", function()
   T.eq(mf.G.last.power.limit, nil)
   T.eq(d.limit, 1000000000)
 end)
+
+-- #135: the 10 minute average and the 24 h peak
+T.test("operator power: avg10 and peak are in the status, and the peak survives a reboot", function()
+  local w, c, d, mf = rig()                       -- potential about 2000, draw 500
+  w:run(300)
+  d.rate = 1800
+  w:run(20)
+  d.rate = 500
+  w:run(300)
+  local p = mf.G.last.power
+  T.truthy(p.avg10 and p.avg10Pct, "no avg10")
+  T.truthy(p.avg10Pct > 20 and p.avg10Pct < 35, "avg10Pct " .. tostring(p.avg10Pct))
+  T.truthy(p.peak > 1600 and p.peak <= 1800, "peak " .. tostring(p.peak))
+  T.truthy(p.peakPct > 80 and p.peakPct < 95, "peakPct " .. tostring(p.peakPct))
+  T.truthy(p.peakAt, "no peakAt")
+  w:run(40)                                       -- let the saved copy catch up
+  local saved = c:readTable("operator.cfg").peak
+  T.truthy(saved and saved.v > 1600, "peak not saved")
+  c:_stop(); w:run(5); c:run("operator"); w:run(30)
+  local q = mf.G.last.power
+  T.truthy(q.peak and math.abs(q.peak - saved.v) < 1, "peak lost over a reboot: " .. tostring(q.peak))
+  T.truthy(q.avgSpan < 100, "average should start young again: " .. tostring(q.avgSpan))
+end)

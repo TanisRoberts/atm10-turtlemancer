@@ -13,6 +13,10 @@
 -- Detectors are labelled like units (Detector-1, ...): numbers handed out once, kept in operator.cfg, never reused.
 local M = {}
 local WINDOW = 5
+local AVG_WINDOW = 600         -- seconds of draw averaged into avg10 (#135)
+local AVG_STEP = 5             -- one long-window sample every this many seconds
+local PEAK_KEEP = 24 * 3600    -- the peak is the highest smoothed draw within this many seconds
+local PEAK_SAVE = 30           -- a new peak is written to operator.cfg at most this often (seconds)
 local TYPE = "energy_detector"
 
 local function call(p, m, ...)
@@ -69,7 +73,53 @@ function M.sample(self, now)
   s[#s + 1] = { t = now, v = sum }
   while #s > 1 and now - s[1].t > WINDOW do table.remove(s, 1) end
   self.seenAt, self.limit = now, limit
+  M.track(self, now)
   return true
+end
+
+-- The long view of the draw (#135): avg10 = the smoothed draw averaged over the last AVG_WINDOW seconds;
+-- peak = the highest smoothed draw in the last 24 h with when (utc seconds), kept in operator.cfg (`peak`) so a
+-- restart keeps it. `mins` holds one maximum per minute (this run only) to find the next-highest when a peak expires.
+function M.track(self, now)
+  local dr = 0
+  for _, x in ipairs(self.samples) do dr = dr + x.v end
+  dr = dr / #self.samples
+  local L = self.long or {}
+  self.long = L
+  if not L[#L] or now - L[#L].t >= AVG_STEP then L[#L + 1] = { t = now, v = dr } end
+  while #L > 0 and now - L[1].t > AVG_WINDOW do table.remove(L, 1) end
+  local at = utc()
+  local cfg = self.plant.cfg
+  self.mins = self.mins or {}
+  local m = self.mins
+  local slot = math.floor(at / 60)
+  if not m[#m] or m[#m].slot ~= slot then m[#m + 1] = { slot = slot, v = dr } elseif dr > m[#m].v then m[#m].v = dr end
+  while #m > 0 and m[1].slot < slot - PEAK_KEEP / 60 do table.remove(m, 1) end
+  local pk = type(cfg.peak) == "table" and tonumber(cfg.peak.v) and cfg.peak or nil
+  if pk and at - (tonumber(pk.at) or 0) > PEAK_KEEP then
+    pk = nil                                          -- expired: the best of what this run saw in the last 24 h
+    for _, x in ipairs(m) do
+      if not pk or x.v >= pk.v then pk = { v = x.v, at = x.slot * 60 } end
+    end
+    cfg.peak = pk; self.peakDirty = true
+  end
+  if not pk or dr >= pk.v then
+    pk = { v = dr, at = at }
+    cfg.peak = pk; self.peakDirty = true
+  end
+  if self.peakDirty and now - (self.peakSaved or -1e9) >= PEAK_SAVE then
+    self.peakDirty, self.peakSaved = false, now
+    self.plant:save()
+  end
+end
+
+-- avg10 in FE/t and the seconds of data behind it (nil with none)
+function M.average(self, now)
+  local L = self.long
+  if not L or #L == 0 then return nil end
+  local t = 0
+  for _, x in ipairs(L) do t = t + x.v end
+  return t / #L, now - L[1].t
 end
 
 -- Full-power FE/t of one reactor from its status, or nil when it can't be told.
@@ -200,6 +250,16 @@ function M.record(self, units, now)
   local pct = dr and pot > 0 and (dr / pot * 100) or nil
   local rec = { draw = dr, potential = pot, pct = pct, seen = self.seenAt and (now - self.seenAt) or nil,
                 detectors = #self.found, estimated = M.estimated(units) or nil }
+  local avg, span = M.average(self, now)
+  if avg then
+    rec.avg10, rec.avgSpan = avg, span
+    rec.avg10Pct = pot > 0 and (avg / pot * 100) or nil
+  end
+  local pk = self.plant.cfg.peak
+  if type(pk) == "table" and tonumber(pk.v) then
+    rec.peak, rec.peakAt = pk.v, pk.at
+    rec.peakPct = pot > 0 and (pk.v / pot * 100) or nil
+  end
   if M.tripped(self) then
     local b = self.plant.cfg.breaker
     rec.limit, rec.asked, rec.askedPct = self.cap or self.limit or math.floor(pot * (tonumber(self.E.THROTTLE_TO) or 90) / 100), b.asked, b.askedPct

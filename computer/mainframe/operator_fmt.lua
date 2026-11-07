@@ -71,6 +71,34 @@ function F.powerText(op)
   return ("use %d%%%s (%s / %s FE/t)"):format(math.floor(pw.pct + 0.5), pw.estimated and " est." or "", num(pw.draw), num(pw.potential))
 end
 
+-- "avg 64%  peak 131% (14:20)"; nil with no fresh reading or no average yet. Percent of potential, so an
+-- estimated potential carries "est." like the use line. Shared by the screens (the Operator has its own copy).
+function F.avgText(op)
+  local pw = F.power(op)
+  if not pw or not pw.avg10Pct then return nil end
+  local s = ("avg %d%%"):format(math.floor(pw.avg10Pct + 0.5))
+  if pw.peakPct then
+    local at = pw.peakAt and select(2, pcall(os.date, "%H:%M", math.floor(pw.peakAt)))
+    s = s .. ("  peak %d%%%s"):format(math.floor(pw.peakPct + 0.5), type(at) == "string" and (" (" .. at .. ")") or "")
+  end
+  return s
+end
+
+-- Sustained use: nil when it can't be told (stale, no average yet, less than POWER_SPAN seconds of data, or the
+-- potential is only estimated); else the average % of potential.
+F.POWER_SPAN = 300
+function F.sustained(op)
+  local pw = F.power(op)
+  if not pw or pw.estimated or not pw.avg10Pct or (pw.avgSpan or 0) < F.POWER_SPAN then return nil end
+  return pw.avg10Pct
+end
+
+-- Text of the power90 alert.
+function F.power90Text(op)
+  local pct = F.sustained(op) or 0
+  return ("Power is %d%% used on average (10 min). Time for more generation."):format(math.floor(pct + 0.5))
+end
+
 -- true when the grid draws more than the reactors can make; false when not; nil when it can't be told (stale).
 function F.deficit(op)
   local pw = F.power(op)
@@ -132,6 +160,8 @@ function F.plantLine(op, rf, rfAge)
   if #R == 0 then return "Operator: no reactor on its cable." end
   local use = F.powerText(op)
   local tail = use and (" Power " .. use .. ".") or ""
+  local avg = F.avgText(op)
+  if avg and use then tail = tail:gsub("%.$", "") .. ", " .. avg .. "." end
   if F.deficit(op) then tail = tail .. " Power deficit: draw is above what the reactors can make." end
   if #R == 1 then return F.unitLine(R[1]) .. " " .. ura() .. "." .. tail end
   local running = 0

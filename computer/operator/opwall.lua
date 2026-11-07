@@ -192,6 +192,8 @@ return function(S)
       else
         v:put(3, 73, "Buffer " .. D.pct(t.buf), "dim", "bg")
       end
+      local at = S.avgText(pw)
+      if at then v:put(3, 74, at, "dim", "bg") end
     end
   end
 

@@ -51,6 +51,7 @@ local function build(opts)
   end
   local det = opts.detector and net:add("energy_detector_0", world:detector{ rate = opts.detector, limit = 4000 })
   if opts.fullOutlet then outP:give("bigreactors:cyanite_ingot", 64 * 9) end
+  if opts.maxOutput then for _, u in pairs(units) do u.maxOutput = opts.maxOutput end end   -- calibrated (#134)
   for _, u in pairs(units) do            -- the reactor room's two ender chests; a full outlet means the waste chest is full too
     u.fuelChest, u.wasteChest = "enderstorage:ender_chest_" .. (2 * u.num - 2), "enderstorage:ender_chest_" .. (2 * u.num - 1)
     net:add(u.fuelChest, cc.Inv.new{ size = 27 })
@@ -323,4 +324,41 @@ T.test("operator mainframe: Power throttled alert while the breaker is tripped, 
   world:run(60)
   T.eq(count(chat, "Power throttled"), 1, "cleared by itself?\n" .. dump(chat))
   T.truthy(det.limit < 1000000, "detector uncapped")
+end)
+
+-- #135: power90. Calibrated max 3000 FE/t: a draw of 2850 is 95%, 2400 is 80%, 2700 is 90%.
+T.test("operator mainframe: power90 fires on a sustained average, clears below 85%, not on a spike", function()
+  local world, mf, opc, chat, mon, ra, rb, det = build{ supply = 100, maxOutput = 3000, detector = 1500 }
+  say(world, mf, "$island alerts")
+  world:run(400)
+  det.rate = 4500                                  -- a spike of 150%: the 10 minute average barely moves
+  world:run(20)
+  det.rate = 1500
+  world:run(60)
+  T.eq(count(chat, "Power is %d+%% used on average"), 0, "a spike raised it\n" .. dump(chat))
+  det.rate = 2850                                  -- 95% for good
+  world:run(660)
+  T.truthy(heard(chat, "Power is 9%d%% used on average %(10 min%)%. Time for more generation%.", "Tanis"), dump(chat))
+  T.eq(count(chat, "Power is %d+%% used on average"), 1, "should alert once")
+  det.rate = 2700                                  -- 90%: stays up (clears only below 85%)
+  world:run(660)
+  det.rate = 2400                                  -- 80%
+  world:run(660)
+  det.rate = 2850
+  world:run(660)
+  T.eq(count(chat, "Power is %d+%% used on average"), 2, "should alert again after it cleared\n" .. dump(chat))
+end)
+
+T.test("operator mainframe: no power90 while potential is only estimated", function()
+  local world, mf, opc, chat = build{ supply = 100, detector = 3000 }       -- no maxOutput: estimate
+  say(world, mf, "$island alerts")
+  world:run(900)
+  T.eq(count(chat, "Power is %d+%% used on average"), 0, dump(chat))
+end)
+
+T.test("operator mainframe: avg and peak show in island operator", function()
+  local world, mf, opc, chat, mon = build{ supply = 100, maxOutput = 3000, detector = 1800 }
+  world:run(400)
+  say(world, mf, "$island operator")
+  T.truthy(heard(chat, "avg 6%d%%  peak 6%d%% %(%d%d:%d%d%)"), dump(chat))
 end)

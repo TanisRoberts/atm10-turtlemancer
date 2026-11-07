@@ -68,6 +68,7 @@ function M:load()
       self.cfg.plant = type(t.plant) == "table" and t.plant or {}
       self.cfg.detectors = type(t.detectors) == "table" and t.detectors or nil
       self.cfg.breaker = type(t.breaker) == "table" and t.breaker or nil     -- the power breaker (oppower.lua)
+      self.cfg.peak = type(t.peak) == "table" and t.peak or nil             -- the 24 h draw peak { v, at } (oppower.lua)
     end
   end
   self.stamp = stampOf(self.file)

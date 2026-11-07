@@ -252,6 +252,7 @@ local function powerView(pw, op)
     out.tone = "good"
     out.line2, out.tone2 = "Buffer " .. bufText, "dim"
   end
+  out.line3 = opfmt.avgText(op)
   return out
 end
 
@@ -321,6 +322,7 @@ local function glanceDraw(v, L, st, list, vis)
   v:bigNumber(L.px + 1, gy + 2, p.digits, p.tone, { px = 2, py = 1 })
   v:put(L.px + 1, gy + 8, fit(p.line1, L.pw - 1), p.tone1, "bg")
   if p.line2 then v:put(L.px + 1, gy + 9, fit(p.line2, L.pw - 1), p.tone2, "bg") end
+  if p.line3 then v:put(L.px + 1, gy + 10, fit(p.line3, L.pw - 1), "dim", "bg") end
   for y = gy - 1, gy + 10 do v:put(L.px - 2, y, " ", "fg", "bar") end
   -- Needs you and the island line
   local alerts, summary = needs(list, pw)

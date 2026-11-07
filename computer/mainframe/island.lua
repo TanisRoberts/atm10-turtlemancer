@@ -21,6 +21,7 @@ local opfmt = require("operator_fmt")
 local ring = require("ring")
 local tune = require("envfile").new("island.env", "Mainframe alert settings.", {
   { "OPERATOR_SILENT_AFTER", 60, "Seconds without the Operator's heartbeat before a 'reactor silent' alert." },
+  { "POWER_WARN", 90, "Percent of the reactors' calibrated maximum the grid must draw on average over 10 minutes before a 'power 90' alert (it clears 5 below)." },
   { "DEFICIT_AFTER", 30, "Seconds the grid must draw more than the reactors can make before a 'power deficit' alert." },
 })
 tune.load()
@@ -319,6 +320,15 @@ local function watch()
     else
       deficitSince = nil
     end
+  end
+  -- Power 90: sustained use (10 min average) near the reactors' calibrated maximum, like storage90. Not raised
+  -- while potential is only estimated or the average is young; a stale report leaves an alert as it is.
+  if _G.OPERATOR_SEEN and not (os.clock() - _G.OPERATOR_SEEN > tune.v.OPERATOR_SILENT_AFTER) and _G.OPERATOR then
+    local warn = tonumber(tune.v.POWER_WARN) or 90
+    local avg = opfmt.sustained(_G.OPERATOR)
+    if avg and avg >= warn then condition("power90", true, opfmt.power90Text(_G.OPERATOR))
+    elseif avg and avg < warn - 5 then condition("power90", false)
+    elseif opfmt.power(_G.OPERATOR) and opfmt.power(_G.OPERATOR).estimated then condition("power90", false) end
   end
   -- Power throttled: the Operator's breaker is tripped. Stays up until Tanis presses Reset on the Operator.
   if _G.OPERATOR_SEEN and not (os.clock() - _G.OPERATOR_SEEN > tune.v.OPERATOR_SILENT_AFTER) and _G.OPERATOR then
