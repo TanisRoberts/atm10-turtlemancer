@@ -91,7 +91,7 @@ T.test("storage defrag: all drives at one priority warns and moves nothing", fun
   local w, c, inv, me, mon, small = base({ samePrio = true })
   scatter(me, small, "minecraft:cobblestone", 1000)
   open(w, c)
-  T.contains(c.screen, "All drives share one priority")
+  T.contains(c.screen, "Nothing to defrag towards")
   local x, y = c.screen:find("Start")
   if x then c:click(x + 1, y); w:run(30) end
   T.eq(#me:where("minecraft:cobblestone"), 3, "still spread")
@@ -231,4 +231,54 @@ T.test("storage defrag: infinity cells are skipped and listed; stale cell bytes 
   T.contains(c.screen, "Moved")
   T.contains(c.screen, "5k of 5k")
   assert(inv[CHEST]:isEmpty(), "buffer empty")
+end)
+
+-- #137: tiers with no sized cells never count as the top tier
+local function movesUp(w, c, me, small)
+  scatter(me, small, "minecraft:iron_ingot", 3000)
+  open(w, c)
+  T.contains(c.screen, "no sized cells: ignored")
+  tap(c, w, "Start")
+  T.waitFor(w, function() return c.screen:find("Finished") end, 600, "never finished")
+  T.contains(c.screen, "Finished")
+  T.absent(c.screen, "nearly full")
+  assert(allIn(me, "minecraft:iron_ingot", 10), "iron moved up to the sized top tier")
+  T.eq(me:total("minecraft:iron_ingot"), 3000)
+end
+
+T.test("storage defrag: an Infinity-only drive at the highest priority is ignored, not 'full'", function()
+  local w, c, inv, me, mon, small = base()
+  me:addInfinity(me:addDrive{ priority = 20 }, "minecraft:cobblestone")
+  movesUp(w, c, me, small)
+end)
+
+T.test("storage defrag: an empty drive at the highest priority is ignored", function()
+  local w, c, inv, me, mon, small = base()
+  me:addDrive{ priority = 20 }
+  movesUp(w, c, me, small)
+end)
+
+T.test("storage defrag: only ignored tiers above one sized tier: Start is off", function()
+  local w, c, inv, me, mon, small = base({ samePrio = true })
+  me:addDrive{ priority = 20 }
+  scatter(me, small, "minecraft:cobblestone", 1000)
+  open(w, c)
+  T.contains(c.screen, "Nothing to defrag towards")
+  T.contains(c.screen, "no sized cells: ignored")
+  local x, y = c.screen:find("Start")
+  if x then c:click(x + 1, y); w:run(30) end
+  T.eq(#me:where("minecraft:cobblestone"), 3, "still spread")
+end)
+
+T.test("storage defrag: all upper tiers full stops with the numbers before moving anything", function()
+  local w, c, inv, me, mon, small, big = base({ bigCell = "1k" })
+  for _, cl in ipairs(cellsOf(big)) do me:fill(cl, "minecraft:dirt", cl.maxBytes * 8) end
+  scatter(me, small, "minecraft:iron_ingot", 300)
+  open(w, c)
+  tap(c, w, "Start")
+  T.waitFor(w, function() return c.screen:find("Finished") end, 300, "never finished")
+  T.contains(c.screen, "upper tiers nearly full")
+  T.contains(c.screen, "p10:")
+  T.eq(#me:where("minecraft:iron_ingot"), 3, "nothing moved")
+  assert(inv[CHEST]:isEmpty())
 end)

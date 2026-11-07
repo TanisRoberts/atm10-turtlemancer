@@ -14,7 +14,7 @@
 return function(o)
   local D = {}
   local ME = o.ME
-  local KEEP_FREE = 0.05           -- stop when the top tier has less than this fraction free
+  local KEEP_FREE = 0.05           -- stop when the upper tiers have less than this fraction free
   local BC_EVERY, DRAIN_EVERY = 3, 30
   local SPIN = 8                   -- drives per rack
   local INF = 2147483647           -- ExtendedAE infinity cells report this much of their item
@@ -76,18 +76,30 @@ return function(o)
       end
     end
     table.sort(list, function(a, b) return a.prio > b.prio end)
-    for _, t in ipairs(list) do t.racks = math.ceil(t.drives / SPIN) end
-    return list
+    -- Tiers with no sized cells (empty drives, Infinity/Bulk only) can't hold a pile: leave them out (#137)
+    local sized, ignored = {}, {}
+    for _, t in ipairs(list) do
+      t.racks = math.ceil(t.drives / SPIN)
+      if t.total > 0 then sized[#sized + 1] = t else ignored[#ignored + 1] = t end
+    end
+    return sized, ignored
   end
   local function lowUsed(tiers)
     local u = 0
     for i = 2, #tiers do u = u + tiers[i].used end
     return u
   end
-  local function topFreeFrac(tiers)
-    local t = tiers[1]
-    if not t or t.total <= 0 then return 0 end
-    return (t.total - t.used) / t.total
+  -- The destination is every sized tier except the lowest. Returns its combined free fraction and a text naming each tier.
+  -- Bytes come from getDrives, stale up to one AE2 autosave: fine for a rough "is there room" guard, not for exact accounting.
+  local function destFree(tiers)
+    local used, total, parts = 0, 0, {}
+    for i = 1, #tiers - 1 do
+      local t = tiers[i]
+      used = used + t.used; total = total + t.total
+      parts[#parts + 1] = ("p%d: %d%% free"):format(t.prio, math.floor((t.total - t.used) / t.total * 100 + 0.5))
+    end
+    if total <= 0 then return 0, "" end
+    return (total - used) / total, table.concat(parts, ", ")
   end
 
   ---------------------------------------------------------------------------
@@ -101,9 +113,10 @@ return function(o)
   end
 
   function D.plan()
-    local p = { tiers = D.tiers(), queue = {}, warn = {}, voids = {}, infinite = 0, toMove = 0 }
+    local p = { queue = {}, warn = {}, voids = {}, infinite = 0, toMove = 0 }
+    p.tiers, p.ignored = D.tiers()
     if not p.tiers then p.warn[#p.warn + 1] = "ME offline."; return p end
-    if #p.tiers < 2 then p.same = true; p.warn[#p.warn + 1] = "All drives share one priority: nothing to defrag towards." end
+    if #p.tiers < 2 then p.same = true; p.warn[#p.warn + 1] = "Nothing to defrag towards: fewer than two priorities with sized cells." end
     if not D.buffer() then p.warn[#p.warn + 1] = "No Defrag buffer: /assign one." p.noBuffer = true
     elseif not bufferSize() then p.warn[#p.warn + 1] = "The Defrag buffer is not on the cable."; p.noBuffer = true end
     local list = ME.items() or {}
@@ -111,7 +124,7 @@ return function(o)
     local minN = tonumber(tune.v.DEFRAG_MIN) or 0
     local vd = voids()
     local topRoom = 0
-    if p.tiers[1] then topRoom = (p.tiers[1].total - p.tiers[1].used) * 8 end
+    for i = 1, #p.tiers - 1 do topRoom = topRoom + (p.tiers[i].total - p.tiers[i].used) * 8 end
     for _, e in ipairs(list) do
       local skip = skipIds[e.name] or skipIds[e.key]
       if e.count >= INF then skip = true; p.infinite = p.infinite + 1 end
@@ -226,7 +239,8 @@ return function(o)
     end
     local tiers = D.tiers()
     if not tiers then return false end
-    if topFreeFrac(tiers) < KEEP_FREE then finish("top tier nearly full"); return true end
+    local free, why = destFree(tiers)
+    if free < KEEP_FREE then finish("upper tiers nearly full (" .. why .. ")"); return true end
     local b, size = D.buffer(), bufferSize()
     if not size then finish("buffer missing"); return true end
     local e = cur.e
@@ -287,6 +301,9 @@ return function(o)
           local rack = t.racks == 1 and "rack" or "racks"
           put(out, "kv", ("P%d: %d %s, %d drives"):format(t.prio, t.racks, rack, t.drives),
             ("%s/%s bytes"):format(short(t.used), short(t.total)))
+        end
+        for _, t in ipairs(plan.ignored or {}) do
+          put(out, "text", ("p%d: %d %s, no sized cells: ignored"):format(t.prio, t.drives, t.drives == 1 and "drive" or "drives"), nil, "dim")
         end
         if #plan.voids > 0 then
           put(out, "section", "Will be voided")
