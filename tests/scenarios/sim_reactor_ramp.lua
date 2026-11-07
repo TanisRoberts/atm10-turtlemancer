@@ -1,0 +1,30 @@
+-- The sim reactor's optional ramp: output climbs toward full while on, cools when off; no ramp = full at once.
+local cc = require("sim.cc")
+local T  = require("sim.test")
+
+T.test("sim reactor: no ramp outputs its full figure at once", function()
+  local w = cc.world()
+  local r = w:reactor{ prod = 2000, active = true, fuel = 4000 }
+  w:run(1)
+  T.eq(r:getEnergyProducedLastTick(), 2000, "full at once")
+end)
+
+T.test("sim reactor: a ramp climbs toward full, then cools when switched off", function()
+  local w = cc.world()
+  local r = w:reactor{ prod = 2000, active = true, fuel = 4000, ramp = 20, heat = 0 }
+  T.eq(r:getEnergyProducedLastTick(), 0, "starts cold")
+  w:run(20)
+  local a = r:getEnergyProducedLastTick()
+  T.eq(a > 1100 and a < 1400, true, "about 63% after one time constant, got " .. a)
+  w:run(10)
+  local b = r:getEnergyProducedLastTick()
+  T.eq(b > a, true, "still climbing")
+  w:run(200)
+  T.eq(r:getEnergyProducedLastTick() > 1990, true, "settles at full")
+  r:setActive(false)
+  w:run(60)
+  T.eq(r:getEnergyProducedLastTick(), 0, "off reads 0")
+  r:setActive(true)
+  w:run(1)
+  T.eq(r:getEnergyProducedLastTick() < 400, true, "restarts from the cooled state")
+end)

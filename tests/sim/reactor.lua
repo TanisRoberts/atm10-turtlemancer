@@ -3,6 +3,7 @@
 -- Lazy like the furnace: state catches up to the clock on every call.
 --   w:reactor{ prod = FE/t while on, demand = FE/t drained, cap, stored, active, rods, inPort, outPort,
 --              rodScale = true (output follows 100 - rod insertion), rodLevel = starting insertion,
+--              ramp = seconds (time constant): output climbs toward full while on, like a heating fuel core, and cools when off,
 --              activelyCooled = true, without = { "getControlRodLevel", ... } methods the device lacks }
 local Reactor = {}
 Reactor.__index = Reactor
@@ -17,6 +18,7 @@ function Reactor.new(opts)
     cap = opts.cap or 1000000, stored = opts.stored or 500000, on = opts.active or false, rods = opts.rods or 5,
     inPort = opts.inPort, outPort = opts.outPort, fuel = opts.fuel or 0, fuelMax = opts.fuelMax or 4000, waste = 0,
     cooled = opts.activelyCooled, rodLevel = opts.rodLevel or 100, rodScale = opts.rodScale, wasteAcc = 0, burnAcc = 0, made = 0,
+    ramp = opts.ramp, heat = opts.ramp and (opts.heat or (opts.active and 1 or 0)) or 1,
   }, Reactor)
   self.last = self.clock()
   local skip = {}
@@ -28,7 +30,7 @@ function Reactor.new(opts)
   return self
 end
 
-function Reactor:output() return self.rodScale and self.prod * (100 - self.rodLevel) / 100 or self.prod end
+function Reactor:output() return (self.rodScale and self.prod * (100 - self.rodLevel) / 100 or self.prod) * self.heat end
 
 function Reactor:touch()
   local now = self.clock()
@@ -46,7 +48,16 @@ function Reactor:touch()
       end
     end
   end
-  local net = (self.on and self.fuel > 0 and self:output() or 0) - self.demand
+  local h0 = self.heat
+  if self.ramp then
+    local k = math.exp(-dt / self.ramp)
+    self.heat = (self.on and self.fuel > 0) and 1 - (1 - h0) * k or h0 * k
+    self.heat = self.heat < 1e-6 and 0 or self.heat
+  end
+  -- energy over the span uses the average heat (exact enough for a ramp much longer than a pass)
+  local avg = (h0 + self.heat) / 2
+  local full = self.rodScale and self.prod * (100 - self.rodLevel) / 100 or self.prod
+  local net = (self.on and self.fuel > 0 and full * (self.ramp and avg or 1) or 0) - self.demand
   self.stored = math.max(0, math.min(self.cap, self.stored + net * 20 * dt))
   if self.on and self.fuel > 0 then
     self.fuel = math.max(0, self.fuel - 2 * dt)
