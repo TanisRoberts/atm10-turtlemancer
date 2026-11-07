@@ -117,6 +117,12 @@ return function(o)
     p.tiers, p.ignored = D.tiers()
     if not p.tiers then p.warn[#p.warn + 1] = "ME offline."; return p end
     if #p.tiers < 2 then p.same = true; p.warn[#p.warn + 1] = "Nothing to defrag towards: fewer than two priorities with sized cells." end
+    for _, t in ipairs(p.ignored or {}) do
+      if t.cells == 0 and p.tiers[1] and t.prio > p.tiers[1].prio then
+        p.warn[#p.warn + 1] = ("p%d has drives but no cells: fit cells there to defrag into it"):format(t.prio)
+        break
+      end
+    end
     if not D.buffer() then p.warn[#p.warn + 1] = "No Defrag buffer: /assign one." p.noBuffer = true
     elseif not bufferSize() then p.warn[#p.warn + 1] = "The Defrag buffer is not on the cable."; p.noBuffer = true end
     local list = ME.items() or {}
@@ -321,7 +327,11 @@ return function(o)
       else
         local st = S
         if st.running then put(out, "kv", "Item now", st.item or "starting...")
-        else put(out, "kv", "Finished", st.reason or "") end
+        else
+          local head, detail = (st.reason or ""):match("^(.-) (%(.*%))$")
+          put(out, "kv", "Finished", head or st.reason or "")
+          if detail then put(out, "text", detail, nil, "dim") end    -- the numbers, on a line of their own
+        end
         put(out, "kv", "Items done", ("%d of %d"):format(st.done, st.total or 0))
         put(out, "kv", "Items left", tostring(st.left))
         put(out, "kv", "Moved", ("%s of %s"):format(short(st.moved or 0), short((st.moved or 0) + (st.remain or 0))))

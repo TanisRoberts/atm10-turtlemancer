@@ -14,8 +14,21 @@ local function base(opts)
   local inv = {}
   for i = 0, 3 do inv[i] = net:add(B(i), cc.Inv.new{ size = i == CHEST and (opts.bufferSize or 4) or 27, types = BARREL }) end
   local me = net:add("me_bridge_0", w:meBridge{ stale = opts.stale })
-  local small = { me:addRack{ n = 1, priority = 0, cell = "1k" }, me:addRack{ n = 1, priority = 0, cell = "1k" } }
-  local big = me:addRack{ n = 1, priority = opts.samePrio and 0 or 10, cell = opts.bigCell or "256M" }
+  local small, big
+  if opts.room then
+    -- a list of { priority, cell } (cell "infinity" = Infinity cells only, nil = empty drives); lowest tier is `small`
+    for _, r in ipairs(opts.room) do
+      local rack
+      if r[2] == "infinity" then
+        rack = { me:addDrive{ priority = r[1] } }
+        me:addInfinity(rack[1], "minecraft:cobblestone")
+      else rack = me:addRack{ n = 1, priority = r[1], cell = r[2] } end
+      if r[1] == 0 then small = { rack, me:addRack{ n = 1, priority = 0, cell = "1k" } } end
+    end
+  else
+    small = { me:addRack{ n = 1, priority = 0, cell = "1k" }, me:addRack{ n = 1, priority = 0, cell = "1k" } }
+    big = me:addRack{ n = 1, priority = opts.samePrio and 0 or 10, cell = opts.bigCell or "256M" }
+  end
   local c = w:computer{ id = 1, label = "Storage" }
   c:attach("back", cc.wired(net))
   c:attach("top", cc.wireless{ ender = true })
@@ -281,4 +294,38 @@ T.test("storage defrag: all upper tiers full stops with the numbers before movin
   T.contains(c.screen, "p10:")
   T.eq(#me:where("minecraft:iron_ingot"), 3, "nothing moved")
   assert(inv[CHEST]:isEmpty())
+end)
+
+-- Tanis's room (#137): 5000 Infinity only, 4000 empty drives, then 3000 (64k), 2000 (16k), 1000 (4k), 0 (1k)
+local ROOM = { { 5000, "infinity" }, { 4000, nil }, { 3000, "64k" }, { 2000, "16k" }, { 1000, "4k" }, { 0, "1k" } }
+
+T.test("storage defrag: Tanis's room: 5000 and 4000 ignored, 3000+2000+1000 take the piles", function()
+  local w, c, inv, me, mon, small = base({ room = ROOM })
+  scatter(me, small, "minecraft:iron_ingot", 3000)
+  open(w, c)
+  T.contains(c.screen, "p5000: 1 drive, no sized cells: ignored")
+  T.contains(c.screen, "p4000: 1 drive, no sized cells: ignored")
+  T.contains(c.screen, "p4000 has drives but no cells")
+  tap(c, w, "Start")
+  T.waitFor(w, function() return c.screen:find("Finished") end, 600, "never finished")
+  T.absent(c.screen, "nearly full")
+  T.eq(me:total("minecraft:iron_ingot"), 3000)
+  for _, h in ipairs(me:where("minecraft:iron_ingot")) do assert(h.drive.priority >= 1000, "iron left in the 1k tier") end
+end)
+
+T.test("storage defrag: Tanis's room with 3000+2000+1000 nearly full stops before moving", function()
+  local w, c, inv, me, mon, small = base({ room = ROOM })
+  for _, d in ipairs(me.drives) do
+    if d.priority >= 1000 and d.priority <= 3000 then
+      for _, cl in pairs(d.cells) do if cl.maxBytes then me:fill(cl, "minecraft:dirt", cl.maxBytes * 8) end end
+    end
+  end
+  scatter(me, small, "minecraft:iron_ingot", 300)
+  open(w, c)
+  tap(c, w, "Start")
+  T.waitFor(w, function() return c.screen:find("Finished") end, 300, "never finished")
+  T.contains(c.screen, "upper tiers nearly full")
+  T.contains(c.screen, "(p3000: 0% free")
+  T.contains(c.screen, "p1000:")
+  T.eq(#me:where("minecraft:iron_ingot"), 3, "nothing moved")
 end)
