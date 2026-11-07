@@ -127,6 +127,17 @@ T.test("server: the tiers, byte totals and the biggest piles", function()
   T.eq(cy, 3, "legend on row 3, under the header")
 end)
 
+T.test("server: an infinity cell's item is not a biggest pile (#136)", function()
+  local w, srv, mon, me = boot()
+  local free
+  for _, d in ipairs(me.drives) do if not d.cells[d.slots] then free = d; break end end
+  me:addInfinity(free, "minecraft:sand")
+  w:run(60)
+  T.contains(mon, "BIGGEST PILES")
+  T.contains(mon, "Netherrack")
+  T.absent(mon, "Sand")
+end)
+
 -- #132: big screens are read from the floor: the bottom block sits in fixed rows counted up from the last row.
 local function rowOf(mon, text) local _, y = mon:find(text); return y end
 

@@ -128,5 +128,17 @@ return function(o)
     return moved
   end
 
+  -- Put up to `count` of `key` from every slot of `from` into AE2 in ONE call (AP's moveItem walks all slots when no
+  -- fromSlot is given). Returns how many went in.
+  function ME.importAll(from, key, count)
+    local n, hash = splitKey(key)
+    local f = { name = n, count = count }
+    if hash then f.nbtHash = hash end
+    local moved = bridge("importItem", from, f)
+    moved = type(moved) == "number" and moved or 0
+    if moved > 0 then have[key] = (have[key] or 0) + moved end
+    return moved
+  end
+
   return ME
 end

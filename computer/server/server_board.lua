@@ -217,8 +217,13 @@ local function defrag(v, M, y)
     v:put(W - #right - 1, y, right, "fg", "bg")
     v:put(11, y, fit(tostring(msg.item or "?"), W - 11 - #right - 3), "fg", "bg")
     local freed = ("p0 freed %s bytes"):format(B.bytes(msg.freedBytes or 0))
+    local frac = total > 0 and (msg.done or 0) / total or 0
+    if (msg.toMove or 0) > 0 then      -- items moved of the total to move: the bytes lag up to one AE2 save
+      freed = ("%s of %s moved"):format(B.count(msg.moved or 0), B.count(msg.toMove))
+      frac = (msg.moved or 0) / msg.toMove
+    end
     local bw = W - #freed - 4
-    bar(v, 2, y + 1, bw, total > 0 and (msg.done or 0) / total or 0, "info")
+    bar(v, 2, y + 1, bw, frac, "info")
     v:put(W - #freed - 1, y + 1, freed, "dim", "bg")
     return y + 2
   end

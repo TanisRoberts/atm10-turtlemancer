@@ -2,8 +2,8 @@
 -- Moves piles out of low-priority drives (small cells) into the highest-priority storage with room.
 -- AE2 inserts at the highest priority first and extracts from the lowest, so a round trip (export a chunk into the
 -- "Defrag buffer", import it all back) moves it from the lowest tier that holds it into the top tier with room.
--- The bridge reports no types per cell, only bytes, so an item is done when a round trip no longer lowers the
--- lower tiers' used bytes.
+-- Cell bytes are only as fresh as AE2's last save (up to ~5 min), so nothing is measured per trip: each item moves a
+-- fixed amount (its count, less what a void drawer keeps), then it is done. Infinity cells (count 2^31-1) are skipped.
 --
 --   local D = dofile("storage_defrag.lua")({ ME = ME, cfg = fn, info = tbl, call = fn, env = envfile,
 --                                            broadcast = fn(msg), stackOf = fn(key) })
@@ -17,6 +17,8 @@ return function(o)
   local KEEP_FREE = 0.05           -- stop when the top tier has less than this fraction free
   local BC_EVERY, DRAIN_EVERY = 3, 30
   local SPIN = 8                   -- drives per rack
+  local INF = 2147483647           -- ExtendedAE infinity cells report this much of their item
+  local TRIP_S = 1.5               -- seconds per round trip, for the time estimate (an export + an import + a drive read)
 
   local tune = o.env.new("storage.env", "Storage settings.", {
     { "DEFRAG_SKIP", "", "Items /defrag never moves: item ids or #tags, comma separated." },
@@ -99,7 +101,7 @@ return function(o)
   end
 
   function D.plan()
-    local p = { tiers = D.tiers(), queue = {}, warn = {}, voids = {} }
+    local p = { tiers = D.tiers(), queue = {}, warn = {}, voids = {}, infinite = 0, toMove = 0 }
     if not p.tiers then p.warn[#p.warn + 1] = "ME offline."; return p end
     if #p.tiers < 2 then p.same = true; p.warn[#p.warn + 1] = "All drives share one priority: nothing to defrag towards." end
     if not D.buffer() then p.warn[#p.warn + 1] = "No Defrag buffer: /assign one." p.noBuffer = true
@@ -112,17 +114,21 @@ return function(o)
     if p.tiers[1] then topRoom = (p.tiers[1].total - p.tiers[1].used) * 8 end
     for _, e in ipairs(list) do
       local skip = skipIds[e.name] or skipIds[e.key]
+      if e.count >= INF then skip = true; p.infinite = p.infinite + 1 end
       local tags = o.info[e.key] and o.info[e.key].tags
       if not skip and tags then for t in pairs(skipTags) do if tags[t] then skip = true end end end
       if not skip and e.count >= math.max(minN, minN == 0 and stackOf(e.key) or 0) then
-        p.queue[#p.queue + 1] = { key = e.key, name = e.name, label = label(e.key), count = e.count }
+        p.queue[#p.queue + 1] = { key = e.key, name = e.name, label = label(e.key), count = e.count, toMove = e.count }
       end
     end
+    local size = bufferSize()
+    local trips = 0
     table.sort(p.queue, function(a, b) if a.count ~= b.count then return a.count > b.count end return a.key < b.key end)
     for _, e in ipairs(p.queue) do
       local keep = vd[e.name]
       if keep then
         e.void = keep
+        e.toMove = math.max(0, e.count - keep)
         if e.count > keep then
           p.voids[#p.voids + 1] = ("%s: %s, drawer keeps %s, rest voided"):format(e.label, short(e.count), short(keep))
         end
@@ -131,13 +137,18 @@ return function(o)
         e.big = true
       end
     end
+    for _, e in ipairs(p.queue) do
+      p.toMove = p.toMove + e.toMove
+      if size then trips = trips + math.ceil(e.toMove / (size * stackOf(e.key))) end
+    end
+    p.minutes = math.max(1, math.ceil(trips * TRIP_S / 60))
     return p
   end
 
   ---------------------------------------------------------------------------
   -- The run
   ---------------------------------------------------------------------------
-  local S = { running = false, done = 0, left = 0, freed = 0, item = nil, reason = nil, voided = {}, errors = {} }
+  local S = { running = false, done = 0, left = 0, freed = 0, moved = 0, remain = 0, item = nil, reason = nil, voided = {}, errors = {} }
   local queue, idx, cur = {}, 1, nil
   local stopReq, lastBc, lastDrain, drainDue = false, -100, -100, true
   D.state = S
@@ -145,7 +156,8 @@ return function(o)
   function D.running() return S.running end
 
   function D.msg()
-    return { type = "defrag", running = S.running, item = S.item, done = S.done, left = S.left, freedBytes = S.freed }
+    return { type = "defrag", running = S.running, item = S.item, done = S.done, left = S.left,
+             moved = S.moved, toMove = S.moved + S.remain, freedBytes = S.freed }
   end
   local function broadcast()
     lastBc = os.clock()
@@ -185,8 +197,8 @@ return function(o)
     if plan.same or plan.noBuffer or not plan.tiers then return false, plan.warn[1] end
     if leftInBuffer() then D.drain() end
     queue, idx, cur, stopReq = plan.queue, 1, nil, false
-    S = { running = true, done = 0, left = #queue, freed = 0, item = nil, reason = nil, voided = {}, errors = {},
-          startLow = lowUsed(plan.tiers), lowPrev = lowUsed(plan.tiers), total = #queue }
+    S = { running = true, done = 0, left = #queue, freed = 0, moved = 0, remain = plan.toMove or 0, item = nil,
+          reason = nil, voided = {}, errors = {}, startLow = lowUsed(plan.tiers), total = #queue }
     D.state = S
     broadcast()
     os.queueEvent("storage_work")
@@ -196,6 +208,8 @@ return function(o)
   function D.stop() if S.running then stopReq = true; os.queueEvent("storage_work") end end
 
   -- One step: one round trip of the current item (or move on to the next). Worker calls this when it has nothing else to do.
+  -- An item is done once its whole amount has gone through the buffer: AE2 extracts lowest priority first and inserts
+  -- highest first, so every unit has then had its chance to move up. The only live check is the grid's item count.
   local function step()
     if stopReq then stopReq = false; finish("stopped"); return true end
     if not ME.online() then return false end
@@ -204,12 +218,10 @@ return function(o)
       if not e then finish("done"); return true end
       idx = idx + 1
       local have = ME.count(e.key)
-      if not have or have <= 0 then S.done = S.done + 1; S.left = #queue - idx + 1; return true end
-      cur = { e = e, have = have, trips = 0 }
       S.item, S.left = e.label, #queue - idx + 1
-      local t = D.tiers()
-      if not t then return false end
-      S.lowPrev = lowUsed(t)
+      if not have or have <= 0 then S.remain = S.remain - e.toMove; S.done = S.done + 1; return true end
+      cur = { e = e, have = have, left = math.min(e.toMove, have), trips = 0 }
+      S.remain = S.remain - e.toMove + cur.left
       return true
     end
     local tiers = D.tiers()
@@ -219,32 +231,29 @@ return function(o)
     if not size then finish("buffer missing"); return true end
     local e = cur.e
     local cap = size * stackOf(e.key)
-    local moved = ME.export(e.key, math.min(cur.have, cap), b)
+    local want = math.min(cur.left, cap)
+    local moved = want > 0 and ME.export(e.key, want, b) or 0
     cur.trips = cur.trips + 1
-    if moved <= 0 then S.done = S.done + 1; cur = nil; return true end
-    -- everything back in: the highest tier with room takes it
-    local list = o.call(b, "list") or {}
-    for slot, it in pairs(list) do ME.import(b, slot, it.count, e.key) end
+    if moved <= 0 then S.done = S.done + 1; S.remain = S.remain - cur.left; cur = nil; return true end
+    -- everything back in: the highest tier with room takes it (one call drains every slot)
+    ME.importAll(b, e.key, moved)
     if leftInBuffer() then
       D.drain()
       if leftInBuffer() then finish("AE2 would not take the items back; they stay in the buffer"); return true end
     end
+    cur.left = cur.left - moved
+    S.moved = S.moved + moved
+    S.remain = S.remain - moved
     local after = ME.count(e.key) or cur.have
     if after < cur.have then
       local lost = cur.have - after
       S.voided[#S.voided + 1] = { label = e.label, n = lost, expected = e.void ~= nil }
       cur.have = after
-      if not e.void then S.done = S.done + 1; cur = nil; return true end   -- a void nobody listed: leave this item alone
+      if not e.void then S.done = S.done + 1; S.remain = S.remain - cur.left; cur = nil; return true end   -- a void nobody listed: leave this item alone
     end
     local t2 = D.tiers()
-    if not t2 then return true end
-    local low = lowUsed(t2)
-    if low < S.lowPrev then
-      S.freed = S.freed + (S.lowPrev - low)
-      S.lowPrev = low
-    else
-      S.done = S.done + 1; cur = nil
-    end
+    if t2 then S.freed = math.max(0, S.startLow - lowUsed(t2)) end    -- bytes lag up to one AE2 save
+    if cur.left <= 0 then S.done = S.done + 1; cur = nil end
     return true
   end
 
@@ -283,6 +292,10 @@ return function(o)
           put(out, "section", "Will be voided")
           for _, s in ipairs(plan.voids) do put(out, "alert", s, nil, "warn") end
         end
+        if plan.infinite > 0 then
+          put(out, "text", ("%d items from infinity cells: skipped"):format(plan.infinite), nil, "dim")
+        end
+        if #plan.queue > 0 then put(out, "text", ("%s items to move, about %d min"):format(short(plan.toMove), plan.minutes), nil, "dim") end
         put(out, "section", ("Would move (%d, biggest first)"):format(#plan.queue))
         for i, e in ipairs(plan.queue) do
           if i > 60 then put(out, "text", ("... and %d more"):format(#plan.queue - 60), nil, "dim"); break end
@@ -294,7 +307,8 @@ return function(o)
         else put(out, "kv", "Finished", st.reason or "") end
         put(out, "kv", "Items done", ("%d of %d"):format(st.done, st.total or 0))
         put(out, "kv", "Items left", tostring(st.left))
-        put(out, "kv", "Freed in the low tiers", short(st.freed or 0) .. " bytes")
+        put(out, "kv", "Moved", ("%s of %s"):format(short(st.moved or 0), short((st.moved or 0) + (st.remain or 0))))
+        put(out, "kv", "Freed since last save", short(st.freed or 0) .. " bytes")
         for _, vd in ipairs(st.voided or {}) do
           put(out, "alert", ("%s: %s voided"):format(vd.label, short(vd.n)), nil, vd.expected and "warn" or "bad")
         end

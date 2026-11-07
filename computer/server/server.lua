@@ -52,6 +52,10 @@ end
 local function readItems(bridge)
   local items = bridge.getItems()
   if type(items) ~= "table" then return false end
+  -- infinity cells report 2^31-1 of an item: not a real pile, left out of the totals and the biggest list
+  local real = {}
+  for _, it in ipairs(items) do if (it.count or 0) < 2147483647 then real[#real + 1] = it end end
+  items = real
   local total = 0
   for _, it in ipairs(items) do total = total + (it.count or 0) end
   table.sort(items, function(a, b) return (a.count or 0) > (b.count or 0) end)

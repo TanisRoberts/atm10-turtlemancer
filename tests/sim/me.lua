@@ -9,6 +9,8 @@
 --   me:addRack{ priority = 0, cell = "1k" }
 --   me:addBus{ priority = 9999, capacity = 256000, void = true, item = "minecraft:deepslate" }  -- a void drawer
 --   me:fill(cell, "minecraft:cobblestone", 500)                     -- set up fragmentation directly
+--   me:addInfinity(drive, "minecraft:cobblestone")                  -- an ExtendedAE infinity cell (2^31-1 of one item)
+--   w:meBridge{ stale = true }; me:save()                           -- cell usedBytes as of the last save() (AE2 saves ~5 min)
 --   me:where("minecraft:cobblestone")                               -- { {drive=, slot=, count=}, ... }
 --
 -- AE2 facts it follows (checked against the source):
@@ -26,6 +28,11 @@
 -- exportItem/importItem move up to `count` (default: everything that fits) in ONE call over many stacks
 -- and return the moved count, or nil,"INVENTORY_NOT_FOUND" / nil,"NOT_CONNECTED".
 --
+--   * Stale bytes: AE2 serialises a cell's contents only when the drive block entity is saved, and AP builds the cell
+--     info from the saved ItemStack. With `stale = true` getCells/getDrives report usedBytes as of the last `me:save()`
+--     (a cell added later reports 0 until saved). getItems, extract and insert are always live.
+--   * ExtendedAE infinity cell: getItems shows its item at 2^31-1; extract always returns the full amount and insert
+--     swallows everything, so neither changes it.
 -- Not verified against the MEGA Cells source: the MEGA item names (`megacells:item_cell_1m` ...) and
 -- bytesPerType (assumed maxBytes/128 like AE2's own cells; only totals and ordering matter to the programs).
 -- Items are keyed by name alone (nbtHash / components are accepted and ignored).
@@ -107,6 +114,16 @@ function Cell:take(name, n)
 end
 function Cell:priority() return self.drive and self.drive.priority or 0 end
 
+-- ExtendedAE InfinityCellInventory: reports Integer.MAX_VALUE, extract/insert never change it
+local INF = 2147483647
+local Inf = setmetatable({}, { __index = Cell })
+Inf.__index = Inf
+function Inf:count(name) return name == self.infinite and INF or 0 end
+function Inf:holds(name) return name == self.infinite end
+function Inf:room(name) return name == self.infinite and math.huge or 0 end
+function Inf:add(name, n) return n end
+function Inf:take(name, n) return n end
+
 local Bus = {}
 Bus.__index = Bus
 function Bus:count(name) return self.piles[name] or 0 end
@@ -133,7 +150,7 @@ function ME.new(opts)
   return setmetatable({
     types = opts.types or { "me_bridge", "multi_drive" },
     drives = {}, buses = {}, nextSeq = 0,
-    connected = true, online = true,
+    connected = true, online = true, stale = opts.stale,
     energy = { stored = opts.stored or 100000, capacity = opts.capacity or 200000, usage = opts.usage or 20 },
   }, ME)
 end
@@ -165,6 +182,16 @@ function ME:addCell(drive, size, slot)
   c.drive, c.slot, c.seq = drive, slot, self:_seq()
   drive.cells[slot] = c
   return c
+end
+-- an ExtendedAE infinity cell holding `name` in `slot` (or the first empty slot) of `drive`
+function ME:addInfinity(drive, name, slot)
+  local c = self:addCell(drive, "infinity", slot)
+  c.infinite, c.piles = name, { [name] = INF }
+  return setmetatable(c, Inf)
+end
+-- stale = true: remember every cell's usedBytes now (what a drive save writes out)
+function ME:save()
+  for _, c in ipairs(self:cells()) do c.savedBytes = c:usedBytes() end
 end
 -- a rack: `n` drives (8) sharing one priority, each filled with cells of `cell` (nil = empty drives)
 function ME:addRack(opts)
@@ -286,10 +313,11 @@ function ME:_off()
   if not self.connected or not self.online then return "NOT_CONNECTED" end
 end
 
-local function cellInfo(c)
+local function cellInfo(c, stale)
   local item = ME.cellItems[c.size]
   local info = { item = { name = item, displayName = pretty(item), count = 1 }, type = "ae2:i",
-                 bytesPerType = c.bytesPerType, maxBytes = c.maxBytes, maxTypes = c.maxTypes, usedBytes = c:usedBytes() }
+                 bytesPerType = c.bytesPerType, maxBytes = c.maxBytes, maxTypes = c.maxTypes,
+                 usedBytes = stale and (c.savedBytes or 0) or c:usedBytes() }
   if ME.noSize[c.size] then info.bytesPerType, info.maxBytes, info.usedBytes = nil, nil, nil end
   return info
 end
@@ -362,7 +390,7 @@ end
 function ME:getCells()
   local off = self:_off(); if off then return nil, off end
   local out = {}
-  for _, c in ipairs(self:cells()) do out[#out + 1] = cellInfo(c) end
+  for _, c in ipairs(self:cells()) do out[#out + 1] = cellInfo(c, self.stale) end
   return out
 end
 function ME:getDrives()
@@ -370,7 +398,7 @@ function ME:getDrives()
   local out = {}
   for _, d in ipairs(self.drives) do
     local cells = {}
-    for i = 1, d.slots do if d.cells[i] then cells[i] = cellInfo(d.cells[i]) end end
+    for i = 1, d.slots do if d.cells[i] then cells[i] = cellInfo(d.cells[i], self.stale) end end
     out[#out + 1] = { type = d.type, name = d.name, position = { x = d.position.x, y = d.position.y, z = d.position.z },
                       priority = d.priority, usedBytes = 0, totalBytes = 0, cells = cells,   -- AP's bug: both 0
                       menuIcon = { name = "ae2:drive", count = 1 } }

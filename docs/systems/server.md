@@ -34,7 +34,9 @@ A cell is coloured by `usedBytes / maxBytes` (lime under 70%, orange to 90%, red
 
 ## Defrag
 
-Storage broadcasts `{ type = "defrag", running, item, done, left, freedBytes }` on `tanis-base` (`storage_defrag.lua`). Running shows the item, `item done+1 of done+left`, a progress bar and `freed`. Not running: `last run: N items, freed X bytes`, or `never run` when both are 0. No message for 30 s (or ever): `storage not heard`.
+Cell fill (and so `freedBytes`) can lag up to one AE2 autosave (~5 min): the bridge reads a cell's bytes as of the last drive save. Items at 2,147,483,647 (infinity cells) are left out of the biggest piles and the item total.
+
+Storage broadcasts `{ type = "defrag", running, item, done, left, moved, toMove, freedBytes }` on `tanis-base` (`storage_defrag.lua`). Running shows the item, `item done+1 of done+left`, a progress bar and `N of M moved` (items; older messages without `toMove` show `p0 freed X bytes`). Not running: `last run: N items, freed X bytes`, or `never run` when both are 0. No message for 30 s (or ever): `storage not heard`.
 
 ## Sizes and rows
 

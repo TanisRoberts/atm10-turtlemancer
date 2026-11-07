@@ -13,7 +13,7 @@ local function base(opts)
   local net = w:net()
   local inv = {}
   for i = 0, 3 do inv[i] = net:add(B(i), cc.Inv.new{ size = i == CHEST and (opts.bufferSize or 4) or 27, types = BARREL }) end
-  local me = net:add("me_bridge_0", w:meBridge{})
+  local me = net:add("me_bridge_0", w:meBridge{ stale = opts.stale })
   local small = { me:addRack{ n = 1, priority = 0, cell = "1k" }, me:addRack{ n = 1, priority = 0, cell = "1k" } }
   local big = me:addRack{ n = 1, priority = opts.samePrio and 0 or 10, cell = opts.bigCell or "256M" }
   local c = w:computer{ id = 1, label = "Storage" }
@@ -82,7 +82,7 @@ T.test("storage defrag: fragmented piles end up in the big cells, nothing lost, 
   T.eq(#me:where("minecraft:gold_ingot"), 1, "small pile untouched")
   assert(lowBytes(me) < before, "low tiers freed bytes")
   T.eq(#me:where("minecraft:cobblestone"), 1, "one pile in one cell")
-  T.contains(c.screen, "Freed")
+  T.contains(c.screen, "Moved")
   T.contains(c.screen, "Finished")
   assert(inv[CHEST]:isEmpty(), "buffer empty")
 end)
@@ -110,7 +110,8 @@ end)
 
 T.test("storage defrag: a void drawer is announced and only its overflow is lost", function()
   local w, c, inv, me, mon, small = base({ env = "DEFRAG_VOID=minecraft:deepslate=256\n" })
-  me:addBus{ priority = 9999, capacity = 256, void = true, item = "minecraft:deepslate" }
+  local drawer = me:addBus{ priority = 9999, capacity = 256, void = true, item = "minecraft:deepslate" }
+  me:fill(drawer, "minecraft:deepslate", 256)                         -- the drawer is already full
   scatter(me, small, "minecraft:deepslate", 1000)
   scatter(me, small, "minecraft:iron_ingot", 300)
   open(w, c)
@@ -190,7 +191,8 @@ T.test("storage defrag: a dock is still refilled on time and progress is broadca
   for _, m in ipairs(h) do if m.running then sawRunning = true end end
   assert(sawRunning, "a running report")
   T.eq(last.running, false)
-  assert(last.freedBytes > 0, "freed bytes reported")
+  assert(last.moved > 0, "moved reported")
+  assert(last.toMove >= last.moved, "moved never passes the total")
   T.eq(last.freedTypes, nil)
 end)
 
@@ -204,4 +206,29 @@ T.test("storage defrag: DEFRAG_SKIP keeps an item where it is", function()
   T.waitFor(w, function() return c.screen:find("Finished") end, 300, "never finished")
   T.eq(#me:where("minecraft:cobblestone"), 3, "skipped item untouched")
   T.eq(#me:where("minecraft:iron_ingot"), 1)
+end)
+
+T.test("storage defrag: infinity cells are skipped and listed; stale cell bytes do not end an item early", function()
+  local w, c, inv, me, mon, small, big = base({ stale = true })
+  me:save()                                                           -- bytes as of an empty grid
+  me:addInfinity(me:addDrive{ priority = 10 }, "minecraft:cobblestone")
+  scatter(me, small, "minecraft:cobblestone", 1000)                   -- real copies in small cells too
+  scatter(me, small, "minecraft:iron_ingot", 3000)
+  scatter(me, small, "minecraft:copper_ingot", 2000)
+  -- bytes stay stale for the whole run (nobody calls me:save)
+  open(w, c)
+  T.contains(c.screen, "1 items from infinity cells: skipped")
+  T.contains(c.screen, "min")
+  T.absent(c.screen, "Cobblestone")
+  tap(c, w, "Start")
+  T.waitFor(w, function() return c.screen:find("Finished") end, 600, "never finished")
+  T.eq(me:total("minecraft:iron_ingot"), 3000)
+  T.eq(me:total("minecraft:copper_ingot"), 2000)
+  assert(allIn(me, "minecraft:iron_ingot", 10), "iron fully moved up")
+  assert(allIn(me, "minecraft:copper_ingot", 10), "copper fully moved up")
+  T.eq(#me:where("minecraft:iron_ingot"), 1)
+  T.eq(me:total("minecraft:cobblestone") - 2147483647, 1000, "cobblestone untouched")
+  T.contains(c.screen, "Moved")
+  T.contains(c.screen, "5k of 5k")
+  assert(inv[CHEST]:isEmpty(), "buffer empty")
 end)
