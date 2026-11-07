@@ -257,9 +257,9 @@ T.test("operator mainframe: the board row and island operator show power use", f
   world:run(25)
   local _, y = mon:find("Operator")
   local row = mon:line(y)
-  T.truthy(row:find("use 5%d%% %(1,700 / 3,000 FE/t%)"), row)
+  T.truthy(row:find("use 5%d%% est%. %(1,700 / 3,000 FE/t%)"), row)
   say(world, mf, "$island operator")
-  T.truthy(heard(chat, "Power use 5%d%% %(1,700 / 3,000 FE/t%)"), dump(chat))
+  T.truthy(heard(chat, "Power use 5%d%% est%. %(1,700 / 3,000 FE/t%)"), dump(chat))
   T.falsy(heard(chat, "Power deficit"), dump(chat))
 end)
 

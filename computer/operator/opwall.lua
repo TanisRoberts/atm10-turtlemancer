@@ -168,6 +168,7 @@ return function(S)
       v:put(70 - #tag, 59, tag, "bg", "bad")
     end
     local pct = pw and pw.draw and pw.pct
+    if pw and pw.estimated and not thr then v:put(70 - 4, 59, "est.", "warn", "bg") end     -- a reactor is only estimated
     if not pw or not pw.draw then
       v:bigNumber(3, 61, "--", "dim", { px = 4, py = 2 })
       v:put(3, 72, "No energy detector on the cable", "dim", "bg")

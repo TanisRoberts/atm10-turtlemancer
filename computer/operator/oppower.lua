@@ -1,7 +1,8 @@
 -- oppower.lua  --  power use: what the grid draws and what the running reactors could make.
 --   Energy detectors (AP 0.8 type `energy_detector`) sit on the reactor-room cable. Draw = their summed
 --   getTransferRate() (FE/t), averaged over WINDOW seconds. Potential = what the running reactors would make at
---   full power: each one's FE/t scaled up from its current rod level (fe * 100 / level). A reactor with no reading
+--   full power: a calibrated reactor's saved maxOutput (opcal.lua), else its FE/t scaled up from its current rod level
+--   (fe * 100 / level; flagged `estimated`). A reactor with no reading
 --   yet (just switched on) or idling (Auto, full buffer) uses the figure remembered from its last run; disabled or
 --   manual-off reactors count for nothing. pct = draw / potential.
 -- Breaker (issue #121): draw above SURGE_MAX % of potential for SURGE_FOR seconds in a row trips it. Tripped, every
@@ -72,7 +73,12 @@ function M.sample(self, now)
 end
 
 -- Full-power FE/t of one reactor from its status, or nil when it can't be told.
+-- A calibrated reactor counts at its saved `maxOutput` (opcal.lua), running, idling or after a reboot. While it is being
+-- calibrated its figure is frozen at what it was, so the climbing output can't move the breaker's cap.
 function M.unitPotential(u)
+  if u.cal then return u.cal.pot end
+  local mx = tonumber((u.cfg or {}).maxOutput)
+  if mx and mx > 0 then return mx end
   local s = u.status or {}
   if s.active and s.fe and s.fe > 0 then
     local lv = s.level
@@ -96,6 +102,15 @@ function M.potential(units)
     if u.kind == "reactor" and u.present and u.status and u.status.answers and not M.switchedOff(u) then pot = pot + (M.unitPotential(u) or 0) end
   end
   return pot
+end
+
+-- true when a reactor that counts towards the potential has no calibrated figure (so the potential is a guess)
+function M.estimated(units)
+  for _, u in ipairs(units) do
+    if u.kind == "reactor" and u.present and u.status and u.status.answers and not M.switchedOff(u)
+       and not ((tonumber((u.cfg or {}).maxOutput) or 0) > 0) then return true end
+  end
+  return false
 end
 
 function M.tripped(self)
@@ -184,7 +199,7 @@ function M.record(self, units, now)
   local pot = M.potential(units)
   local pct = dr and pot > 0 and (dr / pot * 100) or nil
   local rec = { draw = dr, potential = pot, pct = pct, seen = self.seenAt and (now - self.seenAt) or nil,
-                detectors = #self.found }
+                detectors = #self.found, estimated = M.estimated(units) or nil }
   if M.tripped(self) then
     local b = self.plant.cfg.breaker
     rec.limit, rec.asked, rec.askedPct = self.cap or self.limit or math.floor(pot * (tonumber(self.E.THROTTLE_TO) or 90) / 100), b.asked, b.askedPct

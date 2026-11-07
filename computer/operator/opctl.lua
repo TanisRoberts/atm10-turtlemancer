@@ -3,6 +3,7 @@
 -- Settings live in operator.cfg: per reactor (an override) or `plant` (every reactor's default). Both beat operator.env.
 local plantlib = require("opplant")
 local rods = require("oprods")
+local cal = require("opcal")
 
 -- key -> { env key, step, lowest, highest }. holdMin counts minutes, the rest percent.
 local KEYS = {
@@ -48,6 +49,24 @@ return function(plant, E, hooks)
     local was = hooks.grid:reset()
     if was then kick() end
     return was
+  end
+
+  -- Calibrate (opcal.lua): start a run on the reactor(s), or cancel one. Both return a notice text when nothing happened
+  -- (calibrate: why it didn't start; ref nil = every reactor, those that can't start are named).
+  function C.calibrate(ref)
+    local why
+    for _, u in ipairs(reactors(ref)) do
+      local ok, w = cal.start(u, os.clock(), E, hooks)
+      if not ok then why = (why and (why .. "; ") or "") .. u.label .. ": " .. w end
+    end
+    kick()
+    return why
+  end
+  function C.cancelCalibrate(ref)
+    local n = 0
+    for _, u in ipairs(reactors(ref)) do if cal.cancel(u, os.clock(), hooks) then n = n + 1 end end
+    kick()
+    return n > 0
   end
 
   -- Hold a power level for HOLD_MIN minutes (the reactor is forced ON, then control returns to Auto).

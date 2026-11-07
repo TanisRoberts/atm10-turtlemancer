@@ -68,7 +68,7 @@ end
 function F.powerText(op)
   local pw = F.power(op)
   if not pw then return nil end
-  return ("use %d%% (%s / %s FE/t)"):format(math.floor(pw.pct + 0.5), num(pw.draw), num(pw.potential))
+  return ("use %d%%%s (%s / %s FE/t)"):format(math.floor(pw.pct + 0.5), pw.estimated and " est." or "", num(pw.draw), num(pw.potential))
 end
 
 -- true when the grid draws more than the reactors can make; false when not; nil when it can't be told (stale).

@@ -24,6 +24,8 @@
 -- Commands (mainframe or screen), protocol tanis-operator:
 --   { type = "operator_cmd", unit = <label or id; nil = every reactor>, mode = "auto"|"on"|"off", level = 1..100 }
 --   { type = "operator_cmd", power = "reset" } lifts the power breaker (oppower.lua).
+--   { type = "operator_cmd", calibrate = true|false, unit = ... } starts / cancels a Calibrate run (opcal.lua):
+--   the reactor's true full-power output, saved as `maxOutput` and `maxAt` in operator.cfg.
 --   a mode is saved in operator.cfg; a level is a manual hold.
 local envfile = require("envfile")
 local plantlib = require("opplant")
@@ -32,6 +34,7 @@ local needs = require("opneeds")
 local rods = require("oprods")
 local chests = require("opchests")
 local power = require("oppower")
+local cal = require("opcal")
 local ui = require("ui")
 local screen = require("opscreen")
 
@@ -54,6 +57,10 @@ local env = envfile.new("operator.env", "Operator settings.", {
   { "SURGE_MAX",    150, "Power breaker: trips when the grid draws more than this percent of what the reactors can make (potential)..." },
   { "SURGE_FOR",    10, "...for this many seconds in a row. A shorter surge is let through." },
   { "THROTTLE_TO",  90, "Tripped, the energy detector is capped at this percent of potential so the batteries can recharge. Only Reset on the Operator lifts it." },
+  { "CAL_SETTLE_PCT", 0.5, "Calibrate: settled when the output has not risen more than this percent..." },
+  { "CAL_SETTLE_S", 30, "...over the last this many seconds." },
+  { "CAL_MAX_MIN",  10, "Calibrate: give up after this many minutes (the old figure is kept)." },
+  { "CAL_BUF_MAX",  95, "Calibrate: stop if the reactor's buffer reaches this percent (the power has nowhere to go)." },
   { "TICK",         2,  "Seconds between control passes." },
   { "SLOW",         30, "Seconds between full re-checks of the cable and of what each reactor needs." },
   { "STUCK_AFTER",  120, "Seconds an outlet port may hold cyanite without ever dropping before it is reported as not clearing." },
@@ -175,7 +182,8 @@ local function tick()
       if s.answers and s.stored and s.cap then sum.stored, sum.cap = sum.stored + s.stored, sum.cap + s.cap end
       if st.rechecked then recheck(u, s) end
       local on, off = plantlib.thresholds(u, E)
-      if rods.expire(u, now) then log(u.label .. ": manual hold ended, back to Auto"); event(u.label, "back to Auto"); ui.say(u.label .. ": back to Auto", "good") end
+      if u.cal then cal.step(u, now, E, ctlHooks, function() plant:save() end) end
+      if not u.cal and rods.expire(u, now) then log(u.label .. ": manual hold ended, back to Auto"); event(u.label, "back to Auto"); ui.say(u.label .. ": back to Auto", "good") end
       local lo, hi = rods.limits(u, E)
       if s.level then u.level = s.level end
       list[#list + 1] = { id = u.id, label = u.label, mode = u.hold and u.hold.mode or u.cfg.mode or "auto",
@@ -212,7 +220,7 @@ local function tick()
   for _, u in ipairs(plant.units) do
     if u.kind == "reactor" and u.present and u.driver and u.status.answers then
       local d = decide[u.id]
-      u.why = d and d.why or u.why
+      if u.cal then d = nil; u.why = "calibrating" else u.why = d and d.why or u.why end
       if d and d.active ~= nil and u.status.active ~= d.active then
         if u.driver:setActive(d.active) then
           u.status.active = d.active
@@ -263,6 +271,9 @@ local function record()
       r.fuel, r.fuelMax, r.waste = s.fuel, s.fuelMax, s.waste
       r.fuelTemp, r.casing, r.uranium = s.fuelTemp, s.casing, uran
       r.mode, r.enabled, r.why = u.hold and u.hold.mode or u.cfg.mode or "auto", u.cfg.enabled ~= false, u.why
+      r.maxOutput, r.maxAt = tonumber(u.cfg.maxOutput), u.cfg.maxAt
+      local cp = cal.progress(u, os.clock())
+      r.calibrating, r.calMsg = cp or false, (not cp and u.calMsg) and u.calMsg.text or nil
       r.level, r.rodCount, r.rodLevels = s.level or u.level, s.rodCount, s.rodLevels
       r.levelWhy, r.levelAt, r.holdLeft = u.levelWhy, u.levelAt, rods.holdLeft(u, os.clock())
       local lo, hi = rods.limits(u, E)
@@ -375,6 +386,7 @@ local function onEvent(ev, a, b, c3, d)
     if b.mode then ctl.mode(b.unit, b.mode) end
     if tonumber(b.level) then ctl.hold(b.unit, tonumber(b.level)) end
     if b.power == "reset" then ctl.resetBreaker() end
+    if b.calibrate == true then ctl.calibrate(b.unit) elseif b.calibrate == false then ctl.cancelCalibrate(b.unit) end
   elseif ev == "peripheral" or ev == "peripheral_detach" then
     st.dirty = true
     syncViews()

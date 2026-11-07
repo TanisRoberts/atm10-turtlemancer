@@ -55,6 +55,22 @@ return function(ctl)
       return true, (ref or "Every reactor") .. ": level " .. p .. "% held"
     end })
 
+  cmds:add({ name = "calibrate", args = "[cancel] [reactor]", max = 4,
+    help = "measure a reactor's true max output (cancel stops a run)",
+    run = function(a)
+      local cancel = a.words[1] == "cancel"
+      local ref, err = target(a, cancel and 2 or 1)
+      if err then return false, err end
+      if cancel then
+        if not ctl.cancelCalibrate(ref) then return true, "Nothing is calibrating", "plain" end
+        return true, "Calibration cancelled", "warn"
+      end
+      if #ctl.reactors(ref) == 0 then return false, "No reactor to calibrate" end
+      local why = ctl.calibrate(ref)
+      if why then return false, why end
+      return true, (ref or "Every reactor") .. ": calibrating", "good"
+    end })
+
   cmds:add({ name = "reset", help = "lift the power breaker", max = 0,
     run = function()
       if not ctl.resetBreaker() then return true, "The breaker is not tripped", "plain" end

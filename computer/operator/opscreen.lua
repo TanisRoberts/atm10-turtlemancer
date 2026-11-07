@@ -172,11 +172,12 @@ local function gridRows(t)
 end
 
 -- "Draw 1,200 FE/t  62%" for the Power Grid; nil when there is no detector on the cable
-local function drawText(pw)
+local function drawText(pw, noEst)
   if not pw then return nil end
   if not pw.draw or (pw.seen and pw.seen > 30) then return "no reading", "warn" end
   local s = D.num(pw.draw) .. " FE/t"
-  if pw.pct then s = s .. "  " .. floor(pw.pct + 0.5) .. "%" end
+  if pw.pct then s = s .. " " .. floor(pw.pct + 0.5) .. "%" end
+  if pw.estimated and not noEst then s = s .. " est." end      -- some reactor's potential is a guess (Calibrate it)
   return s
 end
 S.drawText = drawText
@@ -198,9 +199,9 @@ function S.grid(v, x, y0, w, last, rec, t, ctx)
   y = y + 3
   v:kv(x + 1, y, w - 2, "Net", netText(t))
   y = y + 1
-  local dt, tone = drawText(t.power)
+  local dt, tone = drawText(t.power, true)
   if dt then
-    v:put(x + 1, y, "Draw", "dim", "bg")
+    v:put(x + 1, y, (t.power and t.power.estimated) and "Draw  est." or "Draw", t.power and t.power.estimated and "warn" or "dim", "bg")
     v:put(x + 1, y + 1, D.fit(dt, w - 2), tone or "fg", "bg")
     y = y + 2
   end
@@ -358,6 +359,45 @@ local function inletText(r)
   return s
 end
 
+-- "7 Nov" from "2026-11-07"; nil when it can't be read
+local MONTHS = { "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" }
+local function shortDate(s)
+  local y, m, d = tostring(s or ""):match("^(%d+)-(%d+)-(%d+)$")
+  if not y then return nil end
+  return tonumber(d) .. " " .. (MONTHS[tonumber(m)] or "?")
+end
+
+-- The Max output line: { key, value, tone } and the Calibrate / Cancel button (tap twice to start).
+local function maxRow(r)
+  local c = r.calibrating
+  if c then return "", ("Calibrating: %s FE/t, settling"):format(D.num(c.fe or 0)), "warn" end
+  if r.calMsg and not r.maxOutput then return "Max output", "estimated, tap Calibrate", "warn" end
+  if r.maxOutput then
+    local d = shortDate(r.maxAt)
+    return "Max output", D.num(r.maxOutput) .. " FE/t" .. (d and (" (calibrated " .. d .. ")") or ""), nil
+  end
+  return "Max output", "estimated, tap Calibrate", "warn"
+end
+local function calButton(v, ctx, x, y, r)
+  local c = r.calibrating
+  v:buttons(x, y, { c and { label = "Cancel", short = "Cancel", style = "danger", id = "cal:" .. r.label,
+      fn = function() ctx.ctl.cancelCalibrate(r.label) end }
+    or { label = "Calibrate", short = "Calib", style = "primary", confirm = true, id = "cal:" .. r.label,
+      fn = function() tell(ctx.ctl.calibrate(r.label)) end } })
+end
+-- row y: the figure at the left, the button at the right; the last result under it when there is room
+local function maxLine(v, ctx, r, y, last)
+  local k, val, tone = maxRow(r)
+  local bw = v.W >= 50 and 14 or 11
+  v:kv(2, y, v.W - 2 - bw, k, val, tone)
+  calButton(v, ctx, v.W - bw, y, r)
+  if r.calibrating and y + 1 <= last then
+    v:put(2, y + 1, "Running " .. D.clock(r.calibrating.elapsed or 0), "dim", "bg"); return y + 2
+  end
+  if r.calMsg and not r.calibrating and y + 1 <= last then v:put(2, y + 1, D.fit(r.calMsg, v.W - 2), "dim", "bg"); return y + 2 end
+  return y + 1
+end
+
 local function powerTab(v, ctx, r)
   local W, H, now = v.W, v.H, ctx.now
   local running = r.active and true or false
@@ -378,6 +418,15 @@ local function powerTab(v, ctx, r)
     v:put(sx, 6, "Level", "fg", "bg")
     D.pair(v, sx + 7, 6, levelText(r), dec, inc, "lvl", 5)
     autoDraw(v, sx, 7, W - sx, r, now)
+    if H < 21 then          -- no spare row below: the button and the figure fit on the free row beside the rods
+      local c = r.calibrating
+      local bx = v:buttons(sx, 9, { c and { label = "Cancel", short = "Cancel", style = "danger", id = "cal:" .. r.label,
+          fn = function() ctx.ctl.cancelCalibrate(r.label) end }
+        or { label = "Calibrate", short = "Calib", style = "primary", confirm = true, id = "cal:" .. r.label,
+          fn = function() tell(ctx.ctl.calibrate(r.label)) end } })
+      local val = c and (D.num(c.fe or 0) .. " FE/t") or (r.maxOutput and (D.num(r.maxOutput) .. " FE/t") or "estimated")
+      v:kv(bx + 2, 9, W - 2 - bx, "", val, (c or not r.maxOutput) and "warn" or nil)
+    end
     v:put(sx, 10, "Run", "fg", "bg")
     runSwitch(v, ctx, sx + 5, 10, r)
     v:put(2, 4 + rh, D.fit(caption, W - 2), "dim", "bg")
@@ -390,9 +439,10 @@ local function powerTab(v, ctx, r)
       resetButton(v, ctx, W - 17, y)
       y = y + 1
     end
-    y = D.section(v, 2, y + 1, W - 2, "REACTOR")
+    y = D.section(v, 2, H >= 21 and y + 1 or y, W - 2, "REACTOR")      -- a short screen has no spare row for the gap
     v:kv(2, y, W - 2, "Fuel", inletText(r))
     v:kv(2, y + 1, W - 2, "Temperature", ("fuel %sC  casing %sC"):format(D.num(r.fuelTemp), D.num(r.casing)))
+    if H >= 21 and y + 2 < H then maxLine(v, ctx, r, y + 2, H - 2) end
   elseif W >= 31 then
     local rh = min(max(H - 9, 3), 10)
     local width = D.rods(v, 3, 4, rods, 2, rh, running)
@@ -410,7 +460,9 @@ local function powerTab(v, ctx, r)
     v:kv(2, y + 1, W - 2, "Temp", ("fuel %sC  casing %sC"):format(D.num(r.fuelTemp), D.num(r.casing)))
     local dt, tone = drawText(ctx.rec and ctx.rec.power)
     if dt and y + 2 < H - 1 then v:kv(2, y + 2, W - 2, "Draw", dt, tone) end
-    if tripped(ctx.rec and ctx.rec.power) and y + 3 < H - 1 then resetButton(v, ctx, 2, y + 3) end
+    local ny = y + 3
+    if tripped(ctx.rec and ctx.rec.power) and ny < H - 1 then resetButton(v, ctx, 2, ny); ny = ny + 1 end
+    if ny < H - 1 then maxLine(v, ctx, r, ny, H - 2) end
   else
     local width = D.rods(v, 3, 4, rods, 2, 5, running)
     local sx = 3 + width + 2
@@ -425,7 +477,9 @@ local function powerTab(v, ctx, r)
     local y = D.buffer(v, 2, 12, W - 2, r.buf, r.onBelow or 0.3, r.offAbove or 0.9, "Buffer")
     v:kv(2, y + 1, W - 2, "Fuel", fuelText(r))
     v:kv(2, y + 2, W - 2, "Temp", ("%sC / %sC"):format(D.num(r.fuelTemp), D.num(r.casing)))
-    if r.fuelChest and y + 3 < H - 1 then v:kv(2, y + 3, W - 2, "Chest", D.num(r.fuelChest)) end
+    local ny = y + 3
+    if r.fuelChest and ny < H - 1 then v:kv(2, ny, W - 2, "Chest", D.num(r.fuelChest)); ny = ny + 1 end
+    if ny < H - 1 then maxLine(v, ctx, r, ny, H - 2) end
   end
 end
 
