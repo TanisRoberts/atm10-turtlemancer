@@ -39,7 +39,7 @@ local M = {
           files = { "computer/mainframe/mainframe.lua", "computer/mainframe/island.lua", "shared/screens.lua", "shared/ui.lua", "shared/ui_widgets.lua", "shared/ui_parts.lua", "shared/ui_motion.lua",
                     "computer/mainframe/board.lua", "computer/mainframe/butler.lua", "computer/mainframe/wall.lua",
                     "computer/mainframe/base_link.lua",
-                    "computer/mainframe/dig_link.lua", "computer/mainframe/weaver_link.lua",
+                    "computer/mainframe/dig_link.lua", "computer/mainframe/weaver_link.lua", "computer/mainframe/weaver_numbers.lua",
                     "computer/mainframe/farm_link.lua", "computer/mainframe/operator_link.lua", "computer/mainframe/operator_fmt.lua",
                     "computer/mainframe/ring.lua", "shared/envfile.lua" },
         },
@@ -109,13 +109,13 @@ local M = {
         },
         architect = {
           name = "Architect",
-          about = "Weaver's control screen: map, orders, bill",
-          details = "Everything about Weaver the builder on the computer's own screen: what he's "
-            .. "doing, a map of the layer he's on, the island from the side, materials still "
-            .. "needed, the corner markers, and build / stop / test / clear / reboot orders. "
-            .. "Needs a wireless or ender modem; no monitor.",
+          about = "Weaver's control screen: setup wizard, map, orders, bill",
+          details = "One Architect per Weaver. A setup wizard pairs with a Weaver (or re-links by his number), takes a "
+            .. ".litematic dragged onto the screen, asks where the dock and the build's corner are and starts the build; "
+            .. "then Status, Map, Side, Bill and Log tabs and build / stop / home / reboot orders. "
+            .. "Needs an ender modem; an advanced monitor touching it shows the map.",
           run = "architect",
-          files = { "computer/architect/architect.lua", "computer/art/art_gfx.lua", "shared/weaverplan.lua", "shared/litematic.lua", "shared/litematic_inflate.lua", "shared/litematic_nbt.lua", "shared/plan2.lua", "shared/plan2place.lua", "shared/plan2order.lua", "shared/mcblocks_1211.lua", "shared/screens.lua", "shared/ui.lua", "shared/ui_widgets.lua", "shared/ui_parts.lua", "shared/ui_motion.lua" },
+          files = { "computer/architect/architect.lua", "computer/architect/architect_base.lua", "computer/architect/architect_plan.lua", "computer/architect/architect_net.lua", "computer/architect/architect_tabs.lua", "computer/architect/architect_maps.lua", "computer/architect/architect_wizard.lua", "computer/architect/architect_site.lua", "computer/architect/architect_run.lua", "shared/slash.lua", "shared/litematic.lua", "shared/litematic_inflate.lua", "shared/litematic_nbt.lua", "shared/plan2.lua", "shared/plan2place.lua", "shared/plan2order.lua", "shared/mcblocks_1211.lua", "shared/screens.lua", "shared/ui.lua", "shared/ui_widgets.lua", "shared/ui_parts.lua", "shared/ui_motion.lua" },
         },
         operator = {
           name = "Operator",

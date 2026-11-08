@@ -82,6 +82,7 @@ parallel.waitForAll(
   runScript("base_link.lua",     sandbox(true), "Base link"),
   runScript("dig_link.lua",      sandbox(true), "Canary link"),
   runScript("weaver_link.lua",   sandbox(true), "Weaver link"),
+  runScript("weaver_numbers.lua", sandbox(true), "Weaver numbers"),
   runScript("farm_link.lua",     sandbox(true), "Farm link"),
   runScript("operator_link.lua", sandbox(true), "Operator link")
 )

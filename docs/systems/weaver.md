@@ -117,5 +117,5 @@ One dye-coded Ender Storage chest per Weaver. Site end: under the Weaver's dock 
 
 ## Notes for engineers
 
-- Old files to replace or delete per sub-issue: `turtle/weaver/weaver.lua` and `mossy.plan` (#86), `computer/architect/architect.lua` (#88), storage's `weaver` single job, `supplyWeaver`, `weaverReq` and `need` handling (#89), `computer/mainframe/weaver_link.lua` and `_G.WEAVER_STATUS` (#90). `shared/weaverplan.lua` goes once nothing uses it; its nearest-neighbour order moves to the new code.
+- Old files to replace or delete per sub-issue: `turtle/weaver/weaver.lua` and `mossy.plan` (#86), `computer/architect/architect.lua` (#88, done: `docs/systems/architect.md`), storage's `weaver` single job, `supplyWeaver`, `weaverReq` and `need` handling (#89), `computer/mainframe/weaver_link.lua` and `_G.WEAVER_STATUS` (#90). `shared/weaverplan.lua` is gone (the planner has the ordering).
 - The sim has ender chests, block states and stair rules (see `tests/README.md`).

@@ -348,6 +348,23 @@ end
 function Computer:click(x, y, button) self:_queue("mouse_click", button or 1, x, y) end
 function Computer:scroll(dir, x, y) self:_queue("mouse_scroll", dir, x or 1, y or 1) end
 function Computer:queue(...) self:_queue(...) end
+-- Drag a file onto the screen (CC:Tweaked's file_transfer event): c:drop("Build.litematic", bytes) or a list of {name, bytes}
+function Computer:drop(name, bytes)
+  local list = type(name) == "table" and name or { { name, bytes } }
+  local files = {}
+  for i, f in ipairs(list) do
+    local pos, data = 1, f[2]
+    files[i] = { getName = function() return f[1] end, close = function() end,
+                 readAll = function() local r = data:sub(pos); pos = #data + 1; return r end,
+                 read = function(_, n) n = n or 1; if pos > #data then return nil end; local r = data:sub(pos, pos + n - 1); pos = pos + n; return r end }
+    -- like a handle: both h.readAll() and h:readAll() work
+    local h = files[i]
+    local ra, rd = h.readAll, h.read
+    h.readAll = function() return ra() end
+    h.read = function(a, b) if type(a) == "table" then return rd(a, b) end return rd(nil, a) end
+  end
+  self:_queue("file_transfer", { getFiles = function() return files end })
+end
 function Computer:screenText() return self.screen:text() end
 
 -- Everything print()ed since boot, as one string

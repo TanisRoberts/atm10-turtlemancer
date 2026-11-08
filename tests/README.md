@@ -25,6 +25,7 @@ Exit code is 0 only if everything passed. Run it before every push to main.
 | `me.lua` | An Advanced Peripherals ME Bridge on an AE2 grid: `w:meBridge{}` then `net:add("me_bridge_0", me)`. Drives/racks/cells with AE2's byte maths, storage buses (priority, capacity, `void`), insert order (highest priority, cells already holding the item first), extract order (lowest priority first), `exportItem`/`importItem` over many stacks, AP's `getDrives` zero-bytes quirk, offline (`me:setOnline(false)`). Helpers: `addRack`, `addRackAt` (a 2x5 rack by wall position, for the server board), `addDrive`, `addCell`, `addBus`, `fill`, `where`, `total`. Header of `me.lua` lists the source facts |
 | `placement.lua` | Block state for what a turtle places (stairs, slabs, logs/hay, gates, chests, torches), read from CC:Tweaked's `TurtlePlaceCommand`; see "Block states" below |
 | `ender.lua` | Ender Storage chests: one shared inventory per dye code, at a world block and on a wired net; `w:ender()` |
+| `architect.lua` | An Architect that is already set up (`A.prepare(c)` writes its label, state and a build), for screen and monitor scenarios |
 | `weaver.lua` | Weaver scenario helper: flat ground, dock turtle on an ender chest, and a world-vs-expected-blocks diff |
 | `test.lua` | `T.test`, `T.eq`, `T.contains`, `T.waitFor`, `T.running` |
 
@@ -63,7 +64,7 @@ end)
 Handy calls:
 
 - **Computers:** `w:computer{id=, label=, w=, h=}`, `c:run("prog")`, `c:reboot()` (runs `startup.lua` if there is one; files survive),
-  `c:type("text")`, `c:key(257)` (Enter), `c:click(x, y)`, `c:writeFile / readFile / writeTable / readTable`,
+  `c:type("text")`, `c:key(257)` (Enter), `c:click(x, y)`, `c:drop(name, bytes)` (a file dragged onto the screen: the `file_transfer` event), `c:writeFile / readFile / writeTable / readTable`,
   `c:output()` (everything `print`ed), `c.screen:text()`, `c.screen:dump()` to see a layout, `c.G.x` for the running program's globals (its own, else `_G`) (`c.env` is the computer's `_G`: like CraftOS, `require` and `shell` live only in each program's env, so a `dofile()`d file can't use them).
 - **Turtles:** `w:turtle{id=, x=, y=, z=, facing=0..3 (N,E,S,W), fuel=, left=, right=, items={[slot]={name,count}}}`.
   World blocks: `w:setBlock(x,y,z,"minecraft:stone", inv?)`, `w:fill(x1,y1,z1,x2,y2,z2,block)`, `w:getBlock`, `w:count(name, box)`.

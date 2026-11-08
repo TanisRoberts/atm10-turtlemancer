@@ -2,19 +2,23 @@
 -- the cable monitor is numbered, a tap picks it, and the controller draws on it. `monitors` asks again.
 local cc = require("sim.cc")
 local T  = require("sim.test")
+local A  = require("sim.architect")
 
 T.test("architect: no touching monitor, the cable one is picked by a tap and shows the map", function()
   local w = cc.world()
   local net = w:net()
   local cable = net:monitor("monitor_5", 36, 24)
-  local a = w:computer{ id = 1, label = "Architect" }
+  local a = w:computer{ id = 1 }
   a:attach("top", cc.wireless{ ender = true })
   a:attach("back", cc.wired(net))
-  local s = w:computer{ id = 2, label = "Weaver" }
+  local s = w:computer{ id = 2, label = "Weaver-01" }
   s:attach("top", cc.wireless{ ender = true })
   a:installRole("architect")
+  local hash = A.prepare(a)
   s:install("tests/demo/weaver_stub.lua", "weaver_stub.lua")
   s:run("weaver_stub")
+  w:run(0.5)
+  s.G.STATUS = { state = "building", msg = "", n = 1, label = "Weaver-01", layer = 1, total = 3, idx = 31, cells = 120, work = "layer", x = 5, y = 1, z = 2, fuel = 12000, gaps = 0, hash = hash }
   a:run("architect")
   w:run(4)
   T.eq(a.error, nil)
@@ -33,15 +37,18 @@ T.test("architect: a touching monitor still wins with no prompt", function()
   local w = cc.world()
   local net = w:net()
   local cable = net:monitor("monitor_5", 36, 24)
-  local a = w:computer{ id = 1, label = "Architect" }
+  local a = w:computer{ id = 1 }
   a:attach("top", cc.wireless{ ender = true })
   a:attach("back", cc.wired(net))
   local mon = a:monitor("right", 36, 24)
-  local s = w:computer{ id = 2, label = "Weaver" }
+  local s = w:computer{ id = 2, label = "Weaver-01" }
   s:attach("top", cc.wireless{ ender = true })
   a:installRole("architect")
+  local hash = A.prepare(a)
   s:install("tests/demo/weaver_stub.lua", "weaver_stub.lua")
   s:run("weaver_stub")
+  w:run(0.5)
+  s.G.STATUS = { state = "building", msg = "", n = 1, label = "Weaver-01", layer = 1, total = 3, idx = 31, cells = 120, work = "layer", x = 5, y = 1, z = 2, fuel = 12000, gaps = 0, hash = hash }
   a:run("architect")
   w:run(15)
   T.contains(mon, "Weaver-01 building")

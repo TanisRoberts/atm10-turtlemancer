@@ -2,7 +2,7 @@
 
 Part of issue #26. Built from the UI kit (`docs/design/ui-kit.md`): header B, buttons B, tiles B, the palette and motion A.
 
-**Code:** `computer/architect/architect.lua`
+**Code:** `computer/architect/` (v2: `docs/systems/architect.md`). Corners is gone and Side shows the ground line; the wizard is `architect-fleet.md`.
 
 Weaver's controller. Terminal only (no monitor): tabs, orders, a map, a bill and a log.
 
