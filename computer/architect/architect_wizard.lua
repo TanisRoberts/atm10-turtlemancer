@@ -219,6 +219,8 @@ function drawStep2List(v)
   if V.sub2 == "all" then
     for _, e in ipairs(mostUsed(info)) do rows[#rows + 1] = { key = pretty(e.name), value = comma(e.n) } end
   else
+    -- a build loaded from its saved .plan2 (after a reboot) has the marks but not the reasons: work them out again
+    if not P.plan.ulist then plan2place.classify(P.plan) end
     for _, u in ipairs(P.plan.ulist or {}) do
       rows[#rows + 1] = { key = pretty(u.name) .. (" at %d %d %d"):format(u.x, u.y, u.z), value = tostring(u.why or ""), tone = "warn" }
     end

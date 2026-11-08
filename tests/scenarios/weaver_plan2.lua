@@ -74,6 +74,15 @@ T.test("plan2: write, read back, and the hash catches a changed file", function(
   local back = P.parse(P.text(P.fromLitematic(slurp("placement.litematic"))))
   T.eq(back.marks[2][2 * 12 + 3], "FE", "the arch stair: stand west, face east")
   T.eq(select(2, P.parse("hello")), "not a .plan2 file")
+  -- a reloaded .plan2 has no ulist; classify() gives it back with the same marks (the Architect's Simpler list)
+  local orig = P.fromLitematic(slurp("placement.litematic"))
+  T.eq(back.ulist, nil)
+  local saved = {}
+  for y, t in pairs(back.marks) do for k, m in pairs(t) do saved[y .. ":" .. k] = m end end
+  req("plan2place").classify(back)
+  T.eq(#back.ulist, #orig.ulist, "same U cells after a reload")
+  T.eq(type(back.ulist[1].why), "string", "with their reasons")
+  for y, t in pairs(back.marks) do for k, m in pairs(t) do T.eq(saved[y .. ":" .. k], m, "mark at " .. y .. ":" .. k) end end
 end)
 
 -- ---- end to end ----------------------------------------------------------------------------------------------------
