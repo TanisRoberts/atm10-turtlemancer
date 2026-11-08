@@ -76,6 +76,15 @@ end
 
 function start()
   M_ARGS = args
+  -- The island Weaver (v1) left weaver.cfg/weaver.state behind with WORLD coordinates (C.dx/dy/dz). Read as dock
+  -- coordinates they send him thousands of blocks away "home". Start fresh instead: setup asks his facing, and
+  -- stops with an error (without moving) if he isn't on his dock's chest.
+  if C and (C.dx ~= nil or C.dz ~= nil) then
+    print("Old Weaver files found: starting fresh. I must be on my dock.")
+    for _, f in ipairs({ STATE_FILE, GAPS_FILE, GAPLIST }) do if fs.exists(f) then fs.delete(f) end end
+    S, GAPS = {}, {}
+    setup()
+  end
   if args[1] == "setup" or not C then setup() end
   boot()
   setStatus("starting", "Booted")

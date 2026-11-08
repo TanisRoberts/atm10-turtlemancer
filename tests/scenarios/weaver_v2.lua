@@ -269,3 +269,26 @@ T.test("weaver v2 (#87): a reboot in the middle of a turn: sorted out by the blo
     if case.lost then T.truthy(r.lost, "same block ahead: heading unknown") else T.eq(r.h, case.h); T.falsy(r.lost) end
   end
 end)
+
+T.test("weaver v2: old island-Weaver files (world coordinates) never send him off; he starts fresh at his dock", function()
+  local site, w, t = setup()
+  t:writeTable("weaver.cfg", { dx = 40, dy = 64, dz = -30, dh = 0, plan = "mossy.plan" })
+  t:writeTable("weaver.state", { x = 40, y = 64, z = -30, h = 0, want = "idle" })
+  local x, y, z = site.body.x, site.body.y, site.body.z
+  t:reboot()
+  w:run(5)
+  T.contains(t.screen, "WEAVER SETUP")
+  T.eq(site.body.x, x); T.eq(site.body.y, y); T.eq(site.body.z, z)
+  T.eq(t:readTable("weaver.state"), nil)
+  -- off his dock (no chest under him): setup stops with an error and he doesn't move at all
+  local site2, w2, t2 = setup()
+  t2:writeTable("weaver.cfg", { dx = 40, dy = 64, dz = -30, dh = 0 })
+  t2:writeTable("weaver.state", { x = 40, y = 64, z = -30, h = 0, want = "idle" })
+  w2:setBlock(site2.body.x, site2.body.y - 1, site2.body.z, nil)
+  local x2, z2 = site2.body.x, site2.body.z
+  t2:reboot(); w2:run(10)
+  T.contains(t2.error or "", "No chest or barrel under me")
+  t2.error = nil                                            -- the expected stop, not a failure of the test
+  T.eq(t2:readTable("weaver.state"), nil, "stopped in setup, nothing saved")
+  T.eq(site2.body.x, x2); T.eq(site2.body.z, z2)
+end)
