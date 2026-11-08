@@ -53,6 +53,10 @@ local function mainLoop()
       os.sleep(1)
     elseif S.sup then
       finishSupply()
+    elseif S.marks and (S.want == "clear" or S.want == "build") then
+      clearStep()                                    -- markers out: take them away first (also before a build)
+    elseif S.want == "test" and S.markCells then
+      markStep()
     elseif S.want ~= "build" then
       if not atDock() then goHome() end
       setStatus(S.want == "stop" and "stopped" or "idle", "Waiting for an order")

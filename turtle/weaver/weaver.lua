@@ -11,7 +11,7 @@
 -- The program is in parts (weaver_*.lua), loaded into ONE shared environment (as the miner is): a name defined in
 -- one part is seen by all of them.
 local PARTS = { "weaver_base.lua", "weaver_move.lua", "weaver_inv.lua", "weaver_net.lua", "weaver_build.lua",
-  "weaver_loop.lua" }
+  "weaver_mark.lua", "weaver_loop.lua" }
 local M = setmetatable({ core = dofile("turtlecore.lua"), args = { ... } }, { __index = _ENV })
 for _, name in ipairs(PARTS) do
   local f = fs.open(name, "r")

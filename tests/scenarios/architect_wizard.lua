@@ -307,3 +307,46 @@ T.test("architect: a turned build lands turned: the same file at 90 degrees come
   local ok, bad, total = W.diff(w, (expected(req, bytes, 90, 6, 65, 10)), { max = 10 })
   if not ok then error(total .. " cells differ:\n  " .. table.concat(bad, "\n  ")) end
 end)
+
+T.test("architect (#138): Test marks the 4 bottom corners of the turned footprint, Clear removes them, the build then runs", function()
+  local req = loader()
+  local bytes = slurp(PLAN_FILE)
+  local plan = req("plan2").fromLitematic(bytes)
+  LATE = {}
+  local site, w, t, st, mf, stock = setup(plan)
+  stock:give("minecraft:cobblestone", 16)                    -- he carries nothing yet: he fetches cobblestone for the markers
+  w:run(5)
+  local a = architect(w, 2)
+  w:run(3)
+  tapText(w, a, "A new Weaver"); w:run(4); tapText(w, a, "Turtle #7")
+  w:runUntil(function() return A(a).S and A(a).S.n end, 30); w:run(2)
+  tapText(w, a, "Next"); a:drop("Placement.litematic", bytes); w:run(2); tapText(w, a, "Next")
+  enterSite(w, a, 6, 10)
+  tapText(w, a, "90", true)
+  local sz = plan.info.size
+  local ew, ns = sz.z, sz.x                                  -- turned 90: the sides swap
+  local y = 66                                               -- on top of the bottom-layer cell (y 65)
+  local corners = { { 6, 10 }, { 6 + ew - 1, 10 }, { 6, 10 - ns + 1 }, { 6 + ew - 1, 10 - ns + 1 } }
+  local function markers()
+    local n = 0
+    for x = -2, 40 do for z = -30, 30 do
+      local b = w:getBlock(x, y, z)
+      if b then n = n + 1 end
+    end end
+    return n
+  end
+  tapText(w, a, "Test")
+  w:runUntil(function() local s = (A(a).R or {}).status; return s and (s.marks or 0) == 4 end, 3000)
+  T.eq(markers(), 4, "exactly 4 markers")
+  for _, c in ipairs(corners) do T.truthy(w:getBlock(c[1], y, c[2]), "marker at " .. c[1] .. "," .. c[2]) end
+  w:run(10)
+  T.contains(a.screen, "markers out, type clear")
+  tapText(w, a, "Clear")
+  w:runUntil(function() local s = (A(a).R or {}).status; return s and (s.marks or 0) == 0 and s.x == 0 and s.z == 0 end, 3000)
+  T.eq(markers(), 0, "markers cleared")
+  tapText(w, a, "Next"); w:run(5); tapText(w, a, "Start build")
+  w:runUntil(function() local s = (A(a).R or {}).status; return s and s.state == "done" end, 20000)
+  w:runUntil(function() return finished(a) end, 20000)
+  local ok, bad, total = W.diff(w, (expected(req, bytes, 90, 6, 65, 10)), { max = 10 })
+  if not ok then error(total .. " cells differ:\n  " .. table.concat(bad, "\n  ")) end
+end)

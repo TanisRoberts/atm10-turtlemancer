@@ -26,6 +26,9 @@ One computer per Weaver. Screens: `docs/design/architect-fleet.md` (wizard) and 
 - **Numbers**: the mainframe (`computer/mainframe/weaver_numbers.lua`, `weavers.reg`) answers `number_req` and `relink`, and keeps the site of each build (`site_set`) so a replacement Architect finds it again; the Weaver does not know his own site. A pair message goes to the chosen turtle only (`rednet.send`), so other fresh Weavers stay unpaired.
 - `status.state == "done"` is the finished build (`status.done` is the last `layer_done` record).
 
+## Test and Clear (#138)
+Wizard step 3 and the Status tab have **Test** and **Clear** buttons. Test sends the site to the mainframe, then the `test` order with the 4 bottom corners of the turned footprint (`testCorners()` in `architect_net.lua`). Status shows "marking k/4", then "markers out, type clear" while the Weaver reports `marks > 0`. Clear sends `clear`. Start build with markers out is fine: the Weaver clears them first.
+
 ## Tests
 
 `tests/scenarios/architect_wizard.lua` runs the real Architect, Weaver and mainframe module with a stub storage: pairing, a dropped `placement.litematic`, the site typed in, the whole build compared with the file (also turned 90), gaps filled when storage gets the blocks, a reboot, and a second fresh Architect re-linking. `architect_monitor.lua` and `wired_monitors_5.lua` use `tests/sim/architect.lua` (an Architect already set up) and `tests/demo/weaver_stub.lua`.

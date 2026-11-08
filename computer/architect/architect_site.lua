@@ -95,6 +95,16 @@ function drawStep3(v)
   end
   local face = ({ [0] = "north", "east", "south", "west" })[rotSteps(s.rot)]
   v:put(2, 18, fit(("turn %d: the file's north side faces %s"):format(s.rot, face), W - 2), "dim", "bg")
+  local o = S.order
+  local st = R.status
+  local function busy(word) return o and o.word == word end
+  v:buttons(2, v.H - 1, {
+    { label = "Test", style = busy("test") and "busy" or "idle", id = "b-test",
+      fn = function() if not S.started then S.site = s; save() end; sendOrder("test") end },
+    { label = "Clear", style = busy("clear") and "busy" or "idle", id = "b-clear", fn = function() sendOrder("clear") end },
+  })
+  if st and st.state == "marking" then v:put(20, v.H - 1, ("marking %d/4"):format(st.marked or 0), "info", "bg")
+  elseif st and (st.marks or 0) > 0 then v:put(20, v.H - 1, "markers out, type clear", "warn", "bg") end
   return true
 end
 

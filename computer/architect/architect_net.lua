@@ -57,14 +57,29 @@ end
 ---------------------------------------------------------------------------
 -- Orders
 ---------------------------------------------------------------------------
-local WANT = { build = "build", stop = "stop", home = "stop", reboot = "reboot", status = "status" }
+local WANT = { build = "build", stop = "stop", home = "stop", reboot = "reboot", status = "status", test = "test", clear = "clear" }
+-- the 4 bottom corner cells of the turned footprint, in dock coordinates (the bottom-layer cells; the Weaver marks on top)
+function testCorners()
+  local s = S.site
+  if not (P and siteOK(s)) then return nil end
+  local ew, ns = footprint(s.rot)
+  local x1, x2, z1, z2 = s.cx - s.dx, s.cx + ew - 1 - s.dx, s.cz - ns + 1 - s.dz, s.cz - s.dz
+  local y = s.cy + P.ys[1] - s.dy
+  return { { x1, y, z1 }, { x2, y, z1 }, { x2, y, z2 }, { x1, y, z2 } }
+end
 function sendOrder(word)
   local want = WANT[word]
   if not want then return false end
+  local corners
+  if word == "test" then
+    corners = testCorners()
+    if not (corners and S.n) then return false end
+    tx({ type = "site_set", site = S.site, build = S.name, hash = S.hash })    -- the site first: the mainframe keeps it
+  end
   S.orderSeq = math.max(S.orderSeq + 1, os.epoch and os.epoch("utc") or 0)
-  S.order = { want = want, word = word, seq = S.orderSeq, at = now(), first = now() }
+  S.order = { want = want, word = word, seq = S.orderSeq, at = now(), first = now(), corners = corners }
   save(); addLog("order: " .. word)
-  tx({ type = "order", want = want, seq = S.orderSeq })
+  tx({ type = "order", want = want, seq = S.orderSeq, corners = corners })
   return true
 end
 local function pumpOrder()
@@ -76,7 +91,7 @@ local function pumpOrder()
     if confirmed then addLog("  " .. o.word .. " confirmed") end
     S.order = nil; save(); return
   end
-  if due("order") then tx({ type = "order", want = o.want, seq = o.seq }) end
+  if due("order") then tx({ type = "order", want = o.want, seq = o.seq, corners = o.corners }) end
 end
 
 ---------------------------------------------------------------------------

@@ -76,6 +76,12 @@ function drawStatus(v)
     if why2 then v:put(14, y, fit(why2, W - 14), "dim", "bg"); y = y + 1 end
     y = y + 1
   end
+  if (st.marks or 0) > 0 or st.state == "marking" then
+    v:put(2, y, "Markers", "dim", "bg")
+    if st.state == "marking" then v:put(14, y, ("marking %d/4"):format(st.marked or 0), "info", "bg")
+    else v:put(14, y, "markers out, type clear", "warn", "bg") end
+    y = y + 1
+  end
   if st.lost then v:alert(2, y, W - 2, "Weaver is lost: carry him to the dock, then run weaver found on him", "bad"); y = y + 2 end
   local o = S.order
   local function busy(word) return o and o.word == word end
@@ -84,6 +90,10 @@ function drawStatus(v)
     { label = "Stop", style = busy("stop") and "busy" or "idle", fn = function() sendOrder("stop") end, id = "b-stop" },
     { label = "Home", style = busy("home") and "busy" or "idle", fn = function() sendOrder("home") end, id = "b-home" },
     { label = "Reboot", style = busy("reboot") and "busy" or "idle", confirm = true, fn = function() sendOrder("reboot") end, id = "b-reboot" },
+  })
+  v:buttons(2, y + 2, {
+    { label = "Test", style = busy("test") and "busy" or "idle", fn = function() sendOrder("test") end, id = "b-test" },
+    { label = "Clear", style = busy("clear") and "busy" or "idle", fn = function() sendOrder("clear") end, id = "b-clear" },
   })
 end
 

@@ -29,7 +29,8 @@ function statusMsg()
   return { type = "status", n = S.n, label = os.getComputerLabel(), id = os.getComputerID(), state = S.status, msg = S.msg,
            want = S.want, build = S.build, hash = S.hash, layer = S.layer, total = S.total, idx = S.idx,
            cells = cells and #cells or nil, work = S.work, x = S.x, y = S.y, z = S.z, fuel = fuelLevel(),
-           gaps = #GAPS, need = S.needLayer, done = S.lastDone, lost = S.lost }
+           gaps = #GAPS, need = S.needLayer, done = S.lastDone, lost = S.lost,
+           marks = S.marks and #S.marks or 0, marked = S.markDone, marking = S.markCells and #S.markCells or 0 }
 end
 
 local function resetBuild(msg)
@@ -90,7 +91,14 @@ local function handle(id, msg)
       S.orderSeq = msg.seq
       if msg.want == "reboot" then REBOOT = true
       elseif msg.want == "status" then send(statusMsg())
-      else S.want = msg.want; NEWORDER = true end
+      else
+        if msg.want == "test" and msg.corners and S.want ~= "build" then
+          S.markCells, S.markDone = {}, #(S.marks or {})
+          for _, c in ipairs(msg.corners) do S.markCells[#S.markCells + 1] = c end
+        end
+        if msg.want ~= "test" then S.markCells = nil end
+        S.want = msg.want; NEWORDER = true
+      end
       save()
     end
   elseif t == "supplied" then
