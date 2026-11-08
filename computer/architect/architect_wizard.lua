@@ -220,7 +220,7 @@ function drawStep2List(v)
     for _, e in ipairs(mostUsed(info)) do rows[#rows + 1] = { key = pretty(e.name), value = comma(e.n) } end
   else
     for _, u in ipairs(P.plan.ulist or {}) do
-      rows[#rows + 1] = { key = pretty(u[4]) .. (" at %d %d %d"):format(u[1], u[2], u[3]), value = tostring(u[5]), tone = "warn" }
+      rows[#rows + 1] = { key = pretty(u.name) .. (" at %d %d %d"):format(u.x, u.y, u.z), value = tostring(u.why or ""), tone = "warn" }
     end
   end
   v:report({ title = V.sub2 == "all" and "Bill" or "Placed a simpler way", rows = rows, back = function() V.sub2 = nil end })
