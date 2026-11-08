@@ -1,6 +1,6 @@
 -- weaver_build.lua  --  the two layer lists he holds, placing one cell, gaps and finishing a layer.
--- A cell is { x, y, z, "minecraft:block", how } in dock coordinates; how = "2" for a double slab, nil otherwise.
--- He hovers one above the cell and places down. A part of weaver.lua.
+-- A cell is { x, y, z, "minecraft:block", how =, d =, turn =, item =, n =, state = } in dock coordinates
+-- (the planner's entries, docs/systems/weaver.md section 8). A part of weaver.lua.
 
 LAYERS = {}   -- layer number -> cell list (also on disk as weaver.L<n>)
 GCELLS = nil  -- the gap list from the Architect
@@ -42,7 +42,7 @@ end
 local function gapKey(c) return c[1] .. "," .. c[2] .. "," .. c[3] end
 local function addGap(c)
   for _, g in ipairs(GAPS) do if g[1] == c[1] and g[2] == c[2] and g[3] == c[3] then return end end
-  GAPS[#GAPS + 1] = { c[1], c[2], c[3], c[4] }; saveGaps()
+  GAPS[#GAPS + 1] = c; saveGaps()
 end
 local function delGap(c)
   for i, g in ipairs(GAPS) do
@@ -50,33 +50,52 @@ local function delGap(c)
   end
 end
 
--- Place one cell from above. "ok", "gap" (no block), "dry" (go to the dock for it) or "blocked", why
+local LH = { N = 0, E = 1, S = 2, W = 3 }
+
+-- Place one cell the way the planner says (docs/systems/weaver.md section 8). Default: hover above, face `turn`,
+-- place down n times. F: stand behind the cell and place forward. B: stand beside it, in the open column.
+-- "ok", "gap" (no block), "dry" (go to the dock for it) or "blocked", why
 local function buildCell(c)
-  local name, how = c[4], c[5]
-  local need = how == "2" and 2 or 1
-  if (counts()[name] or 0) < need then
-    if S.short[name] or S.visitKey == (S.work .. ":" .. S.layer .. ":" .. S.idx) then S.short[name] = true; return "gap" end
+  local name, how = c[4], c.how
+  local item = c.item or name
+  local need = c.n or 1
+  if (counts()[item] or 0) < need then
+    if S.short[item] or S.visitKey == (S.work .. ":" .. S.layer .. ":" .. S.idx) then S.short[item] = true; return "gap" end
     return "dry"
   end
-  local ok, why = goTo(c[1], c[2] + 1, c[3])
+  local side, h = how == "F" or how == "B", LH[c.turn or ""]
+  local ok, why
+  if how == "F" then
+    h = LH[c.d or ""]
+    ok, why = goTo(c[1] - DX[h or 0], c[2], c[3] - DZ[h or 0])
+  elseif how == "B" then
+    local d = LH[c.d or ""] or 0
+    h = (d + 2) % 4
+    ok, why = goTo(c[1] + DX[d], c[2], c[3] + DZ[d])
+  else
+    ok, why = goTo(c[1], c[2] + 1, c[3])
+  end
   if not ok then return "blocked", why end
-  local there, d = turtle.inspectDown()
+  local insp, put, dig, atk = turtle.inspectDown, turtle.placeDown, turtle.digDown, turtle.attackDown
+  if side then insp, put, dig, atk = turtle.inspect, turtle.place, turtle.dig, turtle.attack end
+  if h then face(h) end
+  local there, d = insp()
   local reps = need
   if there then
     if d.name == name then
       if how ~= "2" or (d.state and d.state.type == "double") then return "ok" end
       reps = 1                              -- a single slab already stands: one more makes the double
-    elseif canDig(d.name) then turtle.digDown(); dropJunk()
+    elseif canDig(d.name) then dig(); dropJunk()
     else return "blocked", "Blocked by " .. tostring(d.name) end
   end
   for _ = 1, reps do
     local placed = false
     for _ = 1, 5 do
-      local s = slotOf(name)
+      local s = slotOf(item)
       if not s then return "dry" end
       turtle.select(s)
-      if turtle.placeDown() then placed = true; break end
-      turtle.attackDown(); os.sleep(0.2)
+      if put() then placed = true; break end
+      atk(); os.sleep(0.2)
     end
     if not placed then turtle.select(1); return "blocked", "Can't place " .. name end
   end

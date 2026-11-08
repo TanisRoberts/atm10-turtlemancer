@@ -34,11 +34,11 @@ end
 function planBatch()
   local want, used = {}, 0
   for c in aheadCells() do
-    local need = (c[5] == "2") and 2 or 1
-    local old = want[c[4]] or 0
+    local need, item = c.n or 1, c.item or c[4]
+    local old = want[item] or 0
     local nu = used - math.ceil(old / STACK) + math.ceil((old + need) / STACK)
     if nu > SLOT_BLOCKS then break end
-    want[c[4]], used = old + need, nu
+    want[item], used = old + need, nu
   end
   return want
 end

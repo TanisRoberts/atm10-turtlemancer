@@ -191,7 +191,7 @@ T.test("weaver v2: a reboot while waiting for a delivery picks the request up ag
 end)
 
 T.test("weaver v2: a double slab goes down twice", function()
-  local layers = { { { 3, 0, 3, "minecraft:sandstone_slab", "2" }, { 4, 0, 3, "minecraft:sandstone_slab" } },
+  local layers = { { { 3, 0, 3, "minecraft:sandstone_slab", how = "2", n = 2 }, { 4, 0, 3, "minecraft:sandstone_slab" } },
                    { { 5, 1, 5, "minecraft:stone" } } }
   local expected = { ["3,0,3"] = { name = "minecraft:sandstone_slab", state = { type = "double" } },
                      ["4,0,3"] = { name = "minecraft:sandstone_slab", state = { type = "bottom" } },
@@ -200,4 +200,72 @@ T.test("weaver v2: a double slab goes down twice", function()
   t:reboot()
   T.waitFor(w, function() return ar.G.done and ar.G.done[2] end, 2000, "never finished")
   W.expect(w, expected, { oy = 65, box = { 0, 65, 0, 12, 68, 12 } })
+end)
+
+-- #87: block state. Cells are the planner's entries (docs/systems/weaver.md section 8).
+local DIR = { "north", "east", "south", "west" }
+local L = { north = "N", east = "E", south = "S", west = "W" }
+local function stairsPlan()
+  local L1, L2, exp = {}, {}, {}
+  local ST = "minecraft:sandstone_stairs"
+  -- add(list, x, y, z, name, extra fields, expected block (default: name + state))
+  local function add(Ls, x, y, z, name, f, want)
+    f = f or {}
+    f[1], f[2], f[3], f[4] = x, y, z, name
+    table.insert(Ls, f)
+    exp[x .. "," .. y .. "," .. z] = want or { name = name, state = f.state }
+  end
+  for i, f in ipairs(DIR) do
+    add(L1, 2 + i, 0, 3, ST, { turn = L[f], state = { facing = f, half = "bottom" } })   -- block under: bottom
+    add(L2, 2 + i, 1, 5, ST, { turn = L[f], how = "T", state = { facing = f, half = "top" } })  -- air under: top
+  end
+  add(L2, 8, 1, 3, ST, { how = "F", d = "S", turn = "S", state = { facing = "south", half = "bottom" } })
+  -- top slab over a block: slab first, then the block from its east side
+  add(L2, 10, 1, 5, "minecraft:sandstone_slab", { how = "T", state = { type = "top" } })
+  add(L2, 10, 0, 5, "minecraft:stone", { how = "B", d = "E" }, "minecraft:stone")
+  -- slabs
+  add(L1, 4, 0, 8, "minecraft:sandstone_slab", { how = "2", n = 2, state = { type = "double" } })
+  add(L1, 5, 0, 8, "minecraft:sandstone_slab", { state = { type = "bottom" } })
+  add(L2, 6, 1, 8, "minecraft:sandstone_slab", { how = "T", state = { type = "top" } })
+  -- wall torch on stone, from the side; stone first
+  add(L1, 8, 0, 8, "minecraft:stone", nil, "minecraft:stone")
+  add(L2, 8, 1, 8, "minecraft:stone", nil, "minecraft:stone")
+  add(L2, 8, 1, 7, "minecraft:wall_torch", { how = "F", d = "S", turn = "S", item = "minecraft:torch", state = { facing = "north" } },
+      { name = "minecraft:wall_torch", state = { facing = "north" } })
+  -- gate faces the heading, chest faces back at him
+  add(L1, 3, 0, 10, "minecraft:oak_fence_gate", { turn = "S", state = { facing = "south" } })
+  add(L1, 5, 0, 10, "minecraft:chest", { turn = "W", state = { facing = "east" } })
+  add(L1, 7, 0, 10, "minecraft:chest", { turn = "S", state = { facing = "north" } })
+  return { L1, L2 }, exp
+end
+
+T.test("weaver v2 (#87): stairs in all 8 states, slabs, wall torch, gate and chest come out as the plan says", function()
+  local layers, expected = stairsPlan()
+  local site, w, t, ar, st, stock = setup({ layers = layers, expected = expected })
+  for _, n in ipairs({ "sandstone_stairs", "sandstone_slab", "oak_fence_gate", "chest", "torch" }) do
+    stock:give("minecraft:" .. n, 16)
+  end
+  t:reboot()
+  T.waitFor(w, function() return ar.G.done and ar.G.done[2] end, 6000, "never finished")
+  T.eq(#ar.G.done[1] + #ar.G.done[2], 0, "nothing should be skipped")
+  check(w, expected)
+end)
+
+T.test("weaver v2 (#87): a reboot in the middle of a turn: sorted out by the block ahead, else lost", function()
+  for _, case in ipairs({ { block = true, h = 1 }, { block = false, lost = true } }) do
+    local site, w, t, ar = setup({ layers = { { { 3, 0, 3, "minecraft:stone" } }, {} }, expected = {} })
+    t:reboot()
+    T.waitFor(w, function() return ar.G.paired end, 60, "never paired")
+    t:_stop()                                               -- cut off; he faces north, the turn was to the east
+    local s = t:readTable("weaver.state")
+    s.h, s.turning = 0, { from = 0, to = 1, ahead = false }
+    s.want = nil
+    t:writeTable("weaver.state", s)
+    if case.block then w:setBlock(0, 65, -1, "minecraft:stone") end  -- what he now sees ahead differs from before the turn
+    t:reboot()
+    w:run(0.5)
+    local r = t:readTable("weaver.state")
+    T.eq(r.turning, nil)
+    if case.lost then T.truthy(r.lost, "same block ahead: heading unknown") else T.eq(r.h, case.h); T.falsy(r.lost) end
+  end
 end)

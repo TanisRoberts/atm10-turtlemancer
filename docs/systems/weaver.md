@@ -59,7 +59,7 @@ The Weaver places like a player whose yaw is his heading. So he turns first, and
 
 **Code** (`shared/`, all in the `architect` role): `plan2.lua` builds a plan from a trimmed Litematica region (`plan2.fromLitematic(bytes)`), writes it (`plan2.text`) and reads it back (`plan2.parse`, `hashOK` checks the body against `info.hash`). `plan2place.lua` decides the `#M` marks (`classify`, run by `build`) and gives a layer's ordered cells for a rotation: `plan2place.layer(plan, y, rot)`. `plan2order.lua` is the ordering. Each entry has `how` (nil, `F`, `T`, `2`, `U`, or `B` = the fill of the block under a `T`), `d`, `turn` (the heading to face before placing), `item`, `n`, the rotated `state`, and position turned about the plan origin (as `weaverplan.toWorld`). `info.stats` counts F/T/U/2; `plan.ulist` says why each U could not be done. Other rules the planner follows: sideways logs/hay use `F` (clicking the next block of the row, so the row is built from its far end; its last block has nothing to click on a floor and is `U`); a top-half stair/slab on the ground (layer 0) is `U`; a block under a `T` that is not plain, or that a torch or sideways log hangs on, makes it `U`. `tests/scenarios/weaver_plan2.lua` builds a hand-made file in the sim by these lists and compares every state.
 
-Fence gates face the heading; chests face back towards Weaver (turn the other way first). #83 confirms all of this in game; #87 implements it.
+Fence gates face the heading; chests face back towards Weaver. The planner turns the entry (`turn`); the Weaver just faces it (cell format in section 8, #87). #83 confirms it in game.
 
 Inside a layer, cells go in nearest-neighbour order (as `weaverplan.lua` does today), with the `F`/`T` constraints above. The Architect computes each layer's list and sends it already ordered. The Weaver just works through it by index.
 
@@ -97,7 +97,11 @@ One dye-coded Ender Storage chest per Weaver. Site end: under the Weaver's dock 
 `turtle/weaver/`: `weaver.lua` loads `weaver_base/move/inv/net/build/loop.lua` into one shared environment (as the miner). Fuel and chunk loading come from the turtle core. Tunables in `weaver.env`: `FUEL_TARGET` 20000, `FUEL_LOW` 3000, `SUPPLY_WAIT` 30.
 
 - **Setup** (first start, or `weaver setup`): a chest, barrel or Ender Storage chest must be under him; asks which way he faces. No GPS: he counts moves from the dock. Dock coordinates: the dock cell is 0,0,0; x east, y up, z south. After carrying him back to the dock: `weaver found`.
-- **Cells** are `{x, y, z, "minecraft:block", how}` in dock coordinates, ordered. He hovers at y+1 and `placeDown`s. Implemented: default, and `how = "2"` (double slab, two placements). `F`, `T` and the facing of stairs/gates/chests are #87: until then they come out the default way. A block already standing in the cell is accepted (restart safe); a natural block in the cell is dug first; anything else is reported as `blocked`.
+- **Cells** are the planner's entries (`plan2place.layer`, section 4) in dock coordinates, ordered: an array `{x, y, z, "minecraft:block"}` that also carries named fields `how`, `d`, `turn`, `item`, `n`, `state` (all optional; the Architect (#88) translates the planner's entries, keeping those names). Headings are compass letters `N E S W` (N = -z, E = +x). The Weaver reads `how d turn item n`; `state` is for checks and the Architect. He hovers at y+1 unless `how` says otherwise.
+  - Default (`how` nil, `T`, `U`, `2`): go above the cell, face `turn` (if set), hold `item` (default: the block), `placeDown` `n` times (`2` = double slab, two placements).
+  - `F`: stand in the cell `cell - d` at the cell's own height, face `d`, `place` forward (bottom-half stair/slab over air; wall torch, whose `item` is the torch and whose block is the wall torch; sideways logs).
+  - `B` (the fill of the block under a `T` stair): the cell has the y of the block. He goes down the open column at `B + d`, faces away from `d`, and places forward into B.
+  - A block already standing in the cell (same name) is accepted (restart safe); a natural block is dug first; anything else is `blocked`. `skipped`/`blocked` reports use the cell's name.
 - **Messages** (all on `tanis-weaver`, broadcast, every one carries `n`):
   - `hello {id}` every 3 s while unpaired. `pair {n}` answered by `paired {n}`; label `Weaver-NN`.
   - `relink {n}` answered by `state {…status fields…}`.
@@ -109,7 +113,7 @@ One dye-coded Ender Storage chest per Weaver. Site end: under the Weaver's dock 
   - `status {n, label, state, msg, want, build, hash, layer, total, idx, cells, work, x, y, z, fuel, gaps, need, done, lost}` every 3 s; `need` is the layer number he is waiting for.
   - Supply: `supply {seq, items, fuel}` to storage every 5 s until `supplied {seq, sent, missing}`; then he sucks until he has gained everything in `sent` (up to `SUPPLY_WAIT` s after the last item). `missing` names become gaps (`S.short`).
 - **Dock visit**: burn the fuel he carries, work out the batch (cells ahead, at most 12 slots), drop everything else into the chest (empty buckets too), ask, collect. Fuel is asked for under `FUEL_LOW` or when the tank is close to the trip home; fuel items are burnt as they arrive.
-- **Files**: `weaver.state` (progress, position, open supply request), `weaver.L<n>` (held layers), `weaver.gaps`, `weaver.gaplist`. A reboot or chunk unload resumes at the same cell; an open supply request is picked up again (same `seq`). A reboot that cuts a *turn* in half leaves him `lost` (heading unknown): carry him to the dock and run `weaver found`.
+- **Files**: `weaver.state` (progress, position, open supply request), `weaver.L<n>` (held layers), `weaver.gaps`, `weaver.gaplist`. A reboot or chunk unload resumes at the same cell; an open supply request is picked up again (same `seq`). A turn is saved before it is made, with the block ahead; after a reboot in the middle of one, a different block ahead means the turn happened. If it looks the same, he is `lost` (heading unknown): carry him to the dock and run `weaver found`.
 
 ## Notes for engineers
 

@@ -69,8 +69,14 @@ function move(kind)
   return false, "Stuck"
 end
 
-function turnRight() S.turning = true; save(); turtle.turnRight(); S.h = (S.h + 1) % 4; S.turning = nil; save() end
-function turnLeft()  S.turning = true; save(); turtle.turnLeft();  S.h = (S.h + 3) % 4; S.turning = nil; save() end
+-- A turn is saved before it is made, with what was ahead of him, so a reboot in the middle can be sorted out
+local function turn(cmd, step)
+  local seen, d = turtle.inspect()
+  S.turning = { from = S.h, to = (S.h + step) % 4, ahead = seen and d.name or false }
+  save(); cmd(); S.h = S.turning.to; S.turning = nil; save()
+end
+function turnRight() turn(turtle.turnRight, 1) end
+function turnLeft()  turn(turtle.turnLeft, 3) end
 function face(h)
   local d = (h - S.h) % 4
   if d == 1 then turnRight() elseif d == 2 then turnRight(); turnRight() elseif d == 3 then turnLeft() end
@@ -129,7 +135,12 @@ end
 
 -- Boot: work out whether a move or turn was cut short
 function recoverMove()
-  if S.turning then S.lost = true; S.turning = nil end
+  if type(S.turning) == "table" then
+    -- Did the turn happen? Only the block ahead can tell: a different one means yes, the same means unknown
+    local seen, d = turtle.inspect()
+    if (seen and d.name or false) ~= S.turning.ahead then S.h = S.turning.to else S.lost = true end
+  elseif S.turning then S.lost = true end
+  S.turning = nil
   if S.pending then
     local f = turtle.getFuelLevel()
     if type(f) == "number" and type(S.pending.fuel) == "number" then
