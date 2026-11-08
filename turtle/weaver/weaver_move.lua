@@ -44,6 +44,7 @@ end
 function move(kind)
   local op = OPS[kind]
   for _ = 1, 40 do
+    keepChunk()                                     -- also while stuck retrying: only swaps when due
     if turtle.getFuelLevel() == 0 then return false, "Out of fuel" end
     S.pending = { kind = kind, fuel = turtle.getFuelLevel() }; save()
     local moved, why = op.move()
@@ -118,6 +119,20 @@ function goTo(tx, ty, tz)
 end
 
 function atDock() return S.x == 0 and S.y == 0 and S.z == 0 end
+
+-- Further from the dock than he can believe his own position? (an old or foreign save, a lost fix)
+FAR_FROM_DOCK = 200
+function farFromDock() return math.abs(S.x or 0) > FAR_FROM_DOCK or math.abs(S.z or 0) > FAR_FROM_DOCK end
+
+-- Idle or stopped, off the dock: go home only if the position can be trusted and someone (an Architect or a
+-- build) gave him a reason. Otherwise stay put; too far away means lost.
+function idleHome()
+  if atDock() then return end
+  if farFromDock() then
+    S.lost = true; save(); return
+  end
+  if S.arch or S.build then goHome() end
+end
 
 -- Home: the retry-forever version; errors out only on a state he can't fix
 function goHome()

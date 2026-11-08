@@ -33,6 +33,7 @@ local function boot()
   openModem()
   if S.x == nil then S.x, S.y, S.z, S.h, S.want = 0, 0, 0, C.dh, S.want or "idle" end   -- fresh: he sits on his dock
   recoverMove()
+  if farFromDock() then S.lost = true end           -- a position he can't believe: never set off from it
   if M_ARGS[1] == "found" then S.x, S.y, S.z, S.h, S.lost = 0, 0, 0, C.dh, nil end
   S.n = myNumber()
   save()
@@ -48,6 +49,7 @@ local function mainLoop()
     NEWORDER = false
     if REBOOT then reboot() end
     if S.lost then
+      keepChunk()
       setStatus("lost", "Carry me to my dock, then run: weaver found"); os.sleep(5)
     elseif S.n == nil then
       os.sleep(1)
@@ -58,13 +60,14 @@ local function mainLoop()
     elseif S.want == "test" and S.markCells then
       markStep()
     elseif S.want ~= "build" then
-      if not atDock() then goHome() end
+      idleHome()
+      keepChunk()                                    -- stay loaded while he waits (refreshes itself on a timer)
       setStatus(S.want == "stop" and "stopped" or "idle", "Waiting for an order")
       os.sleep(1)
     elseif S.layer > (S.total or math.huge) and S.work == "layer" and fs.exists(GAPLIST) then
       S.work, S.idx = "gap", 1; save()
     elseif S.layer > (S.total or math.huge) and S.work == "layer" then
-      if not atDock() then goHome() end
+      idleHome()
       setStatus("done", ("Build %s finished, %d gaps"):format(tostring(S.build), #GAPS))
       send({ type = "done", build = S.build, hash = S.hash, gaps = #GAPS })
       os.sleep(3)

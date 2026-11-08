@@ -46,6 +46,13 @@ function wizFrame(v, nxt)
     if i < 4 then x = v:put(x, 3, " > ", "bar", "bg") end
   end
   v:footer({ back = backStep })
+  local st = R.status
+  if S.n and st and st.x then   -- where he is, even before setup is finished
+    local hd = st.h and ({ [0] = "N", "E", "S", "W" })[st.h] or "?"
+    local t = ("Weaver at %d %d %d facing %s"):format(st.x, st.y or 0, st.z, hd)
+    if st.lost then v:put(2, 2, fit(t .. ": LOST, carry him to the dock, run: weaver found", v.W - 2), "bad", "bg")
+    else v:put(2, 2, fit(t, v.W - 2), "dim", "bg") end
+  end
   if nxt then
     local lab = nxt.label or "Next"
     v:buttons(v.W - #lab - 5, v.H, { { label = lab .. " >", style = nxt.ok and "primary" or "disabled", enabled = nxt.ok and true or false,

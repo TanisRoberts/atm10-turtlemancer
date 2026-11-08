@@ -61,7 +61,7 @@ local ARCHITECT = [[
       elseif m.type == "layer_done" then
         if not _G.done[m.layer] then _G.done[m.layer] = m.skipped; sendLayer(m.layer + 2) end
       elseif m.type == "gaps_filled" then _G.filled = m.cells
-      elseif m.type == "status" then _G.last = m end
+      elseif m.type == "status" then _G.last = m; _G.nstat = (_G.nstat or 0) + 1 end
     end
     if _G.sendGaps then rednet.broadcast({ type = "gaps", n = N, cells = _G.sendGaps }, P); _G.sendGaps = nil end
   end
@@ -291,4 +291,47 @@ T.test("weaver v2: old island-Weaver files (world coordinates) never send him of
   t2.error = nil                                            -- the expected stop, not a failure of the test
   T.eq(t2:readTable("weaver.state"), nil, "stopped in setup, nothing saved")
   T.eq(site2.body.x, x2); T.eq(site2.body.z, z2)
+end)
+
+T.test("weaver v2 (#139): far from the dock with no build he stays put and reports lost, still sending status", function()
+  local site, w, t, ar = setup({ layers = { {}, {} }, expected = {} })
+  t:reboot()
+  T.waitFor(w, function() return ar.G.paired end, 60, "never paired")
+  t:_stop()
+  local s = t:readTable("weaver.state")
+  s.x, s.z, s.want, s.build, s.hash, s.total = 900, -700, "idle", nil, nil, nil
+  t:writeTable("weaver.state", s)
+  local x, y, z = site.body.x, site.body.y, site.body.z
+  t:reboot()
+  w:run(20)
+  T.eq(site.body.x, x); T.eq(site.body.y, y); T.eq(site.body.z, z)
+  local r = t:readTable("weaver.state")
+  T.truthy(r.lost, "should be lost")
+  T.eq(r.x, 900)
+  T.eq(ar.G.last.state, "lost")
+  T.eq(ar.G.last.x, 900); T.eq(ar.G.last.h, 0)
+end)
+
+T.test("weaver v2 (#139): idle off the dock with no Architect and no build: stays where he is", function()
+  local site, w, t = setup({ layers = { {}, {} }, expected = {} })
+  t:writeTable("weaver.state", { x = 5, y = 0, z = 5, h = 0, n = 2, want = "idle", short = {}, skip = {}, orderSeq = 0, supSeq = 0, topY = -1 })
+  local x, z = site.body.x, site.body.z
+  t:reboot()
+  w:run(20)
+  T.eq(site.body.x, x); T.eq(site.body.z, z)
+  T.falsy(t:readTable("weaver.state").lost)
+end)
+
+T.test("weaver v2 (#139): waiting at an unloaded chunk border keeps sending status", function()
+  local site, w, t, ar = setup({ layers = { { { 3, 0, 3, "minecraft:stone" } }, {} }, expected = {} })
+  local loaded = false
+  site.body.chunkGate = function(x, z) return loaded or z > site.body.z - 1 + 1 end   -- nothing north of the dock
+  t:reboot()
+  T.waitFor(w, function() return ar.G.paired end, 60, "never paired")
+  T.waitFor(w, function() return ar.G.last and ar.G.last.state == "waiting" end, 600, "never waited at the border")
+  local n = ar.G.nstat
+  w:run(60)
+  T.truthy(ar.G.nstat >= n + 10, "status should keep coming while he waits")
+  T.eq(ar.G.last.state, "waiting")
+  loaded = true
 end)
