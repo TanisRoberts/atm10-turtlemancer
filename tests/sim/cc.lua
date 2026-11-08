@@ -131,6 +131,12 @@ function World:furnace(opts)
   return Inv.Furnace.new(opts)
 end
 
+-- The world's Ender Storage registry (sim/ender.lua): chests with the same dye code share one inventory
+function World:ender()
+  if not self._ender then self._ender = require("sim.ender").new(self) end
+  return self._ender
+end
+
 -- An Advanced Peripherals ME Bridge on a simulated AE2 grid (sim/me.lua); add it to a net with net:add
 function World:meBridge(opts) return require("sim.me").new(opts) end
 

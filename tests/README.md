@@ -23,6 +23,9 @@ Exit code is 0 only if everything passed. Run it before every push to main.
 | `inv.lua` | Inventories (chests, barrels, drawers) with one-stack-per-call `pushItems`/`pullItems`, and a furnace that cooks in virtual time |
 | `turtle.lua` | A turtle in the voxel world: moves, digs (with drops), inspect, suck/drop, refuel, place, equip; every action takes game time |
 | `me.lua` | An Advanced Peripherals ME Bridge on an AE2 grid: `w:meBridge{}` then `net:add("me_bridge_0", me)`. Drives/racks/cells with AE2's byte maths, storage buses (priority, capacity, `void`), insert order (highest priority, cells already holding the item first), extract order (lowest priority first), `exportItem`/`importItem` over many stacks, AP's `getDrives` zero-bytes quirk, offline (`me:setOnline(false)`). Helpers: `addRack`, `addRackAt` (a 2x5 rack by wall position, for the server board), `addDrive`, `addCell`, `addBus`, `fill`, `where`, `total`. Header of `me.lua` lists the source facts |
+| `placement.lua` | Block state for what a turtle places (stairs, slabs, logs/hay, gates, chests, torches), read from CC:Tweaked's `TurtlePlaceCommand`; see "Block states" below |
+| `ender.lua` | Ender Storage chests: one shared inventory per dye code, at a world block and on a wired net; `w:ender()` |
+| `weaver.lua` | Weaver scenario helper: flat ground, dock turtle on an ender chest, and a world-vs-expected-blocks diff |
 | `test.lua` | `T.test`, `T.eq`, `T.contains`, `T.waitFor`, `T.running` |
 
 Nothing runs unless the scenario advances time: `w:run(30)` runs 30 virtual seconds,
@@ -73,6 +76,58 @@ Handy calls:
   `net:add / net:remove` while running raises the `peripheral` / `peripheral_detach` events.
 - **Other computers talking on rednet:** write a tiny stand-in with `c:writeFile("x.lua", [[ ... ]])` and `c:run("x")`
   (see the Foreman in `miner_basic.lua`) or run the real program.
+
+## Block states (`placement.lua`)
+
+World blocks can carry `state` (a table, like `turtle.inspect` returns): `w:setBlock(x, y, z, { name = "...", state = { facing = "north" } })`.
+A turtle's `place` / `placeUp` / `placeDown` sets the state the way CC:Tweaked 1.21 does. It acts like a player whose yaw is its
+heading and tries clicks in this order (first that places wins): the block in the target cell (only for merging a slab), the block
+one beyond the target (face toward the turtle), for forward only the top of the block under the target, then the turtle's own cell.
+A sideways click is at height 0.45. So:
+
+- **stairs** `facing` = heading; `half` from the clicked face. `placeDown` with a block two below: bottom; with air there: top.
+  `placeUp` is the mirror. Forward `place`: always bottom. Corner `shape` and `waterlogged` are not simulated.
+- **slabs** `type` bottom/top by the same rule. Placing the same slab into a single slab makes `type=double` (each placement
+  uses one item, so a double costs two). A different slab, or a third, fails. Digging a double gives two.
+- **hay_block, `_log`, `_wood`** `axis`: down/up gives `y`. Forward gives the heading's axis (`z` north/south, `x` east/west) only if
+  a block is beyond the target or nothing is under it; with a block under the target and nothing beyond the turtle clicks that
+  block's top and the pillar stands upright (`y`).
+- **fence gates** `facing` = heading, `open=false`. **chests** `facing` = opposite of the heading, `type=single` (keeps its inventory).
+- **torches**: forward with a solid block beyond: `wall_torch` (`soul_wall_torch` ...), `facing` = opposite of the heading, digs back
+  to the torch item. Otherwise a floor `torch` if the block under the target is solid; `placeUp` fails. (The real game may also hang a
+  torch on a side wall when it cannot hang ahead; not simulated.)
+
+To add a block, add a row `{ "suffix$", function(ctx) return { ... } end }` to `Placement.rules` (ctx has `face`, `hitY`,
+`heading`, `vertical`, `canHang`, `floorOk`). `tests/scenarios/sim_placement.lua` covers every row.
+
+## Ender Storage (`ender.lua`)
+
+```lua
+local es = w:ender()                                    -- registry, one per world
+es:place(0, 64, 0, {"red","blue","white"})              -- chest block: a turtle can suck/drop at it
+es:onNet(net, 0, {"red","blue","white"})                -- same chest on a cable as "enderstorage:ender_chest_0"
+es:inv(code)                                            -- the shared inventory (give/count/totals)
+es.delay = 2                                            -- optional realism: items arrive at the other end 2 s later (default 0)
+```
+
+Every end with the same three-dye code is the same inventory. With a delay, space is checked when items go in and they land
+after the delay (lost if the chest filled meanwhile). Peripheral type is `enderstorage:ender_chest`, 27 slots.
+
+## Weaver scenarios (`weaver.lua`)
+
+```lua
+local W = require("sim.weaver")
+local site = W.site{ y = 64, radius = 12, code = {"red","blue","white"} }   -- also ground=, heading=, fuel=, delay=, id=, label=
+site.w, site.turtle (computer), site.body, site.chest (shared ender inv), site.groundY
+site:home(0)                                            -- home end on a wired net (site.net) as enderstorage:ender_chest_0
+W.diff(w, expected, { ox=, oy=, oz=, box={x1,y1,z1,x2,y2,z2}, fill=, max=10 })  -- ok, firstMismatches, total
+W.expect(w, expected, opts)                             -- same, but raises with the report
+```
+
+The turtle sits at `(0, y+1, 0)` on an ender chest dock at `(0, y, 0)` in flat ground (no GPS), with a pickaxe, an ender modem and
+an `advancedperipherals:chunk_controller` in slot 16; no role files are installed. `expected` maps `"x,y,z"` to a block name or
+`{ name =, state = { ... } }` (only the listed state keys are compared). With `box`, every cell in it that is not listed must be
+air (or `fill`).
 
 ## Extending the mocks
 

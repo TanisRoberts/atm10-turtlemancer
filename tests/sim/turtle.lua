@@ -146,7 +146,7 @@ function Turtle.api(world, c)
       world:setBlock(x, y, z, nil)
       local drop = blk.drop or Turtle.drops[blk.name] or blk.name
       b.dug = (b.dug or 0) + 1
-      give(drop, 1)
+      give(drop, blk.dropCount or 1)
       if blk.inv then for _, s in pairs(blk.inv.slots) do give(s.name, s.count) end end
       return true
     end
@@ -271,10 +271,17 @@ function Turtle.api(world, c)
         end
         return false, "Cannot place item here"
       end
-      if blk then return false, "Cannot place block here" end
       if not placeable(s.name) then return false, "Cannot place item here" end
-      local made = Turtle.containers[s.name]
-      world:setBlock(x, y, z, { name = s.name }, made and made() or nil)
+      -- block state (stairs half/facing, slabs, axis, gates, chests, torches) and slab merging: sim/placement.lua
+      local pl, why = require("sim.placement").place(world, b, dir, s.name, x, y, z, blk)
+      if not pl then return false, why end
+      if pl.replace then
+        blk.state = pl.state
+        blk.dropCount = 2
+      else
+        local made = Turtle.containers[s.name]
+        world:setBlock(x, y, z, { name = pl.name, state = pl.state, drop = pl.name ~= s.name and s.name or nil }, made and made() or nil)
+      end
       s.count = s.count - 1
       if s.count <= 0 then b.slots[b.sel] = nil end
       return true
