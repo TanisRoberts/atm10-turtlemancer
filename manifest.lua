@@ -115,7 +115,7 @@ local M = {
             .. "needed, the corner markers, and build / stop / test / clear / reboot orders. "
             .. "Needs a wireless or ender modem; no monitor.",
           run = "architect",
-          files = { "computer/architect/architect.lua", "computer/art/art_gfx.lua", "shared/weaverplan.lua", "shared/litematic.lua", "shared/litematic_inflate.lua", "shared/litematic_nbt.lua", "shared/mcblocks_1211.lua", "shared/screens.lua", "shared/ui.lua", "shared/ui_widgets.lua", "shared/ui_parts.lua", "shared/ui_motion.lua" },
+          files = { "computer/architect/architect.lua", "computer/art/art_gfx.lua", "shared/weaverplan.lua", "shared/litematic.lua", "shared/litematic_inflate.lua", "shared/litematic_nbt.lua", "shared/plan2.lua", "shared/plan2place.lua", "shared/plan2order.lua", "shared/mcblocks_1211.lua", "shared/screens.lua", "shared/ui.lua", "shared/ui_widgets.lua", "shared/ui_parts.lua", "shared/ui_motion.lua" },
         },
         operator = {
           name = "Operator",
