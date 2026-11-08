@@ -95,8 +95,9 @@ local function loadCfg()
   cfg.smelterFeeds = cfg.smelterFeeds or {}
   cfg.smelterOuts = cfg.smelterOuts or {}
   -- Saved before the turtles were renamed (Oct 2026)
-  if cfg.rigger and not cfg.weaver then cfg.weaver = cfg.rigger end
   cfg.rigger = nil
+  cfg.weaver = nil                  -- the old single Weaver barrel: supply is one ender chest per Weaver now
+  cfg.weaverSupply = cfg.weaverSupply or {}   -- chest network name -> Weaver number
   if cfg.diggerBarrels and not cfg.canaryBarrels then cfg.canaryBarrels = cfg.diggerBarrels end
   cfg.diggerBarrels = nil
 end
@@ -170,11 +171,12 @@ end
 local function isSpecial(n)
   if isTank(n) then return true end
   if isSmelterFeed(n) or isSmelterOut(n) then return true end
-  if n == cfg.output or n == cfg.weaver or n == cfg.pocketIn or n == cfg.pocketOut or n == cfg.defragBuffer then return true end
+  if n == cfg.output or n == cfg.pocketIn or n == cfg.pocketOut or n == cfg.defragBuffer then return true end
   for _, d in ipairs(cfg.docks or {}) do if d == n then return true end end
   for _, d in ipairs(cfg.fuels) do if d == n then return true end end
   for _, d in ipairs(cfg.reactorFuels or {}) do if d == n then return true end end
   if cfg.depots and cfg.depots[n] ~= nil then return true end
+  if cfg.weaverSupply and cfg.weaverSupply[n] then return true end
   for _, d in ipairs(cfg.ignored or {}) do if d == n then return true end end
   if isMachine(n) then return true end
   for _, i in ipairs(cfg.inputs) do if i == n then return true end end
@@ -193,8 +195,8 @@ local TYPES = {
     about = "Kept at one Canary refill (lava, coal blocks, coal...). One per Canary." },
   { key = "reactorFuel", label = "Reactor fuel", short = "R.fuel",  tag = "R.FUEL", col = colours.red,
     about = "Kept at REACTOR_FUEL_KEEP reactor fuel units (uranium blocks, then ingots). Never emptied. One per reactor. Its waste chest is an ordinary Input." },
-  { key = "weaver",    label = "Weaver supply",  short = "Weaver",  tag = "WEAVER", col = colours.purple,
-    about = "Filled with what Weaver asks for. Only one." },
+  { key = "weaverSupply", label = "Weaver supply", short = "Weaver", tag = "WEAVER", col = colours.purple,
+    about = "A Weaver's ender chest (full-block wired modem). Cleared, then filled with what that Weaver asks for. One per Weaver number." },
   { key = "pocketIn",  label = "Pocket dump",    short = "P.dump",  tag = "P.DUMP", col = colours.pink,
     about = "The butler's $dump lands here and gets sorted. Only one." },
   { key = "pocketOut", label = "Pocket restock", short = "P.stock", tag = "P.STCK", col = colours.magenta,
@@ -213,9 +215,10 @@ local TYPES = {
 local TYPE_BY = {}
 for _, t in ipairs(TYPES) do TYPE_BY[t.key] = t end
 local LISTS   = { input = "inputs", dock = "docks", fuel = "fuels", reactorFuel = "reactorFuels", drawer = "drawers", ignore = "ignored" }
-local SINGLES = { output = "output", weaver = "weaver", pocketIn = "pocketIn", pocketOut = "pocketOut", defragBuffer = "defragBuffer" }
+local SINGLES = { output = "output", pocketIn = "pocketIn", pocketOut = "pocketOut", defragBuffer = "defragBuffer" }
 
 local function typeOf(n)
+  if cfg.weaverSupply and cfg.weaverSupply[n] then return "weaverSupply" end
   if cfg.fluidDepots and cfg.fluidDepots[n] ~= nil then return "fluidDepot" end
   if cfg.depots and cfg.depots[n] ~= nil then return "depot" end
   for key, field in pairs(SINGLES) do if cfg[field] == n then return key end end
@@ -225,6 +228,7 @@ local function typeOf(n)
 end
 
 local function unassign(n)
+  if cfg.weaverSupply then cfg.weaverSupply[n] = nil end
   if cfg.fluidDepots then cfg.fluidDepots[n] = nil end
   if cfg.depots then cfg.depots[n] = nil end
   for _, field in pairs(SINGLES) do if cfg[field] == n then cfg[field] = nil end end
@@ -240,6 +244,14 @@ end
 -- Give n a job (taking any old one away). Returns the inventory it pushed out of a single job.
 local function assign(n, key)
   unassign(n)
+  if key == "weaverSupply" then
+    cfg.weaverSupply = cfg.weaverSupply or {}
+    local used, num = {}, 1
+    for _, v in pairs(cfg.weaverSupply) do used[v] = true end
+    while used[num] do num = num + 1 end
+    cfg.weaverSupply[n] = num
+    return
+  end
   if key == "fluidDepot" then cfg.fluidDepots = cfg.fluidDepots or {}; cfg.fluidDepots[n] = ""; return end
   if key == "depot" then cfg.depots = cfg.depots or {}; cfg.depots[n] = ""; return end
   local single = SINGLES[key]
@@ -325,7 +337,6 @@ local MARKERS = {
   { key = "output", item = "minecraft:dirt",        what = "1 dirt",        label = "OUTPUT",       need = true },
   { key = "dump",   item = "minecraft:cobblestone", what = "1 cobblestone", label = "CANARY DUMP", many = true },
   { key = "fuel",   item = "minecraft:lava_bucket", what = "1 lava bucket", label = "CANARY FUEL", many = true },
-  { key = "weaver", item = "minecraft:brick",       what = "1 brick",       label = "WEAVER SUPPLY" },
   { key = "docks",  item = "minecraft:coal",        what = "1 coal",        label = "TURTLE DOCK", many = true },
   { key = "pocketIn",  item = "minecraft:flint",   what = "1 flint",       label = "POCKET DUMP",    keep = true },
   { key = "pocketOut", item = "minecraft:feather", what = "1 feather",     label = "POCKET RESTOCK", keep = true },
@@ -380,7 +391,7 @@ local function setup()
       end
     end
     if ok then
-      local types = { input = "input", output = "output", dump = "input", fuel = "fuel", weaver = "weaver",
+      local types = { input = "input", output = "output", dump = "input", fuel = "fuel",
         docks = "dock", pocketIn = "pocketIn", pocketOut = "pocketOut" }
       for _, m in ipairs(MARKERS) do
         for _, n in ipairs(f[m.key] or {}) do assign(n, types[m.key]) end
@@ -410,7 +421,7 @@ local items   = {}   -- sorted item summaries
 local byName  = {}   -- item id -> total count (all variants)
 local stats   = { used = 0, total = 0, kinds = 0, inv = 0 }
 local overCapList = {}  -- items storage has enough of (sent to Canary via the mainframe)
-local minerFuelLimit, weaverBill = nil, {}   -- heard over the network from Canary / Weaver
+local minerFuelLimit, weaverBills = nil, {}   -- Canary's fuel limit; each Architect's bill by Weaver number
 
 local function keyOf(it) return it.name .. (it.nbt and ("#" .. it.nbt) or "") end
 
@@ -512,7 +523,8 @@ local function buildItems()
     byName[e.name] = (byName[e.name] or 0) + e.count
   end
   -- Anything Weaver's build still needs is kept until storage has enough of it
-  local bill = weaverBill or {}
+  local bill = {}
+  for _, b in pairs(weaverBills) do for name, c in pairs(b) do bill[name] = (bill[name] or 0) + c end end
   for name, c in pairs(byName) do
     if c >= math.max(JUNK_CAP, bill[name] or 0) then overCap[#overCap + 1] = name end
   end
@@ -1378,42 +1390,69 @@ local function runNeuralOps(ops)
   return results
 end
 
--- Fill Weaver's supply barrel with what he asked for (items + fuel units).
-local lastWeaverseq = nil
-local weaverReq = nil            -- latest "need" message from Weaver (set by the network loop)
+-- Weavers' supply: one ender chest per Weaver number (cfg.weaverSupply: chest -> number). On a "supply"
+-- request: clear the chest into storage, push the items and fuel, reply "supplied" with what was sent.
+local WEAVER_PROTO = "tanis-weaver"
+local WEAVER_FUEL = { { "minecraft:lava_bucket", 1000 }, { "minecraft:coal_block", 800 }, { "minecraft:coal", 80 }, { "minecraft:charcoal", 80 } }
+local weaverReqs = {}      -- [n] = newest "supply" message not answered yet
+local weaverDone = {}      -- [n] = { seq, reply } the last answer, re-sent for a repeated seq
 local function replyWeaver(msg)
-  if rednet.isOpen() then rednet.broadcast(msg, "tanis-rigger") end
+  if rednet.isOpen() then rednet.broadcast(msg, WEAVER_PROTO) end
 end
-local function supplyWeaver()
-  local req = weaverReq
-  if not req or req.seq == lastWeaverseq then return false end
-  lastWeaverseq = req.seq
-  local got, missing = {}, {}
-  if not cfg.weaver then
-    replyWeaver({ type = "supplied", seq = req.seq, got = got, missing = req.items or {} })
-    return false
+local function weaverChest(n)
+  for chest, num in pairs(cfg.weaverSupply or {}) do if num == n then return chest end end
+end
+local function supplyOne(n, req)
+  local sent, missing = {}, {}
+  local chest = weaverChest(n)
+  local want = {}
+  for name, c in pairs(type(req.items) == "table" and req.items or {}) do
+    if type(name) == "string" and tonumber(c) and c > 0 then want[name] = c end
   end
-  depositFrom(cfg.weaver)  -- take back whatever he handed in, then load the next batch
+  if not chest then
+    missing = want
+    if (tonumber(req.fuel) or 0) >= 80 then missing.fuel = tonumber(req.fuel) end
+    return { type = "supplied", n = n, seq = req.seq, sent = sent, missing = missing }
+  end
+  depositFrom(chest)   -- the clear: whatever he dropped in goes back into storage
   buildItems()
-  for _, e in ipairs(req.items or {}) do
-    local name, want = e[1], e[2]
-    local moved = retrieve(name, want, cfg.weaver)
-    if moved > 0 then got[name] = moved end
-    if moved < want then missing[#missing + 1] = { name, want - moved } end
+  local names = {}
+  for name in pairs(want) do names[#names + 1] = name end
+  table.sort(names)
+  for _, name in ipairs(names) do
+    local moved = retrieve(name, want[name], chest)
+    if moved > 0 then sent[name] = moved end
+    if moved < want[name] then missing[name] = want[name] - moved end
   end
   local units = tonumber(req.fuel) or 0
-  for _, fv in ipairs(FUEL_VALUES) do
+  for _, fv in ipairs(WEAVER_FUEL) do
     local name, v = fv[1], fv[2]
-    local n = math.floor(units / v)
-    if n > 0 and (byName[name] or 0) > 0 then
-      local moved = retrieve(name, math.min(n, byName[name]), cfg.weaver)
+    local k = math.floor(units / v)
+    if k > 0 and (byName[name] or 0) > 0 then
+      local moved = retrieve(name, math.min(k, byName[name]), chest)
       units = units - moved * v
-      if moved > 0 then got[name] = (got[name] or 0) + moved end
+      if moved > 0 then sent[name] = (sent[name] or 0) + moved end
     end
   end
-  if units >= 80 then missing[#missing + 1] = { "fuel", units } end
-  replyWeaver({ type = "supplied", seq = req.seq, got = got, missing = missing })
-  return true
+  if units >= 80 then missing.fuel = units end
+  return { type = "supplied", n = n, seq = req.seq, sent = sent, missing = missing }
+end
+local function supplyWeavers()
+  local did = false
+  local order = {}
+  for n in pairs(weaverReqs) do order[#order + 1] = n end
+  table.sort(order)
+  for _, n in ipairs(order) do
+    local req = weaverReqs[n]
+    weaverReqs[n] = nil
+    if req and not (weaverDone[n] and weaverDone[n].seq == req.seq) then
+      local reply = supplyOne(n, req)
+      weaverDone[n] = { seq = req.seq, reply = reply }
+      replyWeaver(reply)
+      did = true
+    end
+  end
+  return did
 end
 
 -- The butler's restock: make the POCKET RESTOCK chest (or, if none is set, the output chest) hold
@@ -1509,7 +1548,7 @@ end
 
 -- Wait for the next tick, waking early when the network hands us work
 local function waitTick()
-  if not paused and not picking and (DEFRAG.running() or #jobs > 0 or (weaverReq and weaverReq.seq ~= lastWeaverseq)
+  if not paused and not picking and (DEFRAG.running() or #jobs > 0 or next(weaverReqs)
     or (pocketReq and pocketReq.seq ~= lastPocketSeq)) then return end
   local t = os.startTimer(TICK)
   while true do
@@ -1536,7 +1575,7 @@ local function workerLoop()
       if topUpDocks() then buildItems() end
       if topUpDepots() then buildItems() end
       topUpFluidDepots()
-      if supplyWeaver() then buildItems() end
+      if supplyWeavers() then buildItems() end
       if fillPocket() then buildItems() end
       DEFRAG.tick()
       if #jobs > 0 then
@@ -1648,11 +1687,16 @@ local function netLoop()
     elseif type(msg) == "table" then
       if proto == "tanis-miner" and msg.type == "status" then
         minerFuelLimit = tonumber(msg.fuelLimit) or minerFuelLimit
-      elseif proto == "tanis-rigger" and msg.type == "status" then
-        weaverBill = type(msg.bill) == "table" and msg.bill or weaverBill
-      elseif proto == "tanis-rigger" and msg.type == "need" then
-        weaverReq = msg
-        os.queueEvent("storage_work")
+      elseif proto == BASE and msg.type == "bill" and tonumber(msg.n) then
+        weaverBills[msg.n] = type(msg.bill) == "table" and msg.bill or nil   -- an Architect's bill; summed over all
+      elseif proto == WEAVER_PROTO and msg.type == "supply" and tonumber(msg.n) and msg.seq then
+        local done = weaverDone[msg.n]
+        if done and done.seq == msg.seq then
+          replyWeaver(done.reply)                  -- asked again: same answer, nothing moves twice
+        else
+          weaverReqs[msg.n] = msg
+          os.queueEvent("storage_work")
+        end
       elseif proto == BASE and msg.type == "pocket_fill" and msg.seq then
         pocketReq = msg
         os.queueEvent("storage_work")
@@ -1804,6 +1848,7 @@ local function assignScreen()
       for _, field in pairs(LISTS) do for _, n in ipairs(cfg[field] or {}) do out[#out + 1] = n end end
       for n in pairs(cfg.depots or {}) do out[#out + 1] = n end
       for n in pairs(cfg.fluidDepots or {}) do out[#out + 1] = n end
+      for n in pairs(cfg.weaverSupply or {}) do out[#out + 1] = n end
       return out
     end,
     depots = {
@@ -1883,7 +1928,24 @@ local function assignScreen()
           or ("Its %d items stop counting as storage."):format(d.count)
       end
     end,
-    extra = {
+    extras = { {
+      key = "weaverSupply", plain = true,
+      init = function(n) return { num = (cfg.weaverSupply or {})[n] } end,
+      show = function(st) return "Weaver", st.num and ("number " .. st.num) or "number: next free" end,
+      click = function(n, st)
+        print("Which Weaver does " .. n .. " supply? (a number)")
+        local v = tonumber(read())
+        if v and v >= 1 and v == math.floor(v) then st.num = v end
+      end,
+      save = function(n, st)
+        cfg.weaverSupply = cfg.weaverSupply or {}
+        if not st.num then return end
+        for chest, num in pairs(cfg.weaverSupply) do   -- one chest per number: the old holder loses the job
+          if num == st.num and chest ~= n then cfg.weaverSupply[chest] = nil end
+        end
+        cfg.weaverSupply[n] = st.num
+      end,
+    }, {
       key = "dock", plain = true,
       init = function(n)
         local keep = {}
@@ -1908,7 +1970,7 @@ local function assignScreen()
         cfg.dockLink = cfg.dockLink or {}
         cfg.dockLink[n] = st.link
       end,
-    },
+    } },
     hold = function() picking = true; while workerBusy do os.sleep(0.2) end end,
     release = function() picking = false; os.queueEvent("storage_work") end,
     beforeSave = function() while workerBusy do os.sleep(0.1) end end,

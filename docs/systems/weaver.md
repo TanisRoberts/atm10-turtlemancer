@@ -20,7 +20,7 @@ The Architect holds the build (the `.litematic` and its converted plan). The Wea
 | Architect offline or destroyed | The Weaver finishes the two layers he holds, then waits at the dock. Supply goes straight to storage, not through the Architect, so it keeps working. A new Architect re-links by number (section 5). |
 | Restart safety | The Weaver saves `weaver.state` (number, build name, plan hash, site, layer, cell index, position, heading) and the two layer lists as files. He resumes at the same index. Position is saved before each move, as today. |
 | Gap list | The Weaver reports each cell he skipped (storage had none) when he finishes a layer. The Architect keeps the build-wide gap list on disk, never puts a cell on top of a gap into a later layer, and sends a **gap list** as a working area once storage has the block (it watches storage's `tanis-base` stock broadcast). The column above a gap is open, so Weaver fills it with `placeDown` from above. |
-| Bill | The Architect computes it from the plan and broadcasts what's left (`tanis-base`, as today's Weaver does) so storage keeps those items back. |
+| Bill | The Architect computes it from the plan and broadcasts what's left on `tanis-base` as `{type="bill", n, bill}` so storage keeps those items back (it sums every Architect's bill). |
 | Message size | A layer goes in parts of at most 256 cells, each acknowledged. |
 
 ## 2. Handing over a build file: drag and drop onto the Architect

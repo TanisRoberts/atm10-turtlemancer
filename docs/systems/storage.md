@@ -83,3 +83,10 @@ Test: `tests/scenarios/storage_me.lua` (uses the bridge mock `tests/sim/me.lua`)
 - **Broadcast** on `tanis-base` every 3 s while running and once at the end: `{ type = "defrag", running, item, done, left, moved, toMove, freedBytes }`.
 
 Test: `tests/scenarios/storage_defrag.lua`.
+
+## Weaver supply
+
+One job per Weaver number, **Weaver supply** in `/assign` (`cfg.weaverSupply`: chest → number; the number is a button on the job page, new ones take the next free). The chest is the Weaver's Ender Storage chest, on the cable with a full-block wired modem. Protocol `tanis-weaver`, spec in `docs/systems/weaver.md` section 7.
+
+- `{type="supply", n, seq, items={[name]=count}, fuel=units}` is queued per `n` (newest `seq` wins). The worker clears the chest into storage, pushes the items, then fuel (lava first, then coal block, coal, charcoal), one `retrieve` per item. Reply `{type="supplied", n, seq, sent, missing}` (`missing.fuel` in units). A repeated `seq` re-sends the stored reply and moves nothing. A number with no chest is answered with everything missing.
+- Bills: `{type="bill", n, bill={[name]=count}}` on `tanis-base` from each Architect. Storage keeps the sum of all bills back from the junk cap.

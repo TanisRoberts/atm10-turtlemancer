@@ -18,6 +18,7 @@
 --   o.defaultKey(n) -> the job a new pick starts on
 --   o.warn(e, d)    -> optional extra warning line (e = edit state, d = { text, count, missing })
 --   o.problem()     -> optional warning for the list page ("No OUTPUT yet ...")
+--   o.extras        -> a list of o.extra-style settings, one per job key (o.extra alone still works)
 --   o.extra         -> optional extra setting for one job: { key, init(n) -> state, show(state) -> label, text,
 --                      click(n, state) [on a cleared plain screen when plain = true, for typed input],
 --                      plain = true/false, save(n, state) }
@@ -135,6 +136,9 @@ function A.run(o)
   local names = o.names
   local DEPOT_BY, hasDepots = {}, false
   for _, d in ipairs(o.depots or {}) do DEPOT_BY[d.key] = d; hasDepots = true end
+  local EXTRAS = o.extras or (o.extra and { o.extra }) or {}
+  local EXTRA_BY = {}
+  for _, x in ipairs(EXTRAS) do EXTRA_BY[x.key] = x end
   local function isTank(n)
     for _, d in pairs(DEPOT_BY) do if d.tank and d.owns and d.owns(n) then return true end end
     return false
@@ -242,7 +246,8 @@ function A.run(o)
     st.edit = { name = n, orig = key, auto = autoKey ~= nil, autoKey = autoKey, nick = names[n] or "", isNew = isNew,
       key = key or autoKey or o.defaultKey(n) }
     st.edit.nickF = ui.field{ hint = "optional", max = 24, text = st.edit.nick }
-    if o.extra then st.edit.extra = o.extra.init(n) end
+    st.edit.extras = {}
+    for _, x in ipairs(EXTRAS) do st.edit.extras[x.key] = x.init(n) end
     if ruleDepot(key) then
       local r = DEPOT_BY[key].getRule(n) or {}
       local function copy(l) return l and { table.unpack(l) } end
@@ -359,7 +364,7 @@ function A.run(o)
     local bumped
     if e.key ~= e.orig then bumped = o.assign(e.name, e.key) end
     if bumped == e.name then bumped = nil end
-    if o.extra and e.key == o.extra.key then o.extra.save(e.name, e.extra) end
+    if EXTRA_BY[e.key] then EXTRA_BY[e.key].save(e.name, e.extras[e.key]) end
     if ruleDepot(e.key) then dp.setRule(e.name, e.rule, tonumber(e.prioF.text) or 0)
     elseif dp then dp.set(e.name, e.depot) end
     names[e.name] = e.nick ~= "" and e.nick or nil
@@ -603,8 +608,8 @@ function A.run(o)
         e.depot and "fg" or "warn", "bg")
       y = y + 1
     end
-    if o.extra and e.key == o.extra.key and y <= bottom then
-      local label, text = o.extra.show(e.extra)
+    if EXTRA_BY[e.key] and y <= bottom then
+      local label, text = EXTRA_BY[e.key].show(e.extras[e.key])
       local x = v:buttons(2, y, { { label = label, id = "extra", fn = function() e.extraClick = true end } })
       v:put(x + 1, y, fit(text or "", W - x - 1), "dim", "bg")
       y = y + 1
@@ -640,12 +645,13 @@ function A.run(o)
     local e = st.edit
     if e and e.extraClick then
       e.extraClick = false
-      if o.extra.plain then   -- a typed setting: a plain screen for a moment
+      local x = EXTRA_BY[e.key]
+      if x.plain then   -- a typed setting: a plain screen for a moment
         term.setCursorBlink(false)
         term.setBackgroundColour(colours.black); term.setTextColour(colours.white)
         term.clear(); term.setCursorPos(1, 1)
       end
-      o.extra.click(e.name, e.extra)
+      x.click(e.name, e.extras[e.key])
       v:invalidate()
     end
   end
