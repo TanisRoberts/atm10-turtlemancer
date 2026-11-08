@@ -90,6 +90,25 @@ One dye-coded Ender Storage chest per Weaver. Site end: under the Weaver's dock 
 4. Storage → `{type="supplied", n, seq, sent={[name]=count}, missing={[name]=count}}`. For a repeated `seq` it re-sends this reply instead of doing it again. Requests from different Weavers queue; none is lost.
 5. Weaver sucks from the chest until he has gained everything in `sent` (Ender Storage is instant, but he keeps checking for up to 30 s). Anything in `missing` becomes gaps in the cells he builds.
 
+## 8. The Weaver program (v2, #86)
+
+`turtle/weaver/`: `weaver.lua` loads `weaver_base/move/inv/net/build/loop.lua` into one shared environment (as the miner). Fuel and chunk loading come from the turtle core. Tunables in `weaver.env`: `FUEL_TARGET` 20000, `FUEL_LOW` 3000, `SUPPLY_WAIT` 30.
+
+- **Setup** (first start, or `weaver setup`): a chest, barrel or Ender Storage chest must be under him; asks which way he faces. No GPS: he counts moves from the dock. Dock coordinates: the dock cell is 0,0,0; x east, y up, z south. After carrying him back to the dock: `weaver found`.
+- **Cells** are `{x, y, z, "minecraft:block", how}` in dock coordinates, ordered. He hovers at y+1 and `placeDown`s. Implemented: default, and `how = "2"` (double slab, two placements). `F`, `T` and the facing of stairs/gates/chests are #87: until then they come out the default way. A block already standing in the cell is accepted (restart safe); a natural block in the cell is dug first; anything else is reported as `blocked`.
+- **Messages** (all on `tanis-weaver`, broadcast, every one carries `n`):
+  - `hello {id}` every 3 s while unpaired. `pair {n}` answered by `paired {n}`; label `Weaver-NN`.
+  - `relink {n}` answered by `state {…status fields…}`.
+  - `build {n, name, hash, total}`: a new `hash` wipes his layers and gaps. Answered `build_ack`.
+  - `layer {n, hash, layer, total, part, parts, cells}`: layers number from 1, at most 256 cells per part, each part answered `layer_ack {layer, part}`. He holds the layer he builds and the next.
+  - `layer_done {layer, skipped = {{x,y,z,name}}, blocked = {{x,y,z,name,why}}}` when a layer is finished (the Architect then sends layer+2). The last one also rides in `status.done`.
+  - `gaps {n, cells}`: a working area; he does it at the next layer boundary (or at once when the build is done) and answers `gaps_filled {cells}`; `gaps_ack` on receipt.
+  - `order {n, want = "build"|"stop"|"status"|"reboot", seq}`; `done {build, gaps}` when the last layer is in and the gap list is empty.
+  - `status {n, label, state, msg, want, build, hash, layer, total, idx, cells, work, x, y, z, fuel, gaps, need, done, lost}` every 3 s; `need` is the layer number he is waiting for.
+  - Supply: `supply {seq, items, fuel}` to storage every 5 s until `supplied {seq, sent, missing}`; then he sucks until he has gained everything in `sent` (up to `SUPPLY_WAIT` s after the last item). `missing` names become gaps (`S.short`).
+- **Dock visit**: burn the fuel he carries, work out the batch (cells ahead, at most 12 slots), drop everything else into the chest (empty buckets too), ask, collect. Fuel is asked for under `FUEL_LOW` or when the tank is close to the trip home; fuel items are burnt as they arrive.
+- **Files**: `weaver.state` (progress, position, open supply request), `weaver.L<n>` (held layers), `weaver.gaps`, `weaver.gaplist`. A reboot or chunk unload resumes at the same cell; an open supply request is picked up again (same `seq`). A reboot that cuts a *turn* in half leaves him `lost` (heading unknown): carry him to the dock and run `weaver found`.
+
 ## Notes for engineers
 
 - Old files to replace or delete per sub-issue: `turtle/weaver/weaver.lua` and `mossy.plan` (#86), `computer/architect/architect.lua` (#88), storage's `weaver` single job, `supplyWeaver`, `weaverReq` and `need` handling (#89), `computer/mainframe/weaver_link.lua` and `_G.WEAVER_STATUS` (#90). `shared/weaverplan.lua` goes once nothing uses it; its nearest-neighbour order moves to the new code.

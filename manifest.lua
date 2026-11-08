@@ -212,11 +212,12 @@ local M = {
                              "turtle/miner/miner_inv.lua", "turtle/miner/miner_lava.lua", "turtle/miner/miner_plan.lua",
                              "turtle/miner/miner_dock.lua", "turtle/miner/miner_setup.lua", "turtle/miner/miner_loop.lua" },
                    once = { "turtle/miner/junk.txt" } },
-        weaver = { name = "Weaver", about = "Builder: follows a plan file", run = "weaver",
-                   details = "Builds the island from a plan file, layer by layer, and fetches "
-                     .. "materials from storage.",
-                   files = { "turtle/weaver/weaver.lua", "shared/weaverplan.lua" },
-                   once = { "turtle/weaver/mossy.plan" } },
+        weaver = { name = "Weaver", about = "Builder: builds what his Architect sends", run = "weaver",
+                   details = "Builds any build, layer by layer, from the cell lists his paired Architect sends. "
+                     .. "Supplies come from one Ender Storage chest under his dock. Pickaxe + ender modem + chunk controller.",
+                   files = { "turtle/weaver/weaver.lua", "turtle/weaver/weaver_base.lua", "turtle/weaver/weaver_move.lua",
+                             "turtle/weaver/weaver_inv.lua", "turtle/weaver/weaver_net.lua", "turtle/weaver/weaver_build.lua",
+                             "turtle/weaver/weaver_loop.lua", "shared/envfile.lua" } },
         woodpecker = { name = "Woodpecker", about = "Lumberjack: tree farm", run = "lumberjack",
                    details = "Plants, chops and replants a tree farm and drops logs at its dock. "
                      .. "Axe + wireless or ender modem; GPS makes it unlosable. Run from the Farmhand.",
