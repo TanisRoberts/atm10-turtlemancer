@@ -11,7 +11,7 @@
 --
 -- The program is in parts (architect_*.lua), loaded into ONE shared environment (as the Weaver is): a name defined in one
 -- part is seen by all of them.
-local PARTS = { "architect_base.lua", "architect_plan.lua", "architect_net.lua", "architect_tabs.lua", "architect_maps.lua", "architect_wizard.lua",
+local PARTS = { "architect_base.lua", "architect_plan.lua", "architect_gaps.lua", "architect_net.lua", "architect_tabs.lua", "architect_maps.lua", "architect_wizard.lua",
   "architect_site.lua", "architect_run.lua" }
 local M = setmetatable({ args = { ... } }, { __index = _ENV })
 ARCHITECT = M      -- (the sim reads the state from here)

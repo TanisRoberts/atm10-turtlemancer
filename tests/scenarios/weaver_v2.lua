@@ -51,7 +51,7 @@ local ARCHITECT = [[
     elseif type(m) == "table" and m.type == "paired" then paired = true end
   end
   _G.paired = true
-  rednet.broadcast({ type = "build", n = N, name = "Test", hash = data.hash, total = #data.layers }, P)
+  rednet.broadcast({ type = "build", n = N, name = "Test", hash = data.hash, total = #data.layers, blocks = data.blocks }, P)
   sendLayer(1); sendLayer(2)
   rednet.broadcast({ type = "order", n = N, want = "build", seq = 1 }, P)
   while true do
@@ -60,10 +60,10 @@ local ARCHITECT = [[
       if m.type == "layer_ack" then _G.acks = _G.acks + 1
       elseif m.type == "layer_done" then
         if not _G.done[m.layer] then _G.done[m.layer] = m.skipped; sendLayer(m.layer + 2) end
-      elseif m.type == "gaps_filled" then _G.filled = m.cells
+      elseif m.type == "gaps_filled" then _G.filled, _G.buried = m.cells, m.buried
       elseif m.type == "dock_req" then
         _G.dockReqs = (_G.dockReqs or 0) + 1
-        if _G.dock then rednet.broadcast({ type = "site", n = N, dock = _G.dock, dh = 0 }, P) end
+        if _G.dock then rednet.broadcast({ type = "site", n = N, dock = _G.dock, dh = 0, blocks = data.blocks }, P) end
       elseif m.type == "status" then _G.last = m; _G.nstat = (_G.nstat or 0) + 1 end
     end
     if _G.sendGaps then rednet.broadcast({ type = "gaps", n = N, cells = _G.sendGaps }, P); _G.sendGaps = nil end
@@ -125,7 +125,7 @@ local function setup(opts)
   st:writeFile("s.lua", STORAGE); st:run("s")
   local ar = w:computer{ id = 2, label = "Architect" }
   ar:attach("top", cc.wireless{ ender = true })
-  ar:writeTable("layers.dat", { hash = "h1", layers = layers })
+  ar:writeTable("layers.dat", { hash = "h1", layers = layers, blocks = opts.blocks })
   ar:writeFile("a.lua", ARCHITECT); ar:run("a")
   local t = site.turtle
   t.label = nil
@@ -423,4 +423,84 @@ T.test("weaver v2 (#140): lost with a fix, he works out where he is and gets hom
   local r = t:readTable("weaver.state")
   T.falsy(r.lost, "with a fix he is never lost")
   T.eq(r.x, 0); T.eq(r.z, 0)
+end)
+
+---------------------------------------------------------------------------------------------------
+-- #141: gaps filled by hand, gaps buried under later layers, the build is never dug
+---------------------------------------------------------------------------------------------------
+local ST, RW = "minecraft:stone", RED
+local function gapPlan()
+  local layers = { { { 3, 0, 3, ST }, { 4, 0, 3, RW }, { 5, 0, 3, ST } },
+                   { { 3, 1, 3, ST }, { 5, 1, 3, ST } } }
+  local expected = { ["3,0,3"] = ST, ["5,0,3"] = ST, ["3,1,3"] = ST, ["5,1,3"] = ST, ["4,0,3"] = RW }
+  return layers, expected
+end
+
+T.test("weaver v2 (#141): a gap Tanis filled by hand is reported filled, nothing is fetched or placed", function()
+  local layers, expected = gapPlan()
+  local site, w, t, ar, st, stock = setup({ layers = layers, expected = expected })
+  t:reboot()
+  T.waitFor(w, function() return ar.G.done and ar.G.done[2] end, 4000, "never finished")
+  T.eq(#ar.G.done[1], 1)                                   -- the red wool: storage has none
+  w:setBlock(4, 65, 3, RW)                                 -- Tanis puts it in by hand
+  ar.G.sendGaps = { ar.G.done[1][1] }
+  T.waitFor(w, function() return ar.G.filled end, 2000, "gap never reported")
+  T.eq(#ar.G.filled, 1)
+  T.eq(#(ar.G.buried or {}), 0)
+  check(w, expected)
+  T.eq(#t:readTable("weaver.gaps"), 0)
+end)
+
+T.test("weaver v2 (#141): a gap buried under a later layer is reported buried and the build is not dug", function()
+  local layers, expected = gapPlan()
+  table.insert(layers[2], 2, { 4, 1, 3, ST }); expected["4,1,3"] = ST       -- a block on top of the gap
+  local site, w, t, ar, st, stock = setup({ layers = layers, expected = expected })
+  t:reboot()
+  T.waitFor(w, function() return ar.G.done and ar.G.done[2] end, 4000, "never finished")
+  stock:give(RW, 64)                                       -- the wool is here, but there is no way in
+  ar.G.sendGaps = { ar.G.done[1][1] }
+  T.waitFor(w, function() return ar.G.filled end, 2000, "gap never reported")
+  T.eq(#ar.G.filled, 0)
+  T.eq(#ar.G.buried, 1)
+  T.eq(ar.G.buried[1][1], 4)
+  check(w, expected, { ["4,0,3"] = true })                 -- every other block of the build stands, the gap is still open
+  T.eq(#t:readTable("weaver.gaps"), 0)
+end)
+
+local function wallPlan()
+  local layers = { { { 3, 0, 0, ST }, { 4, 0, 0, ST } }, { { 3, 1, 0, ST } } }
+  return layers, { ["3,0,0"] = ST, ["4,0,0"] = ST, ["3,1,0"] = ST }
+end
+
+T.test("weaver v2 (#141): a build block from a lower layer is never dug; the Architect's block list is saved", function()
+  local layers, expected = wallPlan()
+  local site, w, t, ar = setup({ layers = layers, expected = expected, blocks = { "minecraft:sandstone", ST } })
+  w:setBlock(2, 66, 0, "minecraft:sandstone")              -- built earlier, in his way at the height he flies
+  t:reboot()
+  T.waitFor(w, function() return ar.G.done and ar.G.done[2] end, 4000, "never finished")
+  T.eq(w:getBlock(2, 66, 0).name, "minecraft:sandstone")
+  T.eq(w:getBlock(3, 65, 0).name, ST)
+  local c = t:readTable("weaver.cfg")
+  T.eq(#c.blocks, 2)
+end)
+
+T.test("weaver v2 (#141): without the list the same sandstone is natural and gets dug (the test above means something)", function()
+  local layers, expected = wallPlan()
+  local site, w, t, ar = setup({ layers = layers, expected = expected })
+  w:setBlock(2, 66, 0, "minecraft:sandstone")
+  t:reboot()
+  T.waitFor(w, function() return ar.G.done and ar.G.done[2] end, 4000, "never finished")
+  T.falsy(w:getBlock(2, 66, 0), "natural sandstone is cleared out of the way")
+end)
+
+T.test("weaver v2 (#141): a weaver.cfg without the block list gets it from the Architect and carries on building", function()
+  local layers, expected = wallPlan()
+  local site, w, t, ar = setup({ layers = layers, expected = expected, blocks = { "minecraft:sandstone", ST },
+    gps = false, cfg = { dh = 0, wx = 0, wy = 65, wz = 0 } })
+  ar.G.dock = { x = 0, y = 65, z = 0 }
+  t:reboot()
+  T.waitFor(w, function() return ar.G.done and ar.G.done[2] end, 4000, "never finished")
+  T.truthy(ar.G.dockReqs and ar.G.dockReqs >= 1, "he should have asked")
+  T.eq(#t:readTable("weaver.cfg").blocks, 2)
+  check(w, expected)
 end)

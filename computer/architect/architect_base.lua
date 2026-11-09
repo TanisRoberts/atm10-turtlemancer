@@ -34,7 +34,7 @@ end
 -- S: what survives a reboot. n (number), wid (the Weaver's computer ID), name/hash/file (the build), site, started,
 -- orderSeq, gaps (cells he skipped, full entries), held (cells left out above a gap, until it is filled)
 S = readT(STATE_FILE) or {}
-S.gaps, S.held = S.gaps or {}, S.held or {}
+S.gaps, S.held, S.buried = S.gaps or {}, S.held or {}, S.buried or {}
 S.orderSeq = S.orderSeq or 0
 function save() writeT(STATE_FILE, S) end
 

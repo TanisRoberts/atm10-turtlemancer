@@ -60,7 +60,7 @@ end
 -- his dock's WORLD position and facing (wizard step 3), for his GPS; also rides in `build`
 function sendSite()
   local s = S.site
-  if S.n and siteOK(s) then tx({ type = "site", dock = { x = s.dx, y = s.dy, z = s.dz }, dh = s.dh }) end
+  if S.n and siteOK(s) then tx({ type = "site", dock = { x = s.dx, y = s.dy, z = s.dz }, dh = s.dh, blocks = buildNames() }) end
 end
 local WANT = { build = "build", stop = "stop", home = "stop", reboot = "reboot", status = "status", test = "test", clear = "clear" }
 -- the 4 bottom corner cells of the turned footprint, in dock coordinates (the bottom-layer cells; the Weaver marks on top)
@@ -150,7 +150,7 @@ local function pumpBuild()
   local st = R.status
   if not (S.started and P and st and alive()) then return end
   if st.hash ~= S.hash then
-    if due("build") then tx({ type = "build", name = S.name, hash = S.hash, total = P.total }) end
+    if due("build") then tx(buildMsg()) end
     return
   end
   local sl = math.max(st.layer or 1, 1)
@@ -158,6 +158,7 @@ local function pumpBuild()
     if not layerDone(k) and due("layer" .. k) then sendParts(k) end
   end
   if #S.gaps > 0 and not R.gapOut and st.work ~= "gap" and due("gaps", 10) then
+    sweepBuried()
     local list = gapsReady()
     if #list > 0 and (st.layer or 1) >= 1 then
       R.gapOut = { cells = list, at = now() }
@@ -171,6 +172,13 @@ local function pumpBuild()
   end
 end
 
+function buildMsg()
+  local s = S.site
+  local m = { type = "build", name = S.name, hash = S.hash, total = P.total, blocks = buildNames() }
+  if siteOK(s) then m.dock, m.dh = { x = s.dx, y = s.dy, z = s.dz }, s.dh end
+  return m
+end
+
 function startBuild()
   if not (P and siteOK(S.site) and S.n) then return false end
   S.started = true
@@ -178,7 +186,7 @@ function startBuild()
   save()
   tx({ type = "site_set", site = S.site, build = S.name, hash = S.hash })      -- the mainframe keeps it for a replacement
   addLog("build started: " .. tostring(S.name))
-  tx({ type = "build", name = S.name, hash = S.hash, total = P.total, dock = { x = S.site.dx, y = S.site.dy, z = S.site.dz }, dh = S.site.dh })
+  tx(buildMsg())
   sendOrder("build")
   return true
 end
@@ -203,23 +211,6 @@ local function onLayerDone(msg)
   addLog(("Weaver: layer %d done%s"):format(k, added > 0 and (", " .. added .. " gaps") or ""))
   for _, b in ipairs(msg.blocked or {}) do addLog(("  blocked at %d %d %d: %s"):format(b[1], b[2], b[3], tostring(b[5]))) end
   if R.out then R.out[k] = nil end
-  save()
-end
-
-local function onGapsFilled(msg)
-  R.gapOut = nil
-  local filled = {}
-  for _, c in ipairs(msg.cells or {}) do filled[c[1] .. "," .. c[2] .. "," .. c[3]] = true end
-  local rest = {}
-  for _, g in ipairs(S.gaps) do if not filled[g[1] .. "," .. g[2] .. "," .. g[3]] then rest[#rest + 1] = g end end
-  S.gaps = rest
-  local cols = gapColumns()
-  local held = {}
-  for _, h in ipairs(S.held) do
-    if cols[h[1] .. "," .. h[3]] then held[#held + 1] = h else S.gaps[#S.gaps + 1] = h end   -- the column is open: they are gaps now
-  end
-  S.held = held
-  addLog(("Weaver: filled %d gaps, %d left"):format(#(msg.cells or {}), #S.gaps))
   save()
 end
 

@@ -378,3 +378,45 @@ T.test("architect (#138): Test marks the 4 bottom corners of the turned footprin
   local ok, bad, total = W.diff(w, (expected(req, bytes, 90, 6, 65, 10)), { max = 10 })
   if not ok then error(total .. " cells differ:\n  " .. table.concat(bad, "\n  ")) end
 end)
+
+T.test("architect (#141): sends the build's block names, drops buried gaps to a list, Forget gaps (tap twice) clears them", function()
+  local req = loader()
+  local bytes = slurp(PLAN_FILE)
+  local plan = req("plan2").fromLitematic(bytes)
+  LATE = { ["minecraft:oak_log"] = true, ["minecraft:hay_block"] = true }
+  local site, w, t, st, mf, stock = setup(plan)
+  w:run(5)
+  local a = architect(w, 2)
+  bringUp(w, a, t, bytes)
+  w:runUntil(function() local s = (A(a).R or {}).status; return s and s.state == "done" end, 20000)
+  local blocks = t:readTable("weaver.cfg").blocks
+  T.truthy(blocks and #blocks > 3, "weaver.cfg carries the build's block names")
+  local seen = {}
+  for _, n in ipairs(blocks) do seen[n] = true end
+  for _, e in ipairs(plan.info.palette) do T.truthy(seen[e.name], "missing " .. e.name) end
+  local G = A(a)
+  T.truthy(#G.S.gaps > 0, "storage lacked logs and hay: gaps")
+  -- a gap with a sent cell above it is buried; one without is not
+  local c1, c2
+  for _, c in ipairs(G.layerCells(1)) do
+    for _, d in ipairs(G.layerCells(2)) do
+      if d[1] == c[1] and d[3] == c[3] and d[2] > c[2] then c1 = c end
+    end
+  end
+  T.truthy(c1, "a column with blocks in layers 1 and 2")
+  local before = #G.S.gaps
+  G.S.gaps[#G.S.gaps + 1] = c1
+  G.sweepBuried()
+  T.eq(#G.S.gaps, before, "the buried gap left the list")
+  T.eq(#G.S.buried, 1)
+  T.eq(G.S.buried[1][4], c1[4])
+  G.onGapsFilled({ cells = {}, buried = { G.S.gaps[1] } })
+  T.eq(#G.S.buried, 2, "a gap the Weaver reports buried goes to the list too")
+  tapText(w, a, "Status", true)
+  T.contains(a.screen, "buried")
+  tapText(w, a, "Forget gaps")
+  T.truthy(#G.S.gaps > 0, "one tap does nothing")
+  tapText(w, a, "Sure?")
+  w:run(1)
+  T.eq(#G.S.gaps, 0); T.eq(#G.S.buried, 0)
+end)

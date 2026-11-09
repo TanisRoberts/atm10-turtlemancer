@@ -76,9 +76,9 @@ local function handle(id, msg)
     S.arch = id; save()
     local m = statusMsg(); m.type = "state"; send(m)
   elseif t == "site" then
-    setDock(msg.dock)
+    setDock(msg.dock); setBlocks(msg.blocks)
   elseif t == "build" then
-    setDock(msg.dock)
+    setDock(msg.dock); setBlocks(msg.blocks)
     if msg.hash ~= S.hash then resetBuild(msg) else S.total = msg.total or S.total end
     save(); send({ type = "build_ack", hash = S.hash })
   elseif t == "layer" then
@@ -89,6 +89,9 @@ local function handle(id, msg)
     for _, c in ipairs(msg.cells or {}) do S.short[c[4]] = nil end   -- ask storage for them again at the next visit
     save()
     send({ type = "gaps_ack", count = #(msg.cells or {}) })
+  elseif t == "gaps_forget" then
+    GAPS = {}; saveGaps()
+    if S.work ~= "gap" and fs.exists(GAPLIST) then fs.delete(GAPLIST); GCELLS = nil end
   elseif t == "order" then
     if (msg.seq or 0) > S.orderSeq then
       S.orderSeq = msg.seq
@@ -125,6 +128,6 @@ function netLoop()
       lastStatus = now
       send(statusMsg())
     end
-    if S.n and C and not C.wx and now - lastDock >= 10 then lastDock = now; send({ type = "dock_req" }) end
+    if S.n and C and not (C.wx and C.blocks) and now - lastDock >= 10 then lastDock = now; send({ type = "dock_req" }) end
   end
 end

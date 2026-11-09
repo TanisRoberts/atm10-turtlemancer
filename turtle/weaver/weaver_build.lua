@@ -54,15 +54,19 @@ local LH = { N = 0, E = 1, S = 2, W = 3 }
 
 -- Place one cell the way the planner says (docs/systems/weaver.md section 8). Default: hover above, face `turn`,
 -- place down n times. F: stand behind the cell and place forward. B: stand beside it, in the open column.
--- "ok", "gap" (no block), "dry" (go to the dock for it) or "blocked", why
+-- "ok", "gap" (no block), "dry" (go to the dock for it), "buried" (gap work: no way in) or "blocked", why
 local function buildCell(c)
   local name, how = c[4], c.how
   local item = c.item or name
   local need = c.n or 1
-  if (counts()[item] or 0) < need then
+  local gapWork = S.work == "gap"
+  -- Short of the block: ask storage (dry) or leave a gap. Gap work looks at the cell first: one filled by hand needs nothing.
+  local function lacking()
     if S.short[item] or S.visitKey == (S.work .. ":" .. S.layer .. ":" .. S.idx) then S.short[item] = true; return "gap" end
     return "dry"
   end
+  local lack = (counts()[item] or 0) < need
+  if lack and not gapWork then return lacking() end
   local side, h = how == "F" or how == "B", LH[c.turn or ""]
   local ok, why
   if how == "F" then
@@ -75,6 +79,8 @@ local function buildCell(c)
   else
     ok, why = goTo(c[1], c[2] + 1, c[3])
   end
+  -- A gap with the build on top of it (or its side placement walled in): no way in, and he never digs the build
+  if not ok and gapWork and tostring(why):find("^Blocked by") then return "buried", why end
   if not ok then return "blocked", why end
   local insp, put, dig, atk = turtle.inspectDown, turtle.placeDown, turtle.digDown, turtle.attackDown
   if side then insp, put, dig, atk = turtle.inspect, turtle.place, turtle.dig, turtle.attack end
@@ -85,8 +91,10 @@ local function buildCell(c)
     if d.name == name then
       if how ~= "2" or (d.state and d.state.type == "double") then return "ok" end
       reps = 1                              -- a single slab already stands: one more makes the double
+    elseif lack then return lacking()
     elseif canDig(d.name) then dig(); dropJunk()
     else return "blocked", "Blocked by " .. tostring(d.name) end
+  elseif lack then return lacking()
   end
   for _ = 1, reps do
     local placed = false
@@ -113,8 +121,8 @@ local function finishWork()
     S.layer, S.idx, S.skip, S.blocked = S.layer + 1, 1, {}, {}
     S.work = fs.exists(GAPLIST) and "gap" or "layer"
   else
-    send({ type = "gaps_filled", cells = S.filled or {} })
-    S.filled = nil
+    send({ type = "gaps_filled", cells = S.filled or {}, buried = S.buried or {} })
+    S.filled, S.buried = nil, nil
     fs.delete(GAPLIST); GCELLS = nil
     S.work, S.idx = "layer", 1
   end
@@ -153,6 +161,8 @@ function buildStep()
     if S.work == "layer" then S.topY = math.max(S.topY, c[2]) else
       delGap(c); S.filled = S.filled or {}; S.filled[#S.filled + 1] = { c[1], c[2], c[3], c[4] }
     end
+  elseif r == "buried" then
+    delGap(c); S.buried = S.buried or {}; S.buried[#S.buried + 1] = { c[1], c[2], c[3], c[4] }
   elseif r == "gap" then
     if S.work == "layer" then addGap(c); S.skip[#S.skip + 1] = { c[1], c[2], c[3], c[4] } end
   else

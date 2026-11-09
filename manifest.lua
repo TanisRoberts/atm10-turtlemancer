@@ -115,7 +115,7 @@ local M = {
             .. "then Status, Map, Side, Bill and Log tabs and build / stop / home / reboot orders. "
             .. "Needs an ender modem; an advanced monitor touching it shows the map.",
           run = "architect",
-          files = { "computer/architect/architect.lua", "computer/architect/architect_base.lua", "computer/architect/architect_plan.lua", "computer/architect/architect_net.lua", "computer/architect/architect_tabs.lua", "computer/architect/architect_maps.lua", "computer/architect/architect_wizard.lua", "computer/architect/architect_site.lua", "computer/architect/architect_run.lua", "shared/slash.lua", "shared/litematic.lua", "shared/litematic_inflate.lua", "shared/litematic_nbt.lua", "shared/plan2.lua", "shared/plan2place.lua", "shared/plan2order.lua", "shared/mcblocks_1211.lua", "shared/screens.lua", "shared/ui.lua", "shared/ui_widgets.lua", "shared/ui_parts.lua", "shared/ui_motion.lua" },
+          files = { "computer/architect/architect.lua", "computer/architect/architect_base.lua", "computer/architect/architect_plan.lua", "computer/architect/architect_gaps.lua", "computer/architect/architect_net.lua", "computer/architect/architect_tabs.lua", "computer/architect/architect_maps.lua", "computer/architect/architect_wizard.lua", "computer/architect/architect_site.lua", "computer/architect/architect_run.lua", "shared/slash.lua", "shared/litematic.lua", "shared/litematic_inflate.lua", "shared/litematic_nbt.lua", "shared/plan2.lua", "shared/plan2place.lua", "shared/plan2order.lua", "shared/mcblocks_1211.lua", "shared/screens.lua", "shared/ui.lua", "shared/ui_widgets.lua", "shared/ui_parts.lua", "shared/ui_motion.lua" },
         },
         operator = {
           name = "Operator",

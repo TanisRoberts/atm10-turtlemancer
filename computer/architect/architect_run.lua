@@ -16,6 +16,10 @@ COMMANDS = {
   { name = "home", help = "go to the dock", fn = function() sendOrder("home") end },
   { name = "reboot", help = "reboot (and update) at the dock", fn = function() sendOrder("reboot") end },
   { name = "refresh", help = "ask him for his status now", fn = function() sendOrder("status") end },
+  { name = "gaps", help = "gaps: list them; gaps forget: clear them after fixing by hand", fn = function(arg)
+      if arg:lower() == "forget" then local n, b = forgetGaps(); ui.say(("Forgot %d gaps, %d buried"):format(n, b), "plain")
+      else ui.say(gapsSummary(), "plain") end
+    end },
   { name = "layer", help = "layer <n>: look at a layer on the map", fn = cmdLayer },
   { name = "follow", help = "map follows the Weaver again", fn = function() V.layer, V.follow = nil, true end },
   { name = "setup", help = "open the setup wizard", fn = function() openWizard(S.n and 2 or 1) end },

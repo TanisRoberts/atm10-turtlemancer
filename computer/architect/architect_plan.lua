@@ -45,6 +45,10 @@ function setPlan(plan, file)
     end
   end
   p.total = #p.ys
+  local seen = {}
+  p.names = {}
+  for _, e in ipairs(info.palette) do if not seen[e.name] then seen[e.name] = true; p.names[#p.names + 1] = e.name end end
+  table.sort(p.names)
   P, LC = p, {}
   return p
 end
@@ -93,7 +97,7 @@ function readFile(name, bytes)
   setPlan(plan, file)
   local keep = S.hash == info.hash
   S.file, S.name, S.hash = file, info.name, info.hash
-  if not keep then S.site, S.started, S.gaps, S.held, R.acked, R.out = S.site, false, {}, {}, {}, nil end
+  if not keep then S.site, S.started, S.gaps, S.held, S.buried, R.acked, R.out = S.site, false, {}, {}, {}, {}, nil end
   if R.relink and R.relink.state then S.site = S.site or R.relink.site end
   save()
   R.read = { name = name, done = true, report = rep }

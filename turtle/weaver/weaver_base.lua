@@ -65,8 +65,16 @@ function save() writeT(STATE_FILE, S) end
 GAPS = readT(GAPS_FILE) or {}
 function saveGaps() writeT(GAPS_FILE, GAPS) end
 
--- Blocks of the build are never dug (names of every cell he has held)
+-- Blocks of the build are never dug: every block name in the build (the Architect sends them in `build`/`site`, kept in
+-- weaver.cfg as C.blocks) plus the names of every cell he has held
 BUILD = {}
+for _, n in ipairs(C and C.blocks or {}) do BUILD[n] = true end
+function setBlocks(list)
+  if type(list) ~= "table" or #list == 0 or not C then return end
+  local same = type(C.blocks) == "table" and #C.blocks == #list
+  for i, n in ipairs(list) do BUILD[n] = true; if same and C.blocks[i] ~= n then same = false end end
+  if not same then C.blocks = list; writeT(CFG_FILE, C) end
+end
 -- What he may clear out of his way: natural blocks only
 NATURAL = {}
 for _, n in ipairs({ "stone", "dirt", "grass_block", "coarse_dirt", "podzol", "mud", "sand", "red_sand", "gravel",

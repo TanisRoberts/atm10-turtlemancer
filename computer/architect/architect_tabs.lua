@@ -84,6 +84,9 @@ function drawStatus(v)
     else v:put(14, y, "markers out, type clear", "warn", "bg") end
     y = y + 1
   end
+  if #S.gaps + #S.buried > 0 then
+    v:put(2, y, "Gaps", "dim", "bg"); v:put(14, y, fit(gapsSummary(), W - 14), #S.buried > 0 and "warn" or "fg", "bg"); y = y + 1
+  end
   if st.lost then v:alert(2, y, W - 2, "Weaver is lost: carry him to the dock, then run weaver found on him", "bad"); y = y + 2 end
   local o = S.order
   local function busy(word) return o and o.word == word end
@@ -96,6 +99,7 @@ function drawStatus(v)
   v:buttons(2, y + 2, {
     { label = "Test", style = busy("test") and "busy" or "idle", fn = function() sendOrder("test") end, id = "b-test" },
     { label = "Clear", style = busy("clear") and "busy" or "idle", fn = function() sendOrder("clear") end, id = "b-clear" },
+    { label = "Forget gaps", style = "idle", confirm = true, fn = forgetGaps, id = "b-forget" },
   })
 end
 
