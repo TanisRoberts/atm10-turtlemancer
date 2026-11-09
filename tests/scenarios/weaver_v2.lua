@@ -504,3 +504,13 @@ T.test("weaver v2 (#141): a weaver.cfg without the block list gets it from the A
   T.eq(#t:readTable("weaver.cfg").blocks, 2)
   check(w, expected)
 end)
+
+T.test("weaver v2: the Architect's dock Y is the chest's (one below him): GPS learns his own cell on the dock", function()
+  local site, w, t, ar, st, stock, expected = setup({ red = true, gps = true, cfg = { dh = 0, wx = 0, wy = 64, wz = 0 } })
+  ar.G.dock = { x = 0, y = 64, z = 0 }                             -- typed from F3 while looking at the ender chest
+  t:reboot()
+  T.waitFor(w, function() return ar.G.done and ar.G.done[2] end, 6000, "never finished")
+  check(w, expected)
+  T.eq(#ar.G.done[1] + #ar.G.done[2], 0)
+  T.eq(t:readTable("weaver.cfg").wy, 65, "the dock is the block he sits in")
+end)

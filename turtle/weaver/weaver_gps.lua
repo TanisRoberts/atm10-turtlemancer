@@ -22,7 +22,11 @@ end
 
 function setDock(dock)
   if type(dock) ~= "table" or not (dock.x and dock.y and dock.z) then return end
-  if C.wx == dock.x and C.wy == dock.y and C.wz == dock.z then return end
+  -- C.t* is what the Architect sent; C.w* may have been corrected on the dock (one block up): keep that correction
+  -- unless the Architect sends a different position
+  local tx, ty, tz = C.tx or C.wx, C.ty or C.wy, C.tz or C.wz
+  if tx == dock.x and ty == dock.y and tz == dock.z then return end
+  C.tx, C.ty, C.tz = dock.x, dock.y, dock.z
   C.wx, C.wy, C.wz = dock.x, dock.y, dock.z
   writeT(CFG_FILE, C)
   GP.need = true
@@ -62,6 +66,19 @@ function gpsSync(full)
   local fx, fy, fz = gpsFix()
   if not fx then GP.moves = S.lost and -6 or -(GPS_EVERY * 4); return false end
   local fixed = false
+  -- Sitting on his dock's chest, in the dock's column: HIS cell is the dock (dock coordinates 0 0 0 are where he
+  -- sits, as when he counted moves). The position typed on the Architect may be the chest's, one block lower:
+  -- trusting it put every fix one block too high (the arena, layer 11). Learn the dock from the fix instead.
+  if C.wx and fx == C.wx and fz == C.wz and (fy == C.wy or fy == C.wy + 1) then
+    local okc, d = turtle.inspectDown()
+    if okc and d and (d.name:find("chest", 1, true) or d.name:find("barrel", 1, true)) then
+      if fy ~= C.wy then
+        C.wy = fy; writeT(CFG_FILE, C)
+        note("GPS: my dock is the block I sit in, Y " .. fy .. ": layer " .. tostring(S.layer) .. " again from its start")
+        if S.work == "layer" then S.idx = 1 end   -- cells placed while a block off: redo the layer (good ones are skipped)
+      end
+    end
+  end
   if C.wx then
     local nx, ny, nz = fx - C.wx, fy - C.wy, fz - C.wz
     if nx ~= S.x or ny ~= S.y or nz ~= S.z then
