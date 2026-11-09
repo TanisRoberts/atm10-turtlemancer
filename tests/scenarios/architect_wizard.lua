@@ -327,7 +327,7 @@ T.test("architect: a layer he lost after acking it (crash while saving it) is se
     local o = A(a).R.out and A(a).R.out[3]
     return o and o.n >= o.parts and t.files["weaver.L3"] ~= nil
   end, 4000)
-  t.files["weaver.L3"] = nil                                -- as the disk-full crash on the arena left it
+  t.files["weaver.L3"] = ""                                 -- as the disk-full crash on the arena left it: empty
   t:reboot()
   w:run(3000)
   T.contains(a.screen, "finished")

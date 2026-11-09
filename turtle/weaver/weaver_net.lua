@@ -46,6 +46,9 @@ end
 local function addPart(msg)
   local k = msg.layer
   if k < S.layer and S.work == "layer" then send({ type = "layer_ack", layer = k, part = msg.part }); return end
+  if not LAYERS[k] and fs.exists(layerFile(k)) and not getLayer(k) then
+    fs.delete(layerFile(k))                     -- left empty by a failed save (disk full): take it again
+  end
   if not LAYERS[k] and not fs.exists(layerFile(k)) then
     local st = LP[k] or { got = {}, count = 0 }
     LP[k] = st
