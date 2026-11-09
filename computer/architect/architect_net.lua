@@ -57,6 +57,11 @@ end
 ---------------------------------------------------------------------------
 -- Orders
 ---------------------------------------------------------------------------
+-- his dock's WORLD position and facing (wizard step 3), for his GPS; also rides in `build`
+function sendSite()
+  local s = S.site
+  if S.n and siteOK(s) then tx({ type = "site", dock = { x = s.dx, y = s.dy, z = s.dz }, dh = s.dh }) end
+end
 local WANT = { build = "build", stop = "stop", home = "stop", reboot = "reboot", status = "status", test = "test", clear = "clear" }
 -- the 4 bottom corner cells of the turned footprint, in dock coordinates (the bottom-layer cells; the Weaver marks on top)
 function testCorners()
@@ -173,7 +178,7 @@ function startBuild()
   save()
   tx({ type = "site_set", site = S.site, build = S.name, hash = S.hash })      -- the mainframe keeps it for a replacement
   addLog("build started: " .. tostring(S.name))
-  tx({ type = "build", name = S.name, hash = S.hash, total = P.total })
+  tx({ type = "build", name = S.name, hash = S.hash, total = P.total, dock = { x = S.site.dx, y = S.site.dy, z = S.site.dz }, dh = S.site.dh })
   sendOrder("build")
   return true
 end
@@ -238,8 +243,10 @@ function onWeaver(from, msg)
     return
   end
   if msg.n == nil or msg.n ~= S.n then return end
+  if t == "dock_req" then sendSite(); return end
   if t == "status" then
     local was = R.status
+    if msg.gnote and msg.gnote ~= S.gnote then S.gnote = msg.gnote; addLog(msg.gnote) end
     R.status, R.seen = msg, now()
     S.wid = from
     if msg.state == "supply" and (msg.msg or ""):find("Asked storage") then R.supSince = R.supSince or now() else R.supSince = nil end

@@ -235,6 +235,24 @@ T.test("architect: pairs, takes a dropped build, the Weaver builds it and fills 
   T.eq(mf:readTable("weavers.reg").next, 2, "one number handed out")
 end)
 
+T.test("architect (#140): the dock's world position reaches the Weaver from step 3; Status shows GPS ok", function()
+  local req = loader()
+  local bytes = slurp(PLAN_FILE)
+  local plan = req("plan2").fromLitematic(bytes)
+  LATE = {}
+  local site, w, t, st, mf, stock = setup(plan)
+  w.gpsOn = true
+  w:run(5)
+  local a = architect(w, 2)
+  bringUp(w, a, t, bytes)
+  w:runUntil(function() local s = (A(a).R or {}).status; return s and (s.layer or 0) >= 2 end, 4000)
+  local c = t:readTable("weaver.cfg")
+  T.eq(c.wx, 0); T.eq(c.wy, 65); T.eq(c.wz, 0)
+  T.truthy(A(a).R.status.gps, "status carries gps = true")
+  tapText(w, a, "Status", true)
+  T.contains(a.screen, "GPS ok")
+end)
+
 T.test("architect: a second fresh Architect re-links by number mid-build, gets the file again and carries on", function()
   local req = loader()
   local bytes = slurp(PLAN_FILE)

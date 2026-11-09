@@ -48,7 +48,7 @@ function move(kind)
     if turtle.getFuelLevel() == 0 then return false, "Out of fuel" end
     S.pending = { kind = kind, fuel = turtle.getFuelLevel() }; save()
     local moved, why = op.move()
-    if moved then apply(kind); S.pending = nil; save(); keepChunk(); return true end
+    if moved then apply(kind); GP.moves = GP.moves + 1; S.pending = nil; save(); keepChunk(); return true end
     S.pending = nil
     why = tostring(why)
     if why:find("loaded world") then
@@ -122,7 +122,7 @@ function atDock() return S.x == 0 and S.y == 0 and S.z == 0 end
 
 -- Further from the dock than he can believe his own position? (an old or foreign save, a lost fix)
 FAR_FROM_DOCK = 200
-function farFromDock() return math.abs(S.x or 0) > FAR_FROM_DOCK or math.abs(S.z or 0) > FAR_FROM_DOCK end
+function farFromDock() return not GP.trust and math.abs(S.x or 0) > FAR_FROM_DOCK or math.abs(S.z or 0) > FAR_FROM_DOCK end
 
 -- Idle or stopped, off the dock: go home only if the position can be trusted and someone (an Architect or a
 -- build) gave him a reason. Otherwise stay put; too far away means lost.
@@ -136,6 +136,7 @@ end
 
 -- Home: the retry-forever version; errors out only on a state he can't fix
 function goHome()
+  gpsSync(false)                       -- right position before the trip
   local ok, why = goTo(0, 0, 0)
   if not ok then return false, why end
   face(C.dh)

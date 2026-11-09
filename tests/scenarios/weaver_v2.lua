@@ -61,6 +61,9 @@ local ARCHITECT = [[
       elseif m.type == "layer_done" then
         if not _G.done[m.layer] then _G.done[m.layer] = m.skipped; sendLayer(m.layer + 2) end
       elseif m.type == "gaps_filled" then _G.filled = m.cells
+      elseif m.type == "dock_req" then
+        _G.dockReqs = (_G.dockReqs or 0) + 1
+        if _G.dock then rednet.broadcast({ type = "site", n = N, dock = _G.dock, dh = 0 }, P) end
       elseif m.type == "status" then _G.last = m; _G.nstat = (_G.nstat or 0) + 1 end
     end
     if _G.sendGaps then rednet.broadcast({ type = "gaps", n = N, cells = _G.sendGaps }, P); _G.sendGaps = nil end
@@ -127,7 +130,8 @@ local function setup(opts)
   local t = site.turtle
   t.label = nil
   t:installRole("weaver")
-  t:writeTable("weaver.cfg", { dh = 0 })
+  w.gpsOn = opts.gps or false
+  t:writeTable("weaver.cfg", opts.cfg or { dh = 0 })
   t:writeFile("startup.lua", 'shell.run("weaver")\n')
   return site, w, t, ar, st, stock, expected, layers
 end
@@ -263,7 +267,7 @@ T.test("weaver v2 (#87): a reboot in the middle of a turn: sorted out by the blo
     t:writeTable("weaver.state", s)
     if case.block then w:setBlock(0, 65, -1, "minecraft:stone") end  -- what he now sees ahead differs from before the turn
     t:reboot()
-    w:run(0.5)
+    w:run(5)                                               -- boot waits for a GPS answer that never comes
     local r = t:readTable("weaver.state")
     T.eq(r.turning, nil)
     if case.lost then T.truthy(r.lost, "same block ahead: heading unknown") else T.eq(r.h, case.h); T.falsy(r.lost) end
@@ -357,4 +361,66 @@ T.test("weaver v2: a full disk stops him with a clear message and leaves weaver.
   T.contains(t.error or "", "Disk full")
   t.error = nil
   T.truthy(type(t:readTable("weaver.state")) == "table", "weaver.state must survive a failed write")
+end)
+
+-- #140: GPS. The sim's dock is at world (0, 65, 0): the turtle's own cell on the ender chest.
+local WORLD_DOCK = { x = 0, y = 65, z = 0 }
+local function midBuild(w, t)
+  T.waitFor(w, function() local s = t:readTable("weaver.state"); return s and s.layer == 1 and s.idx and s.idx > 6
+    and not s.turning and not s.pending end, 3000, "never got going")
+  t:_stop()
+  return t:readTable("weaver.state")
+end
+
+T.test("weaver v2 (#140): GPS puts a wrong saved position and heading right, and he builds in the right place", function()
+  local site, w, t, ar, st, stock, expected = setup({ red = true, gps = true, cfg = { dh = 0, wx = 0, wy = 65, wz = 0 } })
+  t:reboot()
+  local s = midBuild(w, t)
+  local good = { s.x, s.y, s.z, s.h }
+  s.x, s.z, s.h = s.x + 3, s.z - 2, (s.h + 2) % 4                 -- carried off: wrong position, wrong heading
+  s.want = "build"; t:writeTable("weaver.state", s)
+  t:reboot()
+  T.waitFor(w, function() return ar.G.done and ar.G.done[2] end, 6000, "never finished")
+  check(w, expected)
+  T.eq(#ar.G.done[1] + #ar.G.done[2], 0)
+  T.truthy(ar.G.last.gps, "status should say GPS is ok")
+  T.truthy(ar.G.last.fix, "status should carry the last fix")
+  T.truthy(t:readTable("weaver.state").gnote, "the correction should be noted")
+end)
+
+T.test("weaver v2 (#140): no dock position saved: he asks the Architect, gets it, and carries on building", function()
+  local site, w, t, ar, st, stock, expected = setup({ red = true, gps = true })
+  ar.G.dock = WORLD_DOCK
+  t:reboot()
+  local s = midBuild(w, t)
+  s.h = (s.h + 2) % 4                                              -- wrong heading; GPS knows without a dock position
+  s.want = "build"; t:writeTable("weaver.state", s)
+  t:reboot()
+  T.waitFor(w, function() return ar.G.done and ar.G.done[2] end, 6000, "never finished")
+  check(w, expected)
+  T.truthy(ar.G.dockReqs and ar.G.dockReqs >= 1, "he should have asked for the dock position")
+  local c = t:readTable("weaver.cfg")
+  T.eq(c.wx, 0); T.eq(c.wy, 65); T.eq(c.wz, 0)
+end)
+
+T.test("weaver v2 (#140): no GPS: dead reckoning as before, status says no GPS and he still builds", function()
+  local site, w, t, ar, st, stock, expected = setup({ red = true })
+  t:reboot()
+  T.waitFor(w, function() return ar.G.done and ar.G.done[2] end, 4000, "never finished")
+  check(w, expected)
+  T.eq(ar.G.last.gps, false)
+end)
+
+T.test("weaver v2 (#140): lost with a fix, he works out where he is and gets home himself", function()
+  local site, w, t, ar = setup({ red = true, gps = true, cfg = { dh = 0, wx = 0, wy = 65, wz = 0 } })
+  t:reboot()
+  T.waitFor(w, function() return ar.G.paired end, 60, "never paired")
+  local s = t:readTable("weaver.state")
+  s.lost, s.x, s.z, s.want = true, 400, 400, "stop"                -- an impossible saved position
+  t:_stop(); t:writeTable("weaver.state", s)
+  t:reboot()
+  w:run(60)
+  local r = t:readTable("weaver.state")
+  T.falsy(r.lost, "with a fix he is never lost")
+  T.eq(r.x, 0); T.eq(r.z, 0)
 end)

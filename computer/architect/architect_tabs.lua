@@ -64,7 +64,9 @@ function drawStatus(v)
   v:put(2, y, "Build", "dim", "bg"); local t = ("%s / %s"):format(comma(done), comma(P.blocks)); v:put(W - #t, y, t, "fg", "bg"); y = y + 1
   barRow(v, y, "Overall", P.blocks > 0 and done / P.blocks or 0); y = y + 1
   v:put(2, y, "Fuel", "fg", "bg"); v:bar(10, y, W - 10, nil, (st.fuel or 0) / 20000, { kind = "fuel", text = comma(st.fuel or 0) }); y = y + 2
-  v:put(2, y, "At", "dim", "bg"); v:put(14, y, ("%d %d %d from the dock"):format(st.x or 0, st.y or 0, st.z or 0), "fg", "bg"); y = y + 1
+  v:put(2, y, "At", "dim", "bg"); v:put(14, y, ("%d %d %d from the dock"):format(st.x or 0, st.y or 0, st.z or 0), "fg", "bg")
+  local gt = st.gps and "GPS ok" or "no GPS"
+  v:put(W - #gt - 1, y, gt, st.gps and "good" or "dim", "bg"); y = y + 1
   if stuck then
     v:put(2, y, "Supply", "dim", "bg"); v:put(14, y, why, tone, "bg"); y = y + 2
     v:put(2, y, "Things to check", "gold", "bg"); y = y + 1

@@ -112,6 +112,7 @@ function step3Next()
   S.site = siteFromFields()
   S.started = false
   save()
+  sendSite()
   LC, V.grid = {}, nil
   nextStep()
 end

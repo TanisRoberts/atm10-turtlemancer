@@ -21,7 +21,10 @@ local function setup()
   if not isContainer(turtle.inspectDown()) then
     error("No chest or barrel under me. Put the dock's Ender Storage chest below and run weaver again.", 0)
   end
-  C = { dh = ask("Which way am I facing (north/east/south/west)") }
+  openModem()
+  local g = gpsHeading()
+  if g then print("GPS says I face " .. HNAME[g]) end
+  C = { dh = g or ask("Which way am I facing (north/east/south/west)") }
   writeT(CFG_FILE, C)
   S = { x = 0, y = 0, z = 0, h = C.dh, want = "idle", short = {}, skip = {}, orderSeq = 0, supSeq = 0, topY = -1 }
   GAPS = {}; saveGaps(); save()
@@ -34,6 +37,7 @@ local function boot()
   openModem()
   if S.x == nil then S.x, S.y, S.z, S.h, S.want = 0, 0, 0, C.dh, S.want or "idle" end   -- fresh: he sits on his dock
   recoverMove()
+  gpsSync(true)                                    -- a fix overrides what he saved (position, heading, lost)
   if farFromDock() then S.lost = true end           -- a position he can't believe: never set off from it
   if M_ARGS[1] == "found" then S.x, S.y, S.z, S.h, S.lost = 0, 0, 0, C.dh, nil end
   S.n = myNumber()
@@ -49,6 +53,7 @@ local function mainLoop()
   while true do
     NEWORDER = false
     if REBOOT then reboot() end
+    gpsStep()
     if S.lost then
       keepChunk()
       setStatus("lost", "Carry me to my dock, then run: weaver found"); os.sleep(5)

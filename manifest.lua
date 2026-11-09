@@ -215,7 +215,7 @@ local M = {
         weaver = { name = "Weaver", about = "Builder: builds what his Architect sends", run = "weaver",
                    details = "Builds any build, layer by layer, from the cell lists his paired Architect sends. "
                      .. "Supplies come from one Ender Storage chest under his dock. Pickaxe + ender modem + chunk controller.",
-                   files = { "turtle/weaver/weaver.lua", "turtle/weaver/weaver_base.lua", "turtle/weaver/weaver_move.lua",
+                   files = { "turtle/weaver/weaver.lua", "turtle/weaver/weaver_base.lua", "turtle/weaver/weaver_move.lua", "turtle/weaver/weaver_gps.lua",
                              "turtle/weaver/weaver_inv.lua", "turtle/weaver/weaver_net.lua", "turtle/weaver/weaver_build.lua",
                              "turtle/weaver/weaver_mark.lua", "turtle/weaver/weaver_loop.lua", "shared/envfile.lua" } },
         woodpecker = { name = "Woodpecker", about = "Lumberjack: tree farm", run = "lumberjack",

@@ -30,7 +30,7 @@ function statusMsg()
            want = S.want, build = S.build, hash = S.hash, layer = S.layer, total = S.total, idx = S.idx,
            cells = cells and #cells or nil, work = S.work, x = S.x, y = S.y, z = S.z, h = S.h, fuel = fuelLevel(),
            gaps = #GAPS, disk = fs.getFreeSpace("/"), need = S.needLayer, done = S.lastDone, lost = S.lost,
-           marks = S.marks and #S.marks or 0, marked = S.markDone, marking = S.markCells and #S.markCells or 0 }
+           gps = GP.ok, fix = GP.fix, gnote = S.gnote, marks = S.marks and #S.marks or 0, marked = S.markDone, marking = S.markCells and #S.markCells or 0 }
 end
 
 local function resetBuild(msg)
@@ -75,7 +75,10 @@ local function handle(id, msg)
   if t == "relink" then
     S.arch = id; save()
     local m = statusMsg(); m.type = "state"; send(m)
+  elseif t == "site" then
+    setDock(msg.dock)
   elseif t == "build" then
+    setDock(msg.dock)
     if msg.hash ~= S.hash then resetBuild(msg) else S.total = msg.total or S.total end
     save(); send({ type = "build_ack", hash = S.hash })
   elseif t == "layer" then
@@ -107,7 +110,7 @@ local function handle(id, msg)
 end
 
 function netLoop()
-  local lastStatus, lastHello = -1e9, -1e9
+  local lastStatus, lastHello, lastDock = -1e9, -1e9, -1e9
   while true do
     local id, msg = rednet.receive(PROTOCOL, 1)
     if type(msg) == "table" then handle(id, msg) end
@@ -122,5 +125,6 @@ function netLoop()
       lastStatus = now
       send(statusMsg())
     end
+    if S.n and C and not C.wx and now - lastDock >= 10 then lastDock = now; send({ type = "dock_req" }) end
   end
 end
