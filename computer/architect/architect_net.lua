@@ -153,6 +153,19 @@ local function pumpBuild()
     if due("build") then tx(buildMsg()) end
     return
   end
+  -- He waits for a layer we think he has (lost in a crash or a reboot half way through receiving it): after 20 s of
+  -- that, forget we sent it, so it goes again in full
+  local need = tonumber(st.need)
+  if need and layerDone(need) then
+    R.needSince = R.needSince or {}
+    R.needSince[need] = R.needSince[need] or now()
+    if now() - R.needSince[need] > 20 then
+      R.out[need], R.needSince[need], R.askedAt["layer" .. need] = nil, nil, nil
+      addLog(("Weaver is missing layer %d: sending it again"):format(need))
+    end
+  elseif R.needSince then
+    R.needSince = nil
+  end
   local sl = math.max(st.layer or 1, 1)
   for k = sl, math.min(sl + 1, P.total) do
     if not layerDone(k) and due("layer" .. k) then sendParts(k) end

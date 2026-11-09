@@ -314,6 +314,27 @@ T.test("architect: a reboot mid-build comes back on Status and the build carries
   if not ok then error(total .. " cells differ:\n  " .. table.concat(bad, "\n  ")) end
 end)
 
+T.test("architect: a layer he lost after acking it (crash while saving it) is sent again when he waits for it", function()
+  local req = loader()
+  local bytes = slurp(PLAN_FILE)
+  local plan = req("plan2").fromLitematic(bytes)
+  LATE = {}
+  local site, w, t, st, mf, stock = setup(plan)
+  w:run(5)
+  local a = architect(w, 2)
+  bringUp(w, a, t, bytes)
+  w:runUntil(function()
+    local o = A(a).R.out and A(a).R.out[3]
+    return o and o.n >= o.parts and t.files["weaver.L3"] ~= nil
+  end, 4000)
+  t.files["weaver.L3"] = nil                                -- as the disk-full crash on the arena left it
+  t:reboot()
+  w:run(3000)
+  T.contains(a.screen, "finished")
+  local ok, bad, total = W.diff(w, (expected(req, bytes, 0, 6, 65, 10)), { max = 10 })
+  if not ok then error(total .. " cells differ:\n  " .. table.concat(bad, "\n  ")) end
+end)
+
 T.test("architect: a turned build lands turned: the same file at 90 degrees comes out as the file says", function()
   local req = loader()
   local bytes = slurp(PLAN_FILE)
