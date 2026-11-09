@@ -29,6 +29,7 @@ local function setup()
 end
 
 local function boot()
+  dropOldFiles()
   if core.chunk.restore() then print("Put my modem back on.") end
   openModem()
   if S.x == nil then S.x, S.y, S.z, S.h, S.want = 0, 0, 0, C.dh, S.want or "idle" end   -- fresh: he sits on his dock

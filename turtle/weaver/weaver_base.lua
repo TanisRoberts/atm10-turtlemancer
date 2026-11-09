@@ -27,8 +27,30 @@ function readT(path)
   local f = fs.open(path, "r"); local t = textutils.unserialize(f.readAll()); f.close()
   return type(t) == "table" and t or nil
 end
+-- Compact (CraftOS pretty-prints by default: a layer list is several times bigger that way), and safe when the
+-- disk is full: written to a .tmp first, so the old file survives a failed write.
 function writeT(path, t)
-  local f = fs.open(path, "w"); f.write(textutils.serialize(t)); f.close()
+  local data = textutils.serialize(t, { compact = true })
+  local tmp = path .. ".tmp"
+  local f = fs.open(tmp, "w")
+  local ok, err = pcall(function() f.write(data) end)
+  f.close()
+  if not ok then
+    pcall(fs.delete, tmp)
+    error(("Disk full writing %s (%d bytes free). Delete old files (ls), then run weaver."):format(path,
+      fs.getFreeSpace("/")), 0)
+  end
+  if fs.exists(path) then fs.delete(path) end
+  fs.move(tmp, path)
+end
+-- What the island Weaver (v1) left behind, never used by v2: the plan file was a big one
+function dropOldFiles()
+  for _, f in ipairs(fs.list("")) do
+    if f:match("%.plan$") or f == "weaver.gaps.new" or f == "weaverplan.lua" or f:match("^rigger")
+        or (f:match("%.tmp$") and not fs.isDir(f)) then
+      fs.delete(f)
+    end
+  end
 end
 
 C = readT(CFG_FILE)               -- { dh = heading at the dock }

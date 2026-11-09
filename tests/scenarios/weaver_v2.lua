@@ -335,3 +335,26 @@ T.test("weaver v2 (#139): waiting at an unloaded chunk border keeps sending stat
   T.eq(ar.G.last.state, "waiting")
   loaded = true
 end)
+
+T.test("weaver v2: the island's old plan file is deleted at boot, so a full 1 MB disk builds again", function()
+  local site, w, t, ar = setup()
+  t.hddCapacity = 1000000
+  t:writeFile("mossy.plan", string.rep("x", 900000))
+  t:writeFile("weaver.gaps.new", "old")
+  t:reboot()
+  T.waitFor(w, function() return ar.G.done and ar.G.done[1] end, 3000, "layer 1 never finished")
+  T.eq(t.files["mossy.plan"], nil); T.eq(t.files["weaver.gaps.new"], nil)
+end)
+
+T.test("weaver v2: a full disk stops him with a clear message and leaves weaver.state readable", function()
+  local site, w, t, ar = setup()
+  t:reboot()
+  T.waitFor(w, function() return ar.G.paired end, 60, "never paired")
+  t.hddCapacity = 1000000
+  local n = 0; for _, d in pairs(t.files) do n = n + #d end
+  t:writeFile("junk.dat", string.rep("x", 1000000 - n - 40))   -- room for almost nothing
+  w:run(60)
+  T.contains(t.error or "", "Disk full")
+  t.error = nil
+  T.truthy(type(t:readTable("weaver.state")) == "table", "weaver.state must survive a failed write")
+end)

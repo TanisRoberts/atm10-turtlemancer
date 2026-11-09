@@ -29,7 +29,7 @@ function statusMsg()
   return { type = "status", n = S.n, label = os.getComputerLabel(), id = os.getComputerID(), state = S.status, msg = S.msg,
            want = S.want, build = S.build, hash = S.hash, layer = S.layer, total = S.total, idx = S.idx,
            cells = cells and #cells or nil, work = S.work, x = S.x, y = S.y, z = S.z, h = S.h, fuel = fuelLevel(),
-           gaps = #GAPS, need = S.needLayer, done = S.lastDone, lost = S.lost,
+           gaps = #GAPS, disk = fs.getFreeSpace("/"), need = S.needLayer, done = S.lastDone, lost = S.lost,
            marks = S.marks and #S.marks or 0, marked = S.markDone, marking = S.markCells and #S.markCells or 0 }
 end
 
